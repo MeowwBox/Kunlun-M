@@ -9,8 +9,10 @@ import os
 import ast
 import codecs
 import json
+import csv
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, redirect, HttpResponse
+from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
 from web.index.controller import login_or_token_required, api_token_required
@@ -36,10 +38,6 @@ def tasklog(req, task_id):
     # check task是否存在
     if not task:
         return redirect("dashboard:tasks_list")
-
-    # check task 的状态，只有完成才能继续
-    if task.is_finished == 2:
-        return HttpResponse("Ooooops, Maybe this task still in progress or has error, you can't view the log...")
 
     project_id = get_and_check_scantask_project_id(task_id)
 
@@ -91,6 +89,41 @@ def tasklog(req, task_id):
 
 
 @login_or_token_required
+def tasklogtail(req, task_id):
+    task = ScanTask.objects.filter(id=task_id).first()
+    if not task:
+        return JsonResponse({"code": 404, "status": False, "message": "Task not found."})
+
+    offset = 0
+    if "offset" in req.GET:
+        try:
+            offset = int(req.GET["offset"])
+        except Exception:
+            offset = 0
+    if offset < 0:
+        offset = 0
+
+    log_path = os.path.join(LOGS_PATH, "ScanTask_{}.log".format(task_id))
+    if not os.path.exists(log_path):
+        return JsonResponse({"code": 200, "status": True, "message": {"offset": offset, "data": "", "eof": True}})
+
+    max_bytes = 20000
+    with open(log_path, "rb") as f:
+        f.seek(offset)
+        data = f.read(max_bytes)
+        new_offset = f.tell()
+
+    text = ""
+    try:
+        text = data.decode("utf-8", errors="ignore")
+    except Exception:
+        text = ""
+
+    eof = len(data) < max_bytes
+    return JsonResponse({"code": 200, "status": True, "message": {"offset": new_offset, "data": text, "eof": eof}})
+
+
+@login_or_token_required
 def debuglog(req, task_id):
 
     task = ScanTask.objects.filter(id=task_id).first()
@@ -102,10 +135,6 @@ def debuglog(req, task_id):
     # check task是否存在
     if not task:
         return redirect("dashboard:tasks_list")
-
-    # check task 的状态，只有完成才能继续
-    if task.is_finished == 2:
-        return HttpResponse("Ooooops, Maybe this task still in progress or has error, you can't view the log...")
 
     debuglog_filename = os.path.join(LOGS_PATH, 'ScanTask_{}.log'.format(task_id))
 
@@ -132,10 +161,6 @@ def downloadlog(req, task_id):
     if not task:
         return redirect("dashboard:tasks_list")
 
-    # check task 的状态，只有完成才能继续
-    if task.is_finished == 2:
-        return HttpResponse("Ooooops, Maybe this task still in progress or has error, you can't view the log...")
-
     debuglog_filename = os.path.join(LOGS_PATH, 'ScanTask_{}.log'.format(task_id))
 
     if not os.path.exists(debuglog_filename):
@@ -150,6 +175,34 @@ def downloadlog(req, task_id):
     response['Content-Disposition'] = 'attachment; filename=ScanTask_%s' % task_id + ".log"
     response['X-Sendfile'] = path_to_file
     return response
+
+
+@login_or_token_required
+def exportresult(req, task_id):
+    task = ScanTask.objects.filter(id=task_id).first()
+    if not task:
+        return HttpResponse("Task not found.", status=404)
+
+    fmt = (req.GET.get("format", "json") or "json").lower()
+    project_id = get_and_check_scantask_project_id(task_id)
+    rows = list(get_and_check_scanresult(task_id).objects.filter(scan_project_id=project_id, is_active=1).values())
+
+    if fmt == "csv":
+        resp = HttpResponse(content_type="text/csv; charset=utf-8")
+        resp["Content-Disposition"] = "attachment; filename=ScanTask_{}_result.csv".format(task_id)
+        if not rows:
+            return resp
+
+        fieldnames = list(rows[0].keys())
+        w = csv.DictWriter(resp, fieldnames=fieldnames)
+        w.writeheader()
+        for r in rows:
+            w.writerow(r)
+        return resp
+
+    resp = JsonResponse({"code": 200, "status": True, "message": rows})
+    resp["Content-Disposition"] = "attachment; filename=ScanTask_{}_result.json".format(task_id)
+    return resp
 
 
 @api_token_required

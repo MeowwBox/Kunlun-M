@@ -158,6 +158,159 @@ body.dashboard-shell {
     padding: 11px 16px;
 }
 
+.main-sidebar a {
+    text-decoration: none;
+}
+
+.sidebar-menu > li > a,
+.treeview-menu li a {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.sidebar-menu i,
+.treeview-menu i {
+    width: 16px;
+    text-align: center;
+}
+
+.treeview-menu .fa-circle-o {
+    display: none;
+}
+
+.treeview-menu li a::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: rgba(183, 199, 218, .75);
+    flex: 0 0 6px;
+}
+
+.treeview-menu li.active a::before,
+.treeview-menu li a:hover::before {
+    background: #fff;
+}
+
+.km-advanced-toggle {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1px solid #dde6f2;
+    border-radius: 14px;
+    background: #ffffff;
+    cursor: pointer;
+    user-select: none;
+    transition: all .15s ease;
+}
+
+.km-advanced-toggle:hover {
+    border-color: #cfe0ff;
+    background: #f7fbff;
+}
+
+.km-advanced-toggle:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, .18);
+}
+
+.km-advanced-title {
+    font-weight: 700;
+    color: #1f2a39;
+}
+
+.km-advanced-sub {
+    color: #6b7280;
+    font-size: 12px;
+}
+
+.km-advanced-arrow {
+    margin-left: auto;
+    width: 30px;
+    height: 30px;
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #2f4c7f;
+    background: #f3f7ff;
+    border: 1px solid #d6e3ff;
+    transition: transform .15s ease;
+}
+
+.km-advanced-arrow.is-open {
+    transform: rotate(180deg);
+}
+
+.km-check-group {
+    margin-top: 10px;
+    display: grid;
+    gap: 10px;
+}
+
+.km-check {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid #dde6f2;
+    border-radius: 12px;
+    background: #fff;
+    color: #1f2a39;
+    cursor: pointer;
+    user-select: none;
+}
+
+.km-check input[type="checkbox"] {
+    position: absolute;
+    opacity: 0;
+    width: 1px;
+    height: 1px;
+}
+
+.km-check .km-checkmark {
+    width: 18px;
+    height: 18px;
+    border-radius: 6px;
+    border: 2px solid #b7c7da;
+    background: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 18px;
+    transition: all .15s ease;
+}
+
+.km-check input[type="checkbox"]:checked + .km-checkmark {
+    border-color: #3b82f6;
+    background: #3b82f6;
+}
+
+.km-check input[type="checkbox"]:checked + .km-checkmark::after {
+    content: '';
+    width: 6px;
+    height: 10px;
+    border-right: 2px solid #fff;
+    border-bottom: 2px solid #fff;
+    transform: rotate(45deg);
+    margin-top: -1px;
+}
+
+.km-check.is-disabled {
+    opacity: .6;
+    cursor: not-allowed;
+}
+
+.km-tip {
+    color: #6b7280;
+    font-size: 12px;
+    padding-left: 2px;
+}
+
 .sidebar-menu > li.active > a,
 .sidebar-menu > li > a:hover {
     background: #2a3b50;
@@ -177,7 +330,9 @@ body.dashboard-shell {
 }
 
 .treeview-menu li a {
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 8px;
     color: #b7c7da;
     padding: 9px 16px 9px 36px;
 }

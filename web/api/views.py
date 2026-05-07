@@ -245,7 +245,7 @@ class VendorVulListApiView(View):
     @api_token_required
     def post(request):
         if 'vendor_name' in request.POST:
-            vendor_name = request.GET['vendor_name']
+            vendor_name = request.POST['vendor_name']
             vs = list(get_project_vendor_by_name(vendor_name))
         else:
             vs = []
@@ -269,7 +269,7 @@ class VendorVuLDetailApiView(View):
     @api_token_required
     def post(request):
         if 'vendor_name' in request.POST:
-            vendor_name = request.GET['vendor_name']
+            vendor_name = request.POST['vendor_name']
             vs = list(get_vendor_vul_by_name(vendor_name))
         else:
             vs = []

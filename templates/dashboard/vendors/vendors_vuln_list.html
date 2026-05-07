@@ -1,39 +1,53 @@
 {% extends "dashboard/base.html" %}
-{% block title %}Vendor Vulns list{% endblock %}
+{% block title %}依赖漏洞列表{% endblock %}
 
 {% block body %}
 <div class="row">
         <div class="col-xs-12">
           <div class="box">
             <div class="box-header">
-              <h3 class="box-title">Vendor Vulns List</h3>
+              <h3 class="box-title">依赖漏洞列表</h3>
             </div>
             <!-- /.box-header -->
             <div class="box-body table-responsive no-padding">
-              <table class="table table-hover">
-                <tbody><tr>
-                  <th>ID</th>
-                  <th>Vuln ID</th>
-                  <th>Title</th>
-                  <th>Severity</th>
-                  <th>Cve</th>
-                  <th>Vendor Name</th>
-                  <th>Affected Versions</th>
-                </tr>
-                {% for vendorvuln in vendorvulns %}
-                <tr>
-                    <td>{{ vendorvuln.id }}</td>
-                    <td><a href="{{ vendorvuln.reference }}">{{ vendorvuln.vuln_id }}</a></td>
-
-                      <td><a href="{% url 'dashboard:vendor_vulns_details' vendorvuln.id %}">{{ vendorvuln.title }}</a></td>
-                      <td>{{ vendorvuln.severity }}</td>
-                      <td>{{ vendorvuln.cves }}</td>
-                      <td>{{ vendorvuln.vendor_name }}</td>
-                      <td>{{ vendorvuln.affected_versions }}</td>
-
+              <table class="table table-hover km-table km-table-wide">
+                <thead>
+                  <tr>
+                    <th class="km-col-id">ID</th>
+                    <th class="km-td-nowrap">Vuln ID</th>
+                    <th>标题</th>
+                    <th class="km-td-nowrap">严重性</th>
+                    <th class="km-td-nowrap">CVE</th>
+                    <th>依赖名</th>
+                    <th>影响版本</th>
                   </tr>
-                {% endfor %}
-              </tbody></table>
+                </thead>
+                <tbody>
+                  {% for vendorvuln in vendorvulns %}
+                  <tr>
+                    <td class="km-td-nowrap">{{ vendorvuln.id }}</td>
+                    <td class="km-td-nowrap"><a href="{{ vendorvuln.reference }}">{{ vendorvuln.vuln_id }}</a></td>
+                    <td><div class="km-cell-title"><a class="km-link-strong" href="{% url 'dashboard:vendor_vulns_details' vendorvuln.id %}" title="{{ vendorvuln.title|escape }}">{{ vendorvuln.title }}</a></div></td>
+                    <td class="km-td-nowrap">
+                      {% with s=vendorvuln.severity|lower %}
+                        {% if s == 'critical' or s == 'high' %}
+                          <span class="label label-danger status-label">{{ vendorvuln.severity }}</span>
+                        {% elif s == 'medium' %}
+                          <span class="label label-warning status-label">{{ vendorvuln.severity }}</span>
+                        {% elif s == 'low' %}
+                          <span class="label label-info status-label">{{ vendorvuln.severity }}</span>
+                        {% else %}
+                          <span class="label label-default status-label">{{ vendorvuln.severity }}</span>
+                        {% endif %}
+                      {% endwith %}
+                    </td>
+                    <td class="km-td-nowrap">{{ vendorvuln.cves }}</td>
+                    <td><div class="km-cell-text" title="{{ vendorvuln.vendor_name|escape }}">{{ vendorvuln.vendor_name }}</div></td>
+                    <td><div class="km-cell-text" title="{{ vendorvuln.affected_versions|escape }}">{{ vendorvuln.affected_versions }}</div></td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
             </div>
             <!-- /.box-body -->
 

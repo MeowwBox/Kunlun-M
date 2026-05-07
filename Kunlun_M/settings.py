@@ -114,7 +114,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Shanghai'
 
 USE_I18N = True
 
@@ -135,7 +135,7 @@ STATICFILES_DIRS = [
 # 占位
 
 # web setting
-TITLE = 'KunLun-M Dashbroad'
+TITLE = 'KunLun-M 控制台'
 DESCRIPTION = 'KunLun-Mirror 专注于白帽子的静态代码审计工具'
 SUPER_ADMIN = []
 IS_OPEN_REGISTER = True
@@ -202,6 +202,10 @@ API_TOKEN = "secret_api_token"
 IS_OPEN_REMOTE_SERVER = False
 REMOTE_URL = "http://127.0.0.1:9999"
 REMOTE_URL_APITOKEN = "secret_api_token_in_server"
+
+WEB_UPLOAD_MAX_MB = 50
+WEB_PACKAGE_RETENTION_DAYS = 7
+WEB_SCAN_MAX_CONCURRENCY = 1
 
 # vendor vuln scan
 WITH_VENDOR = False

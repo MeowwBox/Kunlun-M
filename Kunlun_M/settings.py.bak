@@ -114,7 +114,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Shanghai'
 
 USE_I18N = True
 
@@ -135,7 +135,7 @@ STATICFILES_DIRS = [
 # 占位
 
 # web setting
-TITLE = 'KunLun-M Dashbroad'
+TITLE = 'KunLun-M 控制台'
 DESCRIPTION = 'KunLun-Mirror 专注于白帽子的静态代码审计工具'
 SUPER_ADMIN = []
 IS_OPEN_REGISTER = True

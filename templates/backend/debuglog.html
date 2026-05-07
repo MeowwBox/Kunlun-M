@@ -1,6 +1,6 @@
 {% extends "dashboard/base.html" %}
 {% load static %}
-{% block title %}Task Log{% endblock %}
+{% block title %}调试日志{% endblock %}
 
 {% block body %}
 <link rel="stylesheet" href="{% static 'css/prism.css' %}">
@@ -8,21 +8,21 @@
     <div class="col-xs-12">
     <div class="box box-warning">
     <div class="box-header with-border">
-      <h3 class="box-title">Task Setting</h3>
+      <h3 class="box-title">任务配置</h3>
     </div>
     <!-- /.box-header -->
     <div class="box-body">
         <!-- text input -->
         <div class="form-group">
 
-          <label>Task Name:</label>
+          <label>任务名称：</label>
           <div class="checkbox" id="rule">
             {{ task.task_name }}
           </div>
         </div>
         <div class="form-group">
-          <label>Parameter Config:</label>
-          <textarea class="form-control" rows="3" placeholder="Some details about task" name="parameter_config" disabled>{{ task.parameter_config }}</textarea>
+          <label>参数配置：</label>
+          <textarea class="form-control" rows="3" placeholder="任务参数详情" name="parameter_config" disabled>{{ task.parameter_config }}</textarea>
         </div>
         <!-- checkbox -->
     </div>
@@ -30,7 +30,7 @@
 
       <div class="box">
         <div class="box-header">
-            <h3 class="box-title">Debug log<small> {{ task.task_name }}</small></h3>
+            <h3 class="box-title">调试日志<small> {{ task.task_name }}</small></h3>
         </div>
         <!-- /.box-header -->
         <div class="box box-solid">

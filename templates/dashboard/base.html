@@ -7,7 +7,7 @@ scratch. This page gets rid of all links and provides the needed markup only.
 <head>
   <meta charset="utf-8">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <title>KunLun-MA | {% block title %}index{% endblock %}</title>
+  <title>KunLun-MA | {% block title %}首页{% endblock %}</title>
     {% load static %}
   <!-- Tell the browser to be responsive to screen width -->
   <link rel="icon" href="{% static 'favicon.ico' %}" >
@@ -17,9 +17,9 @@ scratch. This page gets rid of all links and provides the needed markup only.
   <link rel="stylesheet" href="{% static 'font-awesome/css/font-awesome.min.css' %}">
   <!-- Ionicons -->
   <link rel="stylesheet" href="{% static 'Ionicons/css/ionicons.min.css' %}">
-  <link rel="stylesheet" href="{% static 'css/dashboard-bulma.css' %}">
+  <link rel="stylesheet" href="{% static 'css/dashboard-bulma.css' %}?v=8">
   <!-- my style -->
-  <link rel="stylesheet" href="{% static 'css/default.css' %}">
+  <link rel="stylesheet" href="{% static 'css/default.css' %}?v=28">
 
   <!-- HTML5 Shim and Respond.js IE8 support of HTML5 elements and media queries -->
   <!-- WARNING: Respond.js doesn't work if you view the page via file:// -->
@@ -50,19 +50,20 @@ scratch. This page gets rid of all links and provides the needed markup only.
     <nav class="navbar navbar-static-top" role="navigation">
       <!-- Sidebar toggle button-->
       <a href="#" class="sidebar-toggle" data-toggle="push-menu" role="button">
-        <span class="sr-only">Toggle navigation</span>
+        <span class="sr-only">切换导航</span>
       </a>
       <div class="navbar-form navbar-left quick-nav hidden-xs">
         <div class="form-group">
-          <input id="quickSearch" type="text" class="form-control" placeholder="Quick search: task / project / rule">
+          <input id="quickSearch" type="text" class="form-control" placeholder="快速跳转：任务 / 项目 / 规则">
         </div>
       </div>
       <!-- Navbar Right Menu -->
       <div class="navbar-custom-menu">
         <ul class="nav navbar-nav">
           <li>
-            <a href="#" id="themeToggle" title="Toggle theme">
+            <a href="#" id="themeToggle" class="km-theme-toggle" title="切换到深色模式" aria-label="切换到深色模式">
               <i id="themeIcon" class="fa fa-sun-o"></i>
+              <span id="themeText" class="km-theme-text">深色</span>
             </a>
           </li>
           <!-- User Account Menu -->
@@ -70,40 +71,24 @@ scratch. This page gets rid of all links and provides the needed markup only.
             <!-- Menu Toggle Button -->
             <a href="#" class="dropdown-toggle" data-toggle="dropdown">
               <!-- The user image in the navbar-->
-              <img src="{% static 'img/1.jpg' %}" class="user-image" alt="User Image">
+              <img src="{% static 'img/1.jpg' %}" class="user-image" alt="用户头像">
               <!-- hidden-xs hides the username on small devices so only the image appears. -->
               <span class="hidden-xs">{{ user }}</span>
             </a>
-            <ul class="dropdown-menu">
-              <!-- The user image in the menu -->
+            <ul class="dropdown-menu km-user-menu">
               <li class="user-header">
-                <img src="{% static 'img/1.jpg' %}" class="img-circle" alt="User Image">
-
+                <img src="{% static 'img/1.jpg' %}" class="img-circle" alt="用户头像">
+                <p class="km-user-name">{{ user }}</p>
+{% if user.is_authenticated %}
+                <p class="km-user-status"><i class="fa fa-circle text-success"></i> 在线</p>
+{% else %}
+                <p class="km-user-status"><i class="fa fa-circle text-danger"></i> 离线</p>
+{% endif %}
               </li>
-              <!-- Menu Body -->
-              <li class="user-body">
-                <div class="row">
-                  <div class="col-xs-4 text-center">
-                    <a href="#">Followers</a>
-                  </div>
-                  <div class="col-xs-4 text-center">
-                    <a href="#">Sales</a>
-                  </div>
-                  <div class="col-xs-4 text-center">
-                    <a href="#">Friends</a>
-                  </div>
-                </div>
-                <!-- /.row -->
-              </li>
-              <!-- Menu Footer-->
               <li class="user-footer user-footer-modern">
-                <div class="row">
-                  <div class="col-xs-6">
-                    <a href="{% url 'dashboard:userinfo' %}" class="btn btn-default btn-flat btn-modern-quiet btn-block text-center">Profile</a>
-                  </div>
-                  <div class="col-xs-6">
-                    <a href="{% url 'index:logout' %}" class="btn btn-default btn-flat btn-block text-center">Sign out</a>
-                  </div>
+                <div class="km-user-actions">
+                  <a href="{% url 'dashboard:userinfo' %}" class="btn btn-default btn-flat btn-modern-quiet btn-block text-center">个人信息</a>
+                  <a href="{% url 'index:logout' %}" class="btn btn-default btn-flat btn-block text-center">退出登录</a>
                 </div>
               </li>
             </ul>
@@ -121,91 +106,91 @@ scratch. This page gets rid of all links and provides the needed markup only.
       <!-- Sidebar user panel (optional) -->
       <div class="user-panel">
         <div class="pull-left image">
-          <img src="{% static 'img/1.jpg' %}" class="img-circle" alt="User Image">
+          <img src="{% static 'img/1.jpg' %}" class="img-circle" alt="用户头像">
         </div>
         <div class="pull-left info">
           <p>{{ user }}</p>
           <!-- Status -->
 {% if user.is_authenticated %}
-          <a href="#"><i class="fa fa-circle text-success"></i> Online</a>
+          <a href="#"><i class="fa fa-circle text-success"></i> 在线</a>
 {% else %}
-          <a href="#"><i class="fa fa-circle .text-danger"></i> Offline</a>
+          <a href="#"><i class="fa fa-circle .text-danger"></i> 离线</a>
 {% endif %}
         </div>
       </div>
 
       <!-- Sidebar Menu -->
       <ul class="sidebar-menu" data-widget="tree">
-        <li class="header">MAIN</li>
         <!-- Optionally, you can add icons to the links -->
         <li class="active treeview menu-open" id="dashboard">
           <a href="#">
-            <i class="fa fa-dashboard"></i> <span>Dashboard</span>
+            <i class="fa fa-dashboard"></i><span>首页</span>
             <span class="pull-right-container">
               <i class="fa fa-angle-left pull-right"></i>
             </span>
           </a>
           <ul class="treeview-menu">
-            <li class="active"><a href="{% url 'dashboard:index' %}"><i class="fa fa-circle-o"></i> Dashboard</a></li>
+            <li class="active"><a href="{% url 'dashboard:index' %}"><i class="fa fa-circle-o"></i>概览</a></li>
           </ul>
         </li>
           <li class="treeview" id="projects">
-          <a href="#"><i class="fa ion-ios-analytics-outline"></i> <span>Projects</span>
+          <a href="#"><i class="fa ion-ios-analytics-outline"></i><span>项目</span>
             <span class="pull-right-container">
                 <i class="fa fa-angle-left pull-right"></i>
               </span>
           </a>
           <ul class="treeview-menu">
-            <li id="projects_list"><a href="{% url 'dashboard:projects_list' %}"><i class="fa fa-circle-o"></i>Projects List</a></li>
+            <li id="projects_list"><a href="{% url 'dashboard:projects_list' %}"><i class="fa fa-circle-o"></i>项目列表</a></li>
           </ul>
         </li>
          <li class="treeview" id="tasks">
-          <a href="#"><i class="fa ion-ios-analytics-outline"></i> <span>Tasks</span>
+          <a href="#"><i class="fa ion-ios-analytics-outline"></i><span>任务</span>
             <span class="pull-right-container">
                 <i class="fa fa-angle-left pull-right"></i>
               </span>
           </a>
           <ul class="treeview-menu">
-            <li id="task_list"><a href="{% url 'dashboard:tasks_list' %}"><i class="fa fa-circle-o"></i>Tasks List</a></li>
+            <li id="task_new"><a href="{% url 'dashboard:task_new' %}"><i class="fa fa-circle-o"></i>新建扫描</a></li>
+            <li id="task_list"><a href="{% url 'dashboard:tasks_list' %}"><i class="fa fa-circle-o"></i>任务列表</a></li>
           </ul>
         </li>
         <li class="treeview" id="vendors">
-          <a href="#"><i class="fa ion-ios-analytics-outline"></i> <span>Vendors</span>
+          <a href="#"><i class="fa ion-ios-analytics-outline"></i><span>依赖</span>
             <span class="pull-right-container">
                 <i class="fa fa-angle-left pull-right"></i>
               </span>
           </a>
           <ul class="treeview-menu">
-            <li id="vendors_list"><a href="{% url 'dashboard:vendors_list' %}"><i class="fa fa-circle-o"></i>Vendors List</a></li>
-            <li id="vendors_statistics"><a href="{% url 'dashboard:vendors_statistics' %}"><i class="fa fa-circle-o"></i>Vendors Statistics</a></li>
-            <li id="vendor_vulns_list"><a href="{% url 'dashboard:vendor_vulns_list' %}"><i class="fa fa-circle-o"></i>Vendors Vuln List</a></li>
-            <li id="vendors_vulns_statistics"><a href="{% url 'dashboard:vendors_vulns_statistics' %}"><i class="fa fa-circle-o"></i>Vendors Vuln Statistics</a></li>
+            <li id="vendors_list"><a href="{% url 'dashboard:vendors_list' %}"><i class="fa fa-circle-o"></i>依赖列表</a></li>
+            <li id="vendors_statistics"><a href="{% url 'dashboard:vendors_statistics' %}"><i class="fa fa-circle-o"></i>依赖统计</a></li>
+            <li id="vendor_vulns_list"><a href="{% url 'dashboard:vendor_vulns_list' %}"><i class="fa fa-circle-o"></i>依赖漏洞列表</a></li>
+            <li id="vendors_vulns_statistics"><a href="{% url 'dashboard:vendors_vulns_statistics' %}"><i class="fa fa-circle-o"></i>依赖漏洞统计</a></li>
 
           </ul>
         </li>
         <li class="treeview" id="rules">
-          <a href="#"><i class="fa ion-document-text"></i> <span>Rules</span>
+          <a href="#"><i class="fa ion-document-text"></i><span>规则</span>
             <span class="pull-right-container">
                 <i class="fa fa-angle-left pull-right"></i>
               </span>
           </a>
           <ul class="treeview-menu">
-            <li id="rule_list"><a href="{% url 'dashboard:rules_list' %}"><i class="fa fa-circle-o"></i>Rules List</a></li>
+            <li id="rule_list"><a href="{% url 'dashboard:rules_list' %}"><i class="fa fa-circle-o"></i>规则列表</a></li>
           </ul>
         </li>
         <li class="treeview" id="tampers">
-          <a href="#"><i class="fa ion-android-expand"></i> <span>Tamper</span>
+          <a href="#"><i class="fa ion-android-expand"></i><span>拓展插件</span>
             <span class="pull-right-container">
                 <i class="fa fa-angle-left pull-right"></i>
               </span>
           </a>
           <ul class="treeview-menu">
-            <li id="tamper_list"><a href="{% url 'dashboard:tampers_list' %}"><i class="fa fa-circle-o"></i>Tamper List</a></li>
+            <li id="tamper_list"><a href="{% url 'dashboard:tampers_list' %}"><i class="fa fa-circle-o"></i>拓展插件列表</a></li>
           </ul>
         </li>
-        <li id="docs"><a href="{% url 'dashboard:docs' %}"><i class="fa fa-book"></i> <span>Documentation</span></a></li>
+        <li id="docs"><a href="{% url 'dashboard:docs' %}"><i class="fa fa-book"></i><span>文档</span></a></li>
 
-        <li id="user"><a href="{% url 'dashboard:userinfo' %}"><i class="fa ion-person"></i> <span>User</span></a></li>
+        <li id="user"><a href="{% url 'dashboard:userinfo' %}"><i class="fa ion-person"></i><span>用户</span></a></li>
       </ul>
       <!-- /.sidebar-menu -->
     </section>
@@ -218,8 +203,8 @@ scratch. This page gets rid of all links and provides the needed markup only.
     <section class="content-header">
         {% block body_header %}
       <h1>
-        Dashboard
-        <small>KunLun-MA Control panel</small>
+        首页
+        <small>KunLun-MA 控制面板</small>
       </h1>
         {% endblock %}
     </section>
@@ -240,10 +225,10 @@ scratch. This page gets rid of all links and provides the needed markup only.
   <footer class="main-footer">
     <!-- To the right -->
     <div class="pull-right hidden-xs">
-      Power by LoRexxar
+      由 LoRexxar 提供支持
     </div>
     <!-- Default to the left -->
-    <strong>Copyright &copy; 2018 <a href="#">Company</a>.</strong> All rights reserved.
+    <strong>Copyright &copy; 2018 <a href="#">公司</a>.</strong> 保留所有权利。
   </footer>
 
 </div>
@@ -253,8 +238,8 @@ scratch. This page gets rid of all links and provides the needed markup only.
 
 <!-- jQuery 3 -->
 <script src="{% static 'js/jquery.min.js' %}"></script>
-<script src="{% static 'js/dashboard-shell.js' %}"></script>
-<script src="{% static 'js/dashboard-enhanced.js' %}"></script>
+<script src="{% static 'js/dashboard-shell.js' %}?v=2"></script>
+<script src="{% static 'js/dashboard-enhanced.js' %}?v=4"></script>
 
 {% block script %}
 

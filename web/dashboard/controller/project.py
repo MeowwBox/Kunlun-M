@@ -12,6 +12,7 @@
 
 import re
 import ast
+from datetime import datetime, timezone as dt_timezone
 
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse, HttpResponseNotFound
@@ -66,7 +67,7 @@ class ProjectListView(TemplateView):
 
             results_count = ScanResultTask.objects.filter(scan_project_id=project.id, is_active=1).count()
 
-            last_scan_time = 0
+            last_scan_time = None
             if tasks:
                 last_scan_time = tasks.first().last_scan_time
 
@@ -75,7 +76,8 @@ class ProjectListView(TemplateView):
             project.last_scan_time = last_scan_time
             project.vendors_count = vendors_count
 
-        context['projects'] = sorted(context['projects'], key=lambda x:x.last_scan_time)[::-1]
+        min_dt = datetime.min.replace(tzinfo=dt_timezone.utc)
+        context['projects'] = sorted(context['projects'], key=lambda x: x.last_scan_time or min_dt, reverse=True)
 
         # context['projects'] = context['projects'][(page-1)*50: page*50]
 

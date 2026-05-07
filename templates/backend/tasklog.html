@@ -1,6 +1,6 @@
 {% extends "dashboard/base.html" %}
 {% load static %}
-{% block title %}Task Log{% endblock %}
+{% block title %}任务日志{% endblock %}
 
 {% block body %}
 <link rel="stylesheet" href="{% static 'css/prism.css' %}">
@@ -8,21 +8,21 @@
     <div class="col-xs-12">
     <div class="box box-warning">
     <div class="box-header with-border">
-      <h3 class="box-title">Task Setting</h3>
+      <h3 class="box-title">任务配置</h3>
     </div>
     <!-- /.box-header -->
     <div class="box-body">
         <!-- text input -->
         <div class="form-group">
 
-          <label>Task Name:</label>
+          <label>任务名称：</label>
           <div class="checkbox" id="rule">
             {{ task.task_name }}
           </div>
         </div>
         <div class="form-group">
-          <label>Parameter Config:</label>
-          <textarea class="form-control" rows="3" placeholder="Some details about task" name="parameter_config" disabled>{{ task.parameter_config }}</textarea>
+          <label>参数配置：</label>
+          <textarea class="form-control" rows="3" placeholder="任务参数详情" name="parameter_config" disabled>{{ task.parameter_config }}</textarea>
         </div>
 
     </div>
@@ -30,57 +30,61 @@
 
     <div class="box box-success">
         <div class="box-header">
-          <h3 class="box-title">Vulnerabilities</h3>
+          <h3 class="box-title">漏洞列表</h3>
         </div>
         <!-- /.box-header -->
         <div class="box-body table-responsive no-padding">
-          <table class="table table-hover">
-                <tbody><tr>
-                  <th>ID</th>
-                  <th>CVI ID</th>
-                  <th>Language</th>
-                  <th>VulFile Path</th>
-                  <th>Source</th>
-                  <th>Type</th>
-                  <th>Is Confirm</th>
-                  <th>Operate</th>
-                </tr>
-                {% for taskresult in taskresults %}
-                <tr>
-                    <td>{{ taskresult.id }}</td>
-                    <td>{{ taskresult.cvi_id }}</td>
-                    <td>{{ taskresult.language }}</td>
-                    <td>{{ taskresult.vulfile_path }}</td>
-                    <td>{{ taskresult.source_code }}</td>
-                    <td>{{ taskresult.result_type }}</td>
-
-                      <td>
-                      {% if taskresult.is_unconfirm == 0 %}
-                      <span class="label label-success">Yes</span>
-                      {% elif  taskresult.is_unconfirm  == 1 %}
-                      <span class="label label-danger">No</span>
-                      {% else %}
-                      <span class="label label-success">{{ taskresult.is_unconfirm }}</span>
-                      {% endif %}
-                      </td>
-                      <td><button id="resultdel" type="button" class="btn-shadow dropdown-toggle btn btn-danger" onclick="delVul('{{ taskresult.id }}')">Delete</button></td>
-
-                  </tr>
-                  <tr>
-                  </tr>
-                {% endfor %}
-              </tbody></table>
+          <table class="table table-hover km-table km-table-wide">
+            <thead>
+              <tr>
+                <th class="km-col-id">ID</th>
+                <th class="km-td-nowrap">CVI</th>
+                <th class="km-td-nowrap">语言</th>
+                <th>文件</th>
+                <th>来源</th>
+                <th class="km-td-nowrap">类型</th>
+                <th class="km-td-nowrap">确认</th>
+                <th class="km-col-actions">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for taskresult in taskresults %}
+              <tr>
+                <td class="km-td-nowrap">{{ taskresult.id }}</td>
+                <td class="km-td-nowrap">{{ taskresult.cvi_id }}</td>
+                <td class="km-td-nowrap">{{ taskresult.language }}</td>
+                <td><div class="km-cell-config" title="{{ taskresult.vulfile_path|escape }}">{{ taskresult.vulfile_path }}</div></td>
+                <td><div class="km-cell-config" title="{{ taskresult.source_code|escape }}">{{ taskresult.source_code }}</div></td>
+                <td class="km-td-nowrap">{{ taskresult.result_type }}</td>
+                <td class="km-td-nowrap">
+                  {% if taskresult.is_unconfirm == 0 %}
+                  <span class="label label-success">是</span>
+                  {% elif  taskresult.is_unconfirm  == 1 %}
+                  <span class="label label-danger">否</span>
+                  {% else %}
+                  <span class="label label-success">{{ taskresult.is_unconfirm }}</span>
+                  {% endif %}
+                </td>
+                <td class="km-td-actions">
+                  <div class="km-actions">
+                    <button type="button" class="btn btn-danger btn-xs" onclick="delVul('{{ taskresult.id }}')">删除</button>
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
         </div>
         <!-- /.box-body -->
         <div class="box-footer">
-        <button id="dlog" type="button" class="btn btn-primary">View Debug Log</button>
-        <button id="ddlog" type="button" class="btn btn-primary">Download Debug Log</button>
+        <button id="dlog" type="button" class="btn btn-primary">查看调试日志</button>
+        <button id="ddlog" type="button" class="btn btn-primary">下载调试日志</button>
         </div>
       </div>
 
       <div class="box">
         <div class="box-header">
-          <h3 class="box-title">Vuls Details</h3>
+          <h3 class="box-title">漏洞详情</h3>
         </div>
           <div class="box-body">
               <div class="box-group" id="accordion">
@@ -90,7 +94,7 @@
                   <div class="box-header with-border">
                     <h4 class="box-title">
                       <a data-toggle="collapse" data-parent="#accordion" href="#collapse{{ rfds.1.id }}" aria-expanded="false" class="collapsed">
-                        Vul {{ rfds.0 }}  #{{ rfds.1.id }}
+                        漏洞 {{ rfds.0 }}  #{{ rfds.1.id }}
                       </a>
                     </h4>
                   </div>
@@ -119,38 +123,40 @@
 
     <div class="box box-success">
         <div class="box-header">
-          <h3 class="box-title">New Evil Functions</h3>
+          <h3 class="box-title">新增危险函数</h3>
         </div>
         <!-- /.box-header -->
         <div class="box-body table-responsive no-padding">
-          <table class="table table-hover">
-                <tbody><tr>
-                  <th>ID</th>
-                  <th>CVI ID</th>
-                  <th>New Function</th>
-                  <th>Origin Function</th>
-                  <th>Is Active</th>
-                </tr>
-                {% for newevilfunc in newevilfuncs %}
-                <tr>
-                    <td>{{ newevilfunc.id }}</td>
-                    <td>{{ newevilfunc.svid }}</td>
-                    <td>{{ newevilfunc.func_name }}</td>
-                    <td>{{ newevilfunc.origin_func_name }}</td>
-
-                      <td>
-                      {% if newevilfunc.is_active %}
-                      <span class="label label-success">Yes</span>
-                      {% elif not newevilfunc.is_active %}
-                      <span class="label label-danger">No</span>
-                      {% else %}
-                      <span class="label label-success">{{ newevilfunc.is_active }}</span>
-                      {% endif %}
-                      </td>
-
-                  </tr>
-                {% endfor %}
-              </tbody></table>
+          <table class="table table-hover km-table">
+            <thead>
+              <tr>
+                <th class="km-col-id">ID</th>
+                <th class="km-td-nowrap">CVI</th>
+                <th>新函数</th>
+                <th>原函数</th>
+                <th class="km-td-nowrap">启用</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for newevilfunc in newevilfuncs %}
+              <tr>
+                <td class="km-td-nowrap">{{ newevilfunc.id }}</td>
+                <td class="km-td-nowrap">{{ newevilfunc.svid }}</td>
+                <td><div class="km-cell-config" title="{{ newevilfunc.func_name|escape }}">{{ newevilfunc.func_name }}</div></td>
+                <td><div class="km-cell-config" title="{{ newevilfunc.origin_func_name|escape }}">{{ newevilfunc.origin_func_name }}</div></td>
+                <td class="km-td-nowrap">
+                  {% if newevilfunc.is_active %}
+                  <span class="label label-success">是</span>
+                  {% elif not newevilfunc.is_active %}
+                  <span class="label label-danger">否</span>
+                  {% else %}
+                  <span class="label label-success">{{ newevilfunc.is_active }}</span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
         </div>
         <!-- /.box-body -->
       </div>

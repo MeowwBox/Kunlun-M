@@ -189,9 +189,18 @@ class ScanTask(models.Model):
     task_name = models.CharField(max_length=200)
     target_path = models.CharField(max_length=300)
     parameter_config = models.TextField()
+    created_at = models.DateTimeField(default=timezone.now)
+    started_at = models.DateTimeField(null=True, default=None)
+    finished_at = models.DateTimeField(null=True, default=None)
+    exit_code = models.IntegerField(null=True, default=None)
+    error_message = models.TextField(null=True, default=None)
+    source_type = models.CharField(max_length=20, null=True, default=None)
+    source_archive = models.CharField(max_length=500, null=True, default=None)
+    source_dir = models.CharField(max_length=500, null=True, default=None)
+    options_json = models.TextField(null=True, default=None)
     last_scan_time = models.DateTimeField(default=timezone.now)
     visit_token = models.CharField(max_length=64, default=uuid.uuid4)
-    is_finished = models.BooleanField(default=False)
+    is_finished = models.IntegerField(default=3)
 
     def save(self, *args, **kwargs):
         # 检查project存不存在，如果不存在，那么新建一个
@@ -233,7 +242,7 @@ def check_and_new_project_id(scantask_id, task_name, project_origin, project_des
         p2 = Project(project_name=st.task_name, project_des=project_des, project_hash=md5(task_name), project_origin=project_origin)
         p2.save()
 
-        st.project_id = p.id
+        st.project_id = p2.id
         st.save()
     else:
         p.project_des = project_des

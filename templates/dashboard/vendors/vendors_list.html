@@ -1,5 +1,5 @@
 {% extends "dashboard/base.html" %}
-{% block title %}Vendors list{% endblock %}
+{% block title %}依赖列表{% endblock %}
 
 {% block body %}
 <div>
@@ -9,13 +9,13 @@
 
 <div class="box box-primary">
     <div class="box-header with-border">
-  <h3 class="box-title">Search Vendor</h3>
+  <h3 class="box-title">搜索依赖</h3>
 </div>
 <div class="box-body">
   <!-- Date -->
   <!-- Date and time range -->
   <div class="form-group">
-    <label>Vendor Name:</label>
+    <label>依赖名称：</label>
 
     <div class="input-group">
       <div class="input-group-addon">
@@ -23,14 +23,14 @@
       </div>
       <input type="text" class="form-control pull-right" name="vendorname" value="" >
     </div>
-              ps: use * to indicate wildcard, just like jackson*.
+              说明：可用 * 作为通配符，例如 jackson*。
     <!-- /.input group -->
   </div>
   </div>
   <!-- /.box -->
     <div class="box-footer">
         <div class="btn-group">
-          <button id="submit" type="submit" class="btn btn-primary">Search</button>
+          <button id="submit" type="submit" class="btn btn-primary">搜索</button>
         </div>
   </div>
 </div>
@@ -41,33 +41,45 @@
         <div class="col-xs-12">
           <div class="box">
             <div class="box-header">
-              <h3 class="box-title">Vendors List</h3>
+              <h3 class="box-title">依赖列表</h3>
             </div>
             <!-- /.box-header -->
             <div class="box-body table-responsive no-padding">
-              <table class="table table-hover">
-                <tbody><tr>
-                  <th>ID</th>
-                  <th>Project</th>
-                  <th>Name</th>
-                  <th>Version</th>
-                  <th>Language</th>
-                  <th>Source</th>
-                  <th>Ext</th>
-                </tr>
-                {% for vendor in vendors %}
-                <tr>
-                    <td><a href="{% url 'dashboard:vendor_details'%}?vendorname={{ vendor.name }}">{{ vendor.id }}</a></td>
-                    <td><a href="{% url 'dashboard:project_detail' vendor.project_id %}">{{ vendor.project_id }} {{ vendor.project_name }}</a></td>
-
-                    <td><a href="{% url 'dashboard:vendor_details'%}?vendorname={{ vendor.name }}">{{ vendor.name }}</a></td>
-                      <td>{{ vendor.version }}</td>
-                      <td>{{ vendor.language }}</td>
-                      <td>{{ vendor.source }}</td>
-                      <td>{{ vendor.ext }}</td>
+              <table class="table table-hover km-table km-table-wide">
+                <thead>
+                  <tr>
+                    <th class="km-col-id">ID</th>
+                    <th class="km-col-project">项目</th>
+                    <th>名称</th>
+                    <th class="km-td-nowrap">版本</th>
+                    <th class="km-td-nowrap">语言</th>
+                    <th class="km-td-nowrap">来源</th>
+                    <th class="km-td-nowrap">Ext</th>
                   </tr>
-                {% endfor %}
-              </tbody></table>
+                </thead>
+                <tbody>
+                  {% for vendor in vendors %}
+                  <tr>
+                    <td class="km-td-nowrap"><a href="{% url 'dashboard:vendor_details'%}?vendorname={{ vendor.name }}">{{ vendor.id }}</a></td>
+                    <td>
+                      <a class="km-link-strong" href="{% url 'dashboard:project_detail' vendor.project_id %}">
+                        <span class="km-td-nowrap">#{{ vendor.project_id }}</span>
+                        <span class="km-muted">{{ vendor.project_name }}</span>
+                      </a>
+                    </td>
+                    <td>
+                      <div class="km-cell-title">
+                        <a class="km-link-strong" href="{% url 'dashboard:vendor_details'%}?vendorname={{ vendor.name }}" title="{{ vendor.name|escape }}">{{ vendor.name }}</a>
+                      </div>
+                    </td>
+                    <td class="km-td-nowrap">{{ vendor.version }}</td>
+                    <td class="km-td-nowrap">{{ vendor.language }}</td>
+                    <td class="km-td-nowrap">{{ vendor.source }}</td>
+                    <td class="km-td-nowrap">{{ vendor.ext }}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
             </div>
             <!-- /.box-body -->
 

@@ -1,53 +1,76 @@
 {% extends "dashboard/base.html" %}
-{% block title %}Tasks list{% endblock %}
+{% load tz %}
+{% block title %}任务列表{% endblock %}
 
 {% block body %}
 <div class="row">
         <div class="col-xs-12">
           <div class="box">
             <div class="box-header">
-              <h3 class="box-title">Tasks List</h3>
-              <div class="box-tools">
-                <input id="allTaskFilterInput" class="form-control input-sm" style="width: 240px;" placeholder="Search task table...">
+              <h3 class="box-title">任务列表</h3>
+              <div class="box-tools km-box-tools">
+                <a class="btn btn-primary btn-xs" href="{% url 'dashboard:task_new' %}">新建扫描</a>
+                <input id="allTaskFilterInput" class="form-control input-sm" style="width: 240px;" placeholder="搜索任务...">
               </div>
             </div>
             <!-- /.box-header -->
             <div class="box-body table-responsive no-padding">
-              <table id="allTaskTable" class="table table-hover">
-                <tbody><tr>
-                  <th>ID</th>
-                  <th>Project</th>
-                  <th>Name</th>
-                  <th>Time</th>
-                  <th>Status</th>
-                  <th>Detail</th>
-                </tr>
-                {% for task in tasks %}
-                <tr>
-                    <td><a href="{% url 'dashboard:task_detail' task.id %}">{{ task.id }}</a></td>
-                    <td><a href="{% url 'dashboard:project_detail' task.project_id %}">{{ task.project_id }} {{ task.project_name }}</a></td>
-
-                      <td>{{ task.target_path }}</td>
-                      <td>{{ task.last_scan_time }}</td>
+              <table id="allTaskTable" class="table table-hover km-table">
+                <thead>
+                  <tr>
+                    <th class="km-col-id">ID</th>
+                    <th class="km-col-project">项目</th>
+                    <th class="km-col-name">名称</th>
+                    <th class="km-col-time">时间</th>
+                    <th class="km-col-status">状态</th>
+                    <th class="km-col-config">参数</th>
+                    <th class="km-col-actions">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for task in tasks %}
+                  <tr>
+                      <td class="km-td-nowrap"><a href="{% url 'dashboard:task_detail' task.id %}">{{ task.id }}</a></td>
                       <td>
-                      {% if task.is_finished == 0 %}
-                      <span class="label label-danger">Error</span>
-                      {% elif task.is_finished == -1 %}
-                      <span class="label label-danger">Error</span>
-                      {% elif task.is_finished == 2 %}
-                      <span class="label label-warning">Running</span>
-                      {% elif task.is_finished == 1 %}
-                      <span class="label label-success">Success</span>
-                      {% else %}
-                      <span class="label label-success">{{ task.is_finished }}</span>
-                      {% endif %}
+                        <a class="km-link-strong" href="{% url 'dashboard:project_detail' task.project_id %}">
+                          <span class="km-td-nowrap">#{{ task.project_id }}</span>
+                          <span class="km-muted">{{ task.project_name }}</span>
+                        </a>
                       </td>
                       <td>
-                      <div class="sparkbar" data-color="#00a65a" data-height="20">{{ task.parameter_config }}</div>
-                    </td>
-                  </tr>
-                {% endfor %}
-              </tbody></table>
+                        <div class="km-cell-title">
+                          <a class="km-link-strong" href="{% url 'dashboard:task_detail' task.id %}" title="{{ task.task_name|default:task.target_path|escape }}">{{ task.task_name|default:task.target_path }}</a>
+                        </div>
+                        <div class="km-cell-sub" title="{{ task.target_path|escape }}">{{ task.target_path }}</div>
+                      </td>
+                      <td class="km-td-time" data-time="{{ task.last_scan_time|localtime|date:'Y-m-d H:i:s' }}">{{ task.last_scan_time|localtime|date:'Y-m-d H:i:s' }}</td>
+                      <td class="km-td-nowrap">
+                        {% if task.is_finished == 0 %}
+                        <span class="label label-danger status-label">失败</span>
+                        {% elif task.is_finished == -1 %}
+                        <span class="label label-danger status-label">失败</span>
+                        {% elif task.is_finished == 2 %}
+                        <span class="label label-warning status-label">运行中</span>
+                        {% elif task.is_finished == 1 %}
+                        <span class="label label-success status-label">成功</span>
+                        {% elif task.is_finished == 3 %}
+                        <span class="label label-info status-label">队列中</span>
+                        {% else %}
+                        <span class="label label-success status-label">{{ task.is_finished }}</span>
+                        {% endif %}
+                      </td>
+                      <td>
+                        <div class="km-cell-config" title="{{ task.parameter_config|escape }}">{{ task.parameter_config }}</div>
+                      </td>
+                      <td class="km-td-actions">
+                        <div class="km-actions">
+                          <a class="btn btn-primary btn-xs" href="{% url 'backend:tasklog' task.id %}">查看日志</a>
+                        </div>
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
             </div>
             <!-- /.box-body -->
 

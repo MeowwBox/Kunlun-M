@@ -1,0 +1,143 @@
+{% extends "dashboard/base.html" %}
+{% block title %}配置扫描{% endblock %}
+
+{% block body %}
+<div class="row">
+  <div class="col-xs-12">
+    <div class="box box-info">
+      <div class="box-header with-border">
+        <h3 class="box-title">配置扫描</h3>
+      </div>
+
+      <form method="post">
+        {% csrf_token %}
+        <div class="box-body">
+          {% if error_message %}
+          <div class="alert alert-danger">{{ error_message }}</div>
+          {% endif %}
+
+          <div class="form-group">
+            <label>上传文件</label>
+            <input type="text" class="form-control" value="{{ archive_name }}" disabled>
+          </div>
+
+          <div class="form-group">
+            <label>任务名称</label>
+            <input type="text" class="form-control" name="task_name" value="{{ task.task_name }}">
+          </div>
+
+          <div class="form-group">
+            <label>项目描述（可选）</label>
+            <textarea class="form-control" rows="2" name="description" placeholder="可选">{{ project_des }}</textarea>
+          </div>
+
+          <hr>
+
+          <div class="km-advanced">
+            <div id="toggleAdvanced" class="km-advanced-toggle" role="button" tabindex="0" aria-expanded="false">
+              <div class="km-advanced-title">进阶选项</div>
+              <div class="km-advanced-sub" id="advancedSub">点击展开</div>
+              <div class="km-advanced-arrow" id="advancedArrow">
+                <i class="fa fa-angle-down"></i>
+              </div>
+            </div>
+            <div id="advancedPanel" style="display:none; margin-top:14px;">
+              <div class="form-group">
+                <label>语言（可选）</label>
+                <select class="form-control" name="language">
+                  <option value="" {% if options.language == "" %}selected{% endif %}>不指定（自动识别）</option>
+                  <option value="php" {% if options.language == "php" %}selected{% endif %}>PHP</option>
+                  <option value="java" {% if options.language == "java" %}selected{% endif %}>Java</option>
+                  <option value="javascript" {% if options.language == "javascript" %}selected{% endif %}>JavaScript</option>
+                  <option value="python" {% if options.language == "python" %}selected{% endif %}>Python</option>
+                  <option value="golang" {% if options.language == "golang" %}selected{% endif %}>Golang</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label>指定规则（可选）</label>
+                <input type="text" class="form-control" name="special_rules" value="{{ options.special_rules }}" placeholder="例如：1000,1001">
+              </div>
+
+              <div class="form-group">
+                <label>拓展插件（可选）</label>
+                <input type="text" class="form-control" name="tamper_name" value="{{ options.tamper_name }}" placeholder="例如：wordpress">
+              </div>
+
+              <div class="form-group">
+                <label>忽略路径（可选）</label>
+                <input type="text" class="form-control" name="black_path" value="{{ options.black_path }}" placeholder="例如：vendor,node_modules,.git">
+              </div>
+
+              <div class="km-check-group">
+                <label class="km-check">
+                  <input type="checkbox" name="unconfirm" value="1" {% if options.unconfirm == 1 %}checked{% endif %}>
+                  <span class="km-checkmark"></span>
+                  包含未确认结果
+                </label>
+
+                <label class="km-check">
+                  <input type="checkbox" name="unprecom" value="1" {% if options.unprecom == 1 %}checked{% endif %}>
+                  <span class="km-checkmark"></span>
+                  跳过预编译
+                </label>
+
+                <label class="km-check {% if vendor_globally_off %}is-disabled{% endif %}">
+                  <input type="checkbox" name="without_vendor" value="1" {% if options.without_vendor == 1 %}checked{% endif %} {% if vendor_globally_off %}disabled{% endif %}>
+                  <span class="km-checkmark"></span>
+                  本次任务关闭组件漏洞扫描（SCA）
+                </label>
+                {% if vendor_globally_off %}
+                  <div class="km-tip">当前全局已关闭 SCA（WITH_VENDOR=False），此选项无需设置。</div>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="box-footer">
+          <button type="submit" class="btn btn-primary">开始扫描</button>
+          <a href="{% url 'dashboard:task_detail' task.id %}" class="btn btn-default">返回任务详情</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+$(document).ready(function () {
+  $("#dashboard").removeClass("active menu-open");
+  $("#dashboard").find("ul li").removeClass("active");
+  $("#tasks").addClass("menu-open");
+  $("#tasks").find("ul").find("li#task_new").addClass("active");
+  $("#tasks").find("ul").css("display","block");
+
+  var btn = document.getElementById('toggleAdvanced');
+  var panel = document.getElementById('advancedPanel');
+  var arrow = document.getElementById('advancedArrow');
+  var sub = document.getElementById('advancedSub');
+  if (btn && panel) {
+    function toggleAdvanced() {
+      var open = panel.style.display !== 'none';
+      panel.style.display = open ? 'none' : 'block';
+      btn.setAttribute('aria-expanded', open ? 'false' : 'true');
+      if (sub) {
+        sub.textContent = open ? '点击展开' : '点击收起';
+      }
+      if (arrow) {
+        arrow.className = open ? 'km-advanced-arrow' : 'km-advanced-arrow is-open';
+      }
+    }
+    btn.addEventListener('click', toggleAdvanced);
+    btn.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggleAdvanced();
+      }
+    });
+  }
+});
+</script>
+{% endblock %}

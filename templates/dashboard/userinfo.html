@@ -1,34 +1,34 @@
 {% extends "dashboard/base.html" %}
-{% block title %} UserInfo {% endblock %}
+{% block title %}个人信息{% endblock %}
 
 {% block body %}
 
  <div class="box box-warning">
     <div class="box-header with-border">
-      <h3 class="box-title">User Profile</h3>
+      <h3 class="box-title">个人信息</h3>
     </div>
     <!-- /.box-header -->
     <div class="box-body">
       <form role="form">
         <!-- text input -->
         <div class="form-group">
-          <label>User</label>
+          <label>用户名</label>
           <input type="text" class="form-control" value="{{ request.user.username }}" disabled>
         </div>
         <div class="form-group">
-          <label>Email</label>
+          <label>邮箱</label>
           <input type="text" class="form-control" value="{{ request.user.email }}" disabled>
         </div>
 
         <div class="form-group">
-          <label>api-token</label>
+          <label>API Token</label>
           <input type="text" class="form-control" value="{{ apitoken }}" disabled>
         </div>
 
         <!-- textarea -->
         <div class="form-group">
-          <label>Profile</label>
-          <textarea class="form-control" rows="3" placeholder="Enter ..." disabled></textarea>
+          <label>备注</label>
+          <textarea class="form-control" rows="3" placeholder="暂无" disabled></textarea>
         </div>
       </form>
     </div>

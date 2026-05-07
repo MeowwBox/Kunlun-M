@@ -19,6 +19,7 @@ import argparse
 import logging
 import traceback
 
+from django.utils import timezone
 from django.core.management import call_command
 from utils.log import log, logger, log_add, log_rm
 from utils.utils import get_mainstr_from_filename, random_generator
@@ -36,7 +37,7 @@ from .__version__ import __copyright__, __epilog__, __scan_epilog__, __database_
 
 from core.rule import RuleCheck, TamperCheck
 from core.console import KunlunInterpreter
-from web.index.models import ScanTask
+from web.index.models import ScanTask, check_and_new_project_id
 
 from Kunlun_M.settings import LOGS_PATH, IS_OPEN_REMOTE_SERVER, REMOTE_URL
 
@@ -87,6 +88,7 @@ def main():
                                        help='Default use new project for scan task.')
         parser_group_scan.add_argument('--origin', dest='origin', action='store', default=None, metavar='<origin>', help='project origin')
         parser_group_scan.add_argument('-des', '--description', dest='description', action='store', default=None, metavar='<description>', help='project description')
+        parser_group_scan.add_argument('--task-id', dest='task_id', action='store', default=None, metavar='<task_id>', help='reuse an existing ScanTask id (for web scan)')
 
         # for log
         parser_group_scan.add_argument('-d', '--debug', dest='debug', action='store_true', default=False, help='open debug mode')
@@ -262,17 +264,35 @@ def main():
         else:
             origin = "File in {}".format(args.target)
 
-        # new scan task
-        if args.newpro:
-            logger.info('[INIT] Use new project for scan task.')
-            task_name = random_generator(16)
-        else:
-            task_name = get_mainstr_from_filename(args.target)
-        s = cli.check_scantask(task_name=task_name, target_path=args.target, parameter_config=sys.argv, project_origin=origin, project_des=args.description, auto_yes=args.yes)
+        if hasattr(args, "task_id") and args.task_id:
+            s = ScanTask.objects.filter(id=int(args.task_id)).first()
+            if not s:
+                logger.warning("[INIT] ScanTask {} not found.".format(args.task_id))
+                exit()
 
-        if s.is_finished:
-            logger.info("[INIT] Finished Task.")
-            exit()
+            if int(s.is_finished) == 1:
+                logger.info("[INIT] Finished Task.")
+                exit()
+
+            s.target_path = args.target
+            s.parameter_config = sys.argv
+            s.last_scan_time = timezone.now()
+            if not s.task_name:
+                s.task_name = get_mainstr_from_filename(args.target)
+            s.save()
+
+            check_and_new_project_id(s.id, s.task_name, origin, project_des=args.description)
+        else:
+            if args.newpro:
+                logger.info('[INIT] Use new project for scan task.')
+                task_name = random_generator(16)
+            else:
+                task_name = get_mainstr_from_filename(args.target)
+            s = cli.check_scantask(task_name=task_name, target_path=args.target, parameter_config=sys.argv, project_origin=origin, project_des=args.description, auto_yes=args.yes)
+
+            if int(s.is_finished) == 1:
+                logger.info("[INIT] Finished Task.")
+                exit()
 
         # 标识任务id
         sid = str(s.id)
@@ -308,9 +328,26 @@ def main():
         }
         Running(sid).status(data)
 
-        cli.start(args.target, args.format, args.output, args.special_rules, sid, args.language, args.tamper_name, args.black_path, args.unconfirm, args.unprecom)
+        s.is_finished = 2
+        s.started_at = timezone.now()
+        s.finished_at = None
+        s.exit_code = None
+        s.error_message = None
+        s.save()
 
-        s.is_finished = True
+        try:
+            cli.start(args.target, args.format, args.output, args.special_rules, sid, args.language, args.tamper_name, args.black_path, args.unconfirm, args.unprecom)
+        except Exception as e:
+            s.is_finished = 0
+            s.finished_at = timezone.now()
+            s.exit_code = 1
+            s.error_message = str(e)[:2000]
+            s.save()
+            raise
+
+        s.is_finished = 1
+        s.finished_at = timezone.now()
+        s.exit_code = 0
         s.save()
         t2 = time.time()
 

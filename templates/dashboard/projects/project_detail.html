@@ -1,5 +1,6 @@
 {% extends "dashboard/base.html" %}
-{% block title %}Project Detail{% endblock %}
+{% load tz %}
+{% block title %}项目详情{% endblock %}
 
 {% block body %}
 <div>
@@ -7,13 +8,13 @@
 <div class="box box-primary">
 <div class="box-header with-border
 ">
-  <h3 class="box-title">Project Details</h3>
+  <h3 class="box-title">项目详情</h3>
 </div>
 <div class="box-body">
   <!-- Date -->
   <!-- Date and time range -->
   <div class="form-group">
-    <label>Project Name:</label>
+    <label>项目名称：</label>
 
     <div class="input-group">
       <input type="text" class="form-control pull-right" name="project_name" value="{{ project.project_name }}" disabled>
@@ -22,14 +23,14 @@
   </div>
 
   <div class="form-group">
-    <label>Origin:</label>
+    <label>来源：</label>
 
       <input type="text" class="form-control pull-right" name="project_origin" value="{{ project.project_origin }}" disabled>
     </div>
 
   <div class="form-group">
-      <label>Description:</label>
-      <textarea class="form-control" rows="3" placeholder="Some details about project" name="project_desc" disabled>{{ project.project_desc }}</textarea>
+      <label>描述：</label>
+      <textarea class="form-control" rows="3" placeholder="项目描述" name="project_desc" disabled>{{ project.project_desc }}</textarea>
     </div>
 
 
@@ -42,45 +43,53 @@
 
 <div class="box box-warning">
 <div class="box-header with-border">
-  <h3 class="box-title">Tasks List</h3>
+  <h3 class="box-title">任务列表</h3>
 </div>
 <!-- /.box-header -->
 <div class="box">
 
 <!-- /.box-header -->
 <div class="box-body table-responsive no-padding">
-  <table class="table table-hover">
-    <tbody><tr>
-      <th>ID</th>
-      <th>Name</th>
-      <th>Time</th>
-      <th>Status</th>
-      <th>Detail</th>
-    </tr>
-    {% for task in tasks %}
-    <tr>
-        <td><a href="{% url 'dashboard:task_detail' task.id %}">{{ task.id }} {{ task.task_name }}</a></td>
-          <td>{{ task.target_path }}</td>
-          <td>{{ task.last_scan_time }}</td>
-          <td>
-          {% if task.is_finished == 0 %}
-          <span class="label label-danger">Error</span>
-          {% elif task.is_finished == -1 %}
-          <span class="label label-danger">Error</span>
-          {% elif task.is_finished == 2 %}
-          <span class="label label-warning">Running</span>
-          {% elif task.is_finished == 1 %}
-          <span class="label label-success">Success</span>
-          {% else %}
-          <span class="label label-success">{{ task.is_finished }}</span>
-          {% endif %}
-          </td>
-          <td>
-          <div class="sparkbar" data-color="#00a65a" data-height="20">{{ task.parameter_config }}</div>
-        </td>
+  <table class="table table-hover km-table km-table-wide">
+    <thead>
+      <tr>
+        <th class="km-col-id">ID</th>
+        <th>名称</th>
+        <th>路径</th>
+        <th class="km-col-time">时间</th>
+        <th class="km-col-status">状态</th>
+        <th class="km-col-config">参数</th>
       </tr>
-    {% endfor %}
-  </tbody></table>
+    </thead>
+    <tbody>
+      {% for task in tasks %}
+      <tr>
+        <td class="km-td-nowrap"><a href="{% url 'dashboard:task_detail' task.id %}">{{ task.id }}</a></td>
+        <td>
+          <div class="km-cell-title">
+            <a class="km-link-strong" href="{% url 'dashboard:task_detail' task.id %}" title="{{ task.task_name|default:task.target_path|escape }}">{{ task.task_name|default:task.target_path }}</a>
+          </div>
+        </td>
+        <td><div class="km-cell-sub" title="{{ task.target_path|escape }}">{{ task.target_path }}</div></td>
+        <td class="km-td-time" data-time="{{ task.last_scan_time|localtime|date:'Y-m-d H:i:s' }}">{{ task.last_scan_time|localtime|date:'Y-m-d H:i:s' }}</td>
+        <td class="km-td-nowrap">
+          {% if task.is_finished == 0 %}
+          <span class="label label-danger status-label">失败</span>
+          {% elif task.is_finished == -1 %}
+          <span class="label label-danger status-label">失败</span>
+          {% elif task.is_finished == 2 %}
+          <span class="label label-warning status-label">运行中</span>
+          {% elif task.is_finished == 1 %}
+          <span class="label label-success status-label">成功</span>
+          {% else %}
+          <span class="label label-success status-label">{{ task.is_finished }}</span>
+          {% endif %}
+        </td>
+        <td><div class="km-cell-config" title="{{ task.parameter_config|escape }}">{{ task.parameter_config }}</div></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </div>
 </div>
 <!-- /.box-body -->
@@ -88,59 +97,69 @@
 
 <div class="box box-warning">
 <div class="box-header with-border">
-  <h3 class="box-title">Results</h3>
+  <h3 class="box-title">结果</h3>
 </div>
 <!-- /.box-header -->
 <div class="box-body">
     <div class="box-body table-responsive no-padding">
-              <table class="table table-hover">
-                <tbody><tr>
-                  <th>ID</th>
-                  <th>CVI ID</th>
-                  <th>Language</th>
-                  <th>VulFile Path/Title</th>
-                  <th>Source</th>
-                  <th>Level</th>
-                  <th>Type</th>
-                  <th>Is Confirm</th>
-                  <th>Operate</th>
-                </tr>
-                {% for taskresult in taskresults %}
-                <tr>
-                    <td>{{ taskresult.id }}</td>
-                    <td>{{ taskresult.cvi_id }}</td>
-                    <td>{{ taskresult.language }}</td>
-                    {% if taskresult.cvi_id == '9999' %}
-                        <td><a href="{% url 'dashboard:vendor_vulns_details' taskresult.vid %}">{{ taskresult.vulfile_path }}</a></td>
-                    {% else %}
-                        <td>{{ taskresult.vulfile_path }}</td>
-                    {% endif %}
+              <table class="table table-hover km-table km-table-wide">
+                <thead>
+                  <tr>
+                    <th class="km-col-id">ID</th>
+                    <th class="km-td-nowrap">CVI</th>
+                    <th class="km-td-nowrap">语言</th>
+                    <th>文件/标题</th>
+                    <th>来源</th>
+                    <th class="km-td-nowrap">等级</th>
+                    <th class="km-td-nowrap">类型</th>
+                    <th class="km-td-nowrap">确认</th>
+                    <th class="km-col-actions">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for taskresult in taskresults %}
+                  <tr>
+                    <td class="km-td-nowrap">{{ taskresult.id }}</td>
+                    <td class="km-td-nowrap">{{ taskresult.cvi_id }}</td>
+                    <td class="km-td-nowrap">{{ taskresult.language }}</td>
+                    <td>
+                      {% if taskresult.cvi_id == '9999' %}
+                        <div class="km-cell-title"><a class="km-link-strong" href="{% url 'dashboard:vendor_vulns_details' taskresult.vid %}" title="{{ taskresult.vulfile_path|escape }}">{{ taskresult.vulfile_path }}</a></div>
+                      {% else %}
+                        <div class="km-cell-config" title="{{ taskresult.vulfile_path|escape }}">{{ taskresult.vulfile_path }}</div>
+                      {% endif %}
+                    </td>
 
                     {% if taskresult.result_type == 'vendor_source_match' %}
-                        <td>
+                      <td class="km-cell-wrap">
                         {% for rs in taskresult.source_code %}
                         <a href="{{ rs }}">{{ rs }}</a><br>
                         {% endfor %}
-                        </td>
+                      </td>
                     {% else %}
-                    <td>{{ taskresult.source_code }}</td>
+                      <td><div class="km-cell-config" title="{{ taskresult.source_code|escape }}">{{ taskresult.source_code }}</div></td>
                     {% endif %}
-                    <td>{{ taskresult.level }}</td>
-                    <td>{{ taskresult.result_type }}</td>
+                    <td class="km-td-nowrap">{{ taskresult.level }}</td>
+                    <td class="km-td-nowrap">{{ taskresult.result_type }}</td>
 
-                      <td>
+                    <td class="km-td-nowrap">
                       {% if taskresult.is_unconfirm == 0 %}
-                      <span class="label label-success">Yes</span>
+                      <span class="label label-success">是</span>
                       {% elif  taskresult.is_unconfirm  == 1 %}
-                      <span class="label label-danger">No</span>
+                      <span class="label label-danger">否</span>
                       {% else %}
                       <span class="label label-success">{{ taskresult.is_unconfirm }}</span>
                       {% endif %}
-                      </td>
-                    <td><button id="resultdel" type="button" class="btn-shadow dropdown-toggle btn btn-danger" onclick="delVul('{{ taskresult.id }}')">Delete</button></td>
+                    </td>
+                    <td class="km-td-actions">
+                      <div class="km-actions">
+                        <button type="button" class="btn btn-danger btn-xs" onclick="delVul('{{ taskresult.id }}')">删除</button>
+                      </div>
+                    </td>
                   </tr>
-                {% endfor %}
-              </tbody></table>
+                  {% endfor %}
+                </tbody>
+              </table>
     </div>
 
     {% csrf_token %}
@@ -152,69 +171,74 @@
 
 <div class="box box-success">
     <div class="box-header with-border">
-      <h3 class="box-title">dependencies Vendors</h3>
+      <h3 class="box-title">依赖列表</h3>
     </div>
     <!-- /.box-header -->
     <div class="box-body table-responsive no-padding">
-      <table class="table table-hover">
-            <tbody><tr>
-              <th>ID</th>
-              <th>Name</th>
-              <th>Version</th>
-              <th>Language</th>
-              <th>Remark</th>
-              <th>Ext</th>
-            </tr>
-            {% for project_vendor in project_vendors %}
-            <tr>
-                <td>{{ project_vendor.id }}</td>
-                <td>{{ project_vendor.name }}</td>
-                <td>{{ project_vendor.version }}</td>
-                <td>{{ project_vendor.language }}</td>
-                <td>{{ project_vendor.source }}</td>
-                <td>{{ project_vendor.ext }}</td>
-
-              </tr>
-            {% endfor %}
-          </tbody></table>
+      <table class="table table-hover km-table km-table-wide">
+        <thead>
+          <tr>
+            <th class="km-col-id">ID</th>
+            <th>名称</th>
+            <th class="km-td-nowrap">版本</th>
+            <th class="km-td-nowrap">语言</th>
+            <th>备注</th>
+            <th class="km-td-nowrap">Ext</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for project_vendor in project_vendors %}
+          <tr>
+            <td class="km-td-nowrap">{{ project_vendor.id }}</td>
+            <td><div class="km-cell-title" title="{{ project_vendor.name|escape }}">{{ project_vendor.name }}</div></td>
+            <td class="km-td-nowrap">{{ project_vendor.version }}</td>
+            <td class="km-td-nowrap">{{ project_vendor.language }}</td>
+            <td><div class="km-cell-config" title="{{ project_vendor.source|escape }}">{{ project_vendor.source }}</div></td>
+            <td class="km-td-nowrap">{{ project_vendor.ext }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
 <!-- /.box-body -->
 </div>
 
 <div class="box box-success">
     <div class="box-header with-border">
-      <h3 class="box-title">New Evil Functions</h3>
+      <h3 class="box-title">新增危险函数</h3>
     </div>
     <!-- /.box-header -->
     <div class="box-body table-responsive no-padding">
-      <table class="table table-hover">
-            <tbody><tr>
-              <th>ID</th>
-              <th>CVI ID</th>
-              <th>New Function</th>
-              <th>Origin Function</th>
-              <th>Is Active</th>
-            </tr>
-            {% for newevilfunc in newevilfuncs %}
-            <tr>
-                <td>{{ newevilfunc.id }}</td>
-                <td>{{ newevilfunc.svid }}</td>
-                <td>{{ newevilfunc.func_name }}</td>
-                <td>{{ newevilfunc.origin_func_name }}</td>
-
-                  <td>
-                  {% if newevilfunc.is_active %}
-                  <span class="label label-success">Yes</span>
-                  {% elif not newevilfunc.is_active %}
-                  <span class="label label-danger">No</span>
-                  {% else %}
-                  <span class="label label-success">{{ newevilfunc.is_active }}</span>
-                  {% endif %}
-                  </td>
-
-              </tr>
-            {% endfor %}
-          </tbody></table>
+      <table class="table table-hover km-table">
+        <thead>
+          <tr>
+            <th class="km-col-id">ID</th>
+            <th class="km-td-nowrap">CVI</th>
+            <th>新函数</th>
+            <th>原函数</th>
+            <th class="km-td-nowrap">启用</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for newevilfunc in newevilfuncs %}
+          <tr>
+            <td class="km-td-nowrap">{{ newevilfunc.id }}</td>
+            <td class="km-td-nowrap">{{ newevilfunc.svid }}</td>
+            <td><div class="km-cell-config" title="{{ newevilfunc.func_name|escape }}">{{ newevilfunc.func_name }}</div></td>
+            <td><div class="km-cell-config" title="{{ newevilfunc.origin_func_name|escape }}">{{ newevilfunc.origin_func_name }}</div></td>
+            <td class="km-td-nowrap">
+              {% if newevilfunc.is_active %}
+              <span class="label label-success">是</span>
+              {% elif not newevilfunc.is_active %}
+              <span class="label label-danger">否</span>
+              {% else %}
+              <span class="label label-success">{{ newevilfunc.is_active }}</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
 <!-- /.box-body -->
 </div>

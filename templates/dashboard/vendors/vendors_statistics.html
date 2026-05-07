@@ -1,5 +1,5 @@
 {% extends "dashboard/base.html" %}
-{% block title %}Vendors Statistics list{% endblock %}
+{% block title %}依赖统计{% endblock %}
 
 {% block body %}
 <div>
@@ -8,26 +8,30 @@
         <div class="col-xs-12">
           <div class="box">
             <div class="box-header">
-              <h3 class="box-title">Vendors Statistics List</h3>
+              <h3 class="box-title">依赖统计</h3>
             </div>
             <!-- /.box-header -->
             <div class="box-body table-responsive no-padding">
-              <table class="table table-hover">
-                <tbody><tr>
-                  <th>ID</th>
-                  <th>Name</th>
-                  <th>Language</th>
-                  <th>Count</th>
-                </tr>
-                {% for vendor in vendors %}
-                <tr>
-                    <td>{{ vendor.id }}</td>
-                    <td><a href="{% url 'dashboard:vendor_details'%}?vendorname={{ vendor.name }}">{{ vendor.name }}</a></td>
-                    <td>{{ vendor.language }}</td>
-                    <td>{{ vendor.total }}</td>
+              <table class="table table-hover km-table">
+                <thead>
+                  <tr>
+                    <th class="km-col-id">ID</th>
+                    <th>名称</th>
+                    <th class="km-td-nowrap">语言</th>
+                    <th class="km-td-nowrap">数量</th>
                   </tr>
-                {% endfor %}
-              </tbody></table>
+                </thead>
+                <tbody>
+                  {% for vendor in vendors %}
+                  <tr>
+                    <td class="km-td-nowrap">{{ vendor.id }}</td>
+                    <td><div class="km-cell-title"><a class="km-link-strong" href="{% url 'dashboard:vendor_details'%}?vendorname={{ vendor.name }}" title="{{ vendor.name|escape }}">{{ vendor.name }}</a></div></td>
+                    <td class="km-td-nowrap">{{ vendor.language }}</td>
+                    <td class="km-td-nowrap">{{ vendor.total }}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
             </div>
             <!-- /.box-body -->
 

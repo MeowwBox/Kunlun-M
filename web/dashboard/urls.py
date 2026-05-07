@@ -19,6 +19,8 @@ urlpatterns = [
     # task
     path('tasks/list', login_required(tasks.TaskListView.as_view()), name='tasks_list'),
     path('tasks/detail/<int:task_id>', tasks.TaskDetailView.as_view(), name="task_detail"),
+    path('tasks/new', login_required(tasks.TaskNewView.as_view()), name="task_new"),
+    path('tasks/config/<int:task_id>', login_required(tasks.TaskConfigView.as_view()), name="task_config"),
 
     # projects
     path('projects/list', login_required(project.ProjectListView.as_view()), name='projects_list'),
@@ -42,6 +44,9 @@ urlpatterns = [
 
     # docs
     path("docs", views.docs, name="docs"),
+    path("docs/api/list", views.docs_api_list, name="docs_api_list"),
+    path("docs/api/file", views.docs_api_file, name="docs_api_file"),
+    path("docs/raw", views.docs_raw, name="docs_raw"),
 
     # user
     path("userinfo", views.userinfo, name="userinfo"),

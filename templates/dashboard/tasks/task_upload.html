@@ -1,0 +1,104 @@
+{% extends "dashboard/base.html" %}
+{% block title %}新建扫描{% endblock %}
+
+{% block body %}
+<div class="row">
+  <div class="col-xs-12 col-md-10 col-md-offset-1 col-lg-8 col-lg-offset-2">
+    <div class="box box-primary">
+      <div class="box-header with-border">
+        <h3 class="box-title">上传项目压缩包</h3>
+      </div>
+
+      <form id="uploadForm" method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div class="box-body" style="padding: 26px 28px 30px;">
+          {% if error_message %}
+          <div class="alert alert-danger">{{ error_message }}</div>
+          {% endif %}
+
+          <div style="color:#6b7280; margin-bottom:10px;">拖入或点击选择文件后将自动上传并进入配置页面</div>
+
+          <div id="dropzone" class="well" style="border: 2px dashed #8da2bf; background: linear-gradient(180deg, #fafcff 0%, #f4f8ff 100%); padding: 38px 24px; text-align: center; cursor: pointer; border-radius: 12px; margin-bottom: 12px;">
+            <div style="font-size: 34px; color:#4b6ea9; line-height: 1; margin-bottom: 14px;">
+              <i class="fa fa-cloud-upload"></i>
+            </div>
+            <div style="font-size: 17px; color:#1f2a39; margin-bottom: 8px;">将 zip 文件拖到这里，或点击选择文件</div>
+            <div style="color: #64748b;">支持：`.zip`（最大 {{ max_mb }}MB）</div>
+            <div id="fileName" style="margin-top: 14px; color: #2f4c7f; font-weight: 600;"></div>
+          </div>
+
+          <div id="uploadStatus" style="min-height: 22px; color:#64748b;"></div>
+          <input id="archiveInput" type="file" name="archive" accept=".zip" style="display:none" required>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+$(document).ready(function () {
+  $("#dashboard").removeClass("active menu-open");
+  $("#dashboard").find("ul li").removeClass("active");
+  $("#tasks").addClass("menu-open");
+  $("#tasks").find("ul").find("li#task_new").addClass("active");
+  $("#tasks").find("ul").css("display","block");
+
+  var dz = document.getElementById('dropzone');
+  var input = document.getElementById('archiveInput');
+  var nameBox = document.getElementById('fileName');
+  var statusBox = document.getElementById('uploadStatus');
+  var form = document.getElementById('uploadForm');
+  var submitting = false;
+
+  function submitNow() {
+    if (submitting) return;
+    submitting = true;
+    statusBox.textContent = '正在上传并准备项目，请稍候...';
+    dz.style.pointerEvents = 'none';
+    dz.style.opacity = '0.72';
+    form.submit();
+  }
+
+  function setFile(f) {
+    if (!f) return;
+    nameBox.textContent = '已选择：' + f.name;
+    setTimeout(function () {
+      submitNow();
+    }, 150);
+  }
+
+  dz.addEventListener('click', function () {
+    input.click();
+  });
+
+  input.addEventListener('change', function () {
+    if (input.files && input.files[0]) setFile(input.files[0]);
+  });
+
+  dz.addEventListener('dragover', function (e) {
+    e.preventDefault();
+    dz.style.background = '#f0f7ff';
+  });
+
+  dz.addEventListener('dragleave', function (e) {
+    e.preventDefault();
+    dz.style.background = '#fafafa';
+  });
+
+  dz.addEventListener('drop', function (e) {
+    e.preventDefault();
+    dz.style.background = '#fafafa';
+    if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files[0]) return;
+    input.files = e.dataTransfer.files;
+    setFile(e.dataTransfer.files[0]);
+  });
+
+  form.addEventListener('submit', function () {
+    if (submitting) return;
+    submitNow();
+  });
+});
+</script>
+{% endblock %}

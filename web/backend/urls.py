@@ -17,10 +17,12 @@ urlpatterns = [
 
     # task log
     path("tasklog/<int:task_id>", views.tasklog, name="tasklog"),
+    path("tasklogtail/<int:task_id>", views.tasklogtail, name="tasklogtail"),
     # task debug log
     path("debuglog/<int:task_id>", views.debuglog, name="debuglog"),
     # download debug log
     path("downloadlog/<int:task_id>", views.downloadlog, name="downloadlog"),
+    path("export/<int:task_id>", views.exportresult, name="exportresult"),
 
     # upload log
     path("uploadlog", csrf_exempt(views.uploadlog), name="uploadlog")

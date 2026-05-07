@@ -1404,7 +1404,7 @@ Input Control:
         st = ScanTask.objects.filter(id=scan_id).first()
 
         if st:
-            if st.is_finished:
+            if int(st.is_finished) == 1:
                 logger.info("[Console] Load ScanTask {} success.".format(scan_id))
                 self.current_mode = 'result'
                 self.result_task_id = scan_id
@@ -1463,7 +1463,7 @@ Input Control:
             origin = "Console Scan File Include From {}".format(task_name)
             s = cli.check_scantask(task_name=task_name, target_path=self.scan_options['target'], parameter_config=self.get_sacn_parameters(), project_origin=origin)
 
-            if s.is_finished:
+            if int(s.is_finished) == 1:
                 logger.info("[INIT] Finished Task.")
                 exit()
 
@@ -1481,7 +1481,7 @@ Input Control:
                       self.scan_options['rule_id'], sid, self.scan_options['language'], self.scan_options['tamper'],
                       self.scan_options['black_path'], True, self.scan_options['is_without_precom'])
 
-            s.is_finished = True
+            s.is_finished = 1
             s.save()
             t2 = time.time()
             logger.info('[INIT] Done! Consume Time:{ct}s'.format(ct=t2 - t1))

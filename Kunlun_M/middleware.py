@@ -24,7 +24,7 @@ class SDataMiddleware:
             request.session["rules_count"] = Rules.objects.count()
             request.session["project_count"] = Project.objects.count()
             request.session["tasks_count"] = ScanTask.objects.count()
-            request.session["tasks_finished_count"] = ScanTask.objects.filter(is_finished=True).count()
+            request.session["tasks_finished_count"] = ScanTask.objects.filter(is_finished=1).count()
             request.session["tampers_count"] = Tampers.objects.all().count()
             request.session["vendor_vuls_count"] = VendorVulns.objects.count()
 

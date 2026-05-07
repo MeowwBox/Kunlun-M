@@ -6,7 +6,7 @@
 
     {% load static %}
     <link rel="icon" href="{% static 'favicon.ico' %}" ><link rel="stylesheet" href="{% static 'css/bulma.css' %}">
-    <link rel="stylesheet" href="{% static 'css/default.css' %}">
+    <link rel="stylesheet" href="{% static 'css/default.css' %}?v=9">
 
 	<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
 </head>
@@ -29,19 +29,19 @@
         <div id="navbarMenuHeroB" class="navbar-menu">
           <div class="navbar-end">
             <a class="navbar-item is-active" href="/">
-              Home
+              首页
             </a>
 
 {% if user.is_authenticated %}
     <a class="navbar-item" href="{% url 'dashboard:index' %}">
-      Dashboard
+      控制台
     </a>
     <a class="navbar-item">
-      Loading
+      加载中
     </a>
     <span class="navbar-item">
       <h3>{{ user }} </h3>
-      <a class="button is-success is-outlined" style="margin-left: 10px" href="{% url 'index:logout' %}">  logout</a>
+      <a class="button is-success is-outlined" style="margin-left: 10px" href="{% url 'index:logout' %}">退出登录</a>
     </span>
 {% else %}
             <span class="navbar-item">
@@ -49,7 +49,7 @@
                 <span class="icon">
                   <i class="fa fa-sign-in"></i>
                 </span>
-                <span>SignUp</span>
+                <span>注册</span>
               </a>
             </span>
             <span class="navbar-item">
@@ -57,7 +57,7 @@
                 <span class="icon">
                   <i class="fa fa-sign-in"></i>
                 </span>
-                <span>SignIn</span>
+                <span>登录</span>
               </a>
             </span>
 {% endif %}
@@ -72,7 +72,7 @@
     <div class="container">
       <div class="columns is-vcentered">
         <div class="column is-7 has-text-left">
-          <p class="landing-badge">KUNLUN-M WEB MODE</p>
+          <p class="landing-badge">KUNLUN-M WEB 模式</p>
           <p class="title landing-title">
             {{ title }}
           </p>

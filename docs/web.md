@@ -45,3 +45,25 @@ python kunlun.py web -p 9999
 - `GET /api/rule/list`
 - `GET /api/rule/<rule_id>`
 
+## Web 新建扫描（上传 Zip）
+Dashboard 提供“Tasks → New Scan”用于上传 zip 包并创建扫描任务。
+
+要点：
+- 任务状态：Queued(3) / Running(2) / Success(1) / Error(0)
+- 上传落盘：`tmp/package/<task_id>/upload.zip`
+- 解压目录：`tmp/package/<task_id>/src/`
+- 执行方式：Web 侧派发子进程执行 `python kunlun.py scan --task-id <id> -t <dir> ...`
+
+配置项（`Kunlun_M/settings.py`）：
+- `WEB_UPLOAD_MAX_MB`：上传大小限制（默认 50）
+- `WEB_PACKAGE_RETENTION_DAYS`：上传包与解压目录保留天数（默认 7）
+- `WEB_SCAN_MAX_CONCURRENCY`：最大并发（默认 1，超出进入队列）
+
+常用入口：
+- 新建扫描：`/dashboard/tasks/new`
+- 配置扫描：`/dashboard/tasks/config/<task_id>`
+- 任务列表：`/dashboard/tasks/list`
+- 任务详情：`/dashboard/tasks/detail/<task_id>`
+- 日志与链路：`/backend/tasklog/<task_id>`
+- Debug 日志：`/backend/debuglog/<task_id>`
+- 导出结果：`/backend/export/<task_id>?format=csv|json`

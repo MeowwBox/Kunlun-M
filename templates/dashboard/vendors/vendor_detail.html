@@ -1,5 +1,5 @@
 {% extends "dashboard/base.html" %}
-{% block title %}Vendor Detail{% endblock %}
+{% block title %}依赖详情{% endblock %}
 
 {% block body %}
 <div>
@@ -7,33 +7,40 @@
 <div class="box box-primary">
     <div class="box-header with-border
     ">
-      <h3 class="box-title">Search Result for {{ vendor_name }}</h3>
+      <h3 class="box-title">依赖搜索结果：{{ vendor_name }}</h3>
     </div>
     <div class="box-body">
     <div class="box-body table-responsive no-padding">
-              <table class="table table-hover">
-                <tbody><tr>
-                  <th>ID</th>
-                  <th>Project</th>
-                  <th>Name</th>
-                  <th>Version</th>
-                  <th>Language</th>
-                  <th>Source</th>
-                  <th>Ext</th>
-                </tr>
-                {% for vendor in vendors %}
-                <tr>
-                    <td>{{ vendor.id }}</td>
-                    <td><a href="{% url 'dashboard:project_detail' vendor.project_id %}">{{ vendor.project_id }}</a></td>
-
-                    <td><a href="{% url 'dashboard:vendor_details'%}?vendorname={{ vendor.name }}">{{ vendor.name }}</a></td>
-                      <td>{{ vendor.version }}</td>
-                      <td>{{ vendor.language }}</td>
-                      <td>{{ vendor.source }}</td>
-                      <td>{{ vendor.ext }}</td>
+              <table class="table table-hover km-table km-table-wide">
+                <thead>
+                  <tr>
+                    <th class="km-col-id">ID</th>
+                    <th class="km-col-project">项目</th>
+                    <th>名称</th>
+                    <th class="km-td-nowrap">版本</th>
+                    <th class="km-td-nowrap">语言</th>
+                    <th class="km-td-nowrap">来源</th>
+                    <th class="km-td-nowrap">Ext</th>
                   </tr>
-                {% endfor %}
-              </tbody></table>
+                </thead>
+                <tbody>
+                  {% for vendor in vendors %}
+                  <tr>
+                    <td class="km-td-nowrap">{{ vendor.id }}</td>
+                    <td class="km-td-nowrap"><a href="{% url 'dashboard:project_detail' vendor.project_id %}">#{{ vendor.project_id }}</a></td>
+                    <td>
+                      <div class="km-cell-title">
+                        <a class="km-link-strong" href="{% url 'dashboard:vendor_details'%}?vendorname={{ vendor.name }}" title="{{ vendor.name|escape }}">{{ vendor.name }}</a>
+                      </div>
+                    </td>
+                    <td class="km-td-nowrap">{{ vendor.version }}</td>
+                    <td class="km-td-nowrap">{{ vendor.language }}</td>
+                    <td class="km-td-nowrap">{{ vendor.source }}</td>
+                    <td class="km-td-nowrap">{{ vendor.ext }}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
     </div>
 
     {% csrf_token %}
@@ -47,29 +54,37 @@
 
 <div class="box box-warning">
 <div class="box-header with-border">
-  <h3 class="box-title">Project contains {{ vendor_name }}</h3>
+  <h3 class="box-title">包含该依赖的项目：{{ vendor_name }}</h3>
 </div>
 <!-- /.box-header -->
 <div class="box-body">
     <div class="box-body table-responsive no-padding">
-              <table class="table table-hover">
-                <tbody><tr>
-                  <th>ID</th>
-                  <th>Origin</th>
-                  <th>Vendor Name</th>
-                  <th>Vendor Version</th>
-                </tr>
-                {% for p in projects %}
-                <tr>
-                    <td><a href="{% url 'dashboard:project_detail' p.id %}">{{ p.id }} {{ p.project_name }}</a></td>
-
-                    <td>{{ p.project_origin }}</td>
-                    <td><a href="{% url 'dashboard:vendor_details'%}?vendorname={{ p.vendor_name }}">{{ p.vendor_name }}</a></td>
-                    <td>{{ p.version }}</td>
-
-                </tr>
-                {% endfor %}
-              </tbody></table>
+              <table class="table table-hover km-table">
+                <thead>
+                  <tr>
+                    <th class="km-col-id">ID</th>
+                    <th>项目</th>
+                    <th>来源</th>
+                    <th>依赖名</th>
+                    <th class="km-td-nowrap">版本</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for p in projects %}
+                  <tr>
+                    <td class="km-td-nowrap"><a href="{% url 'dashboard:project_detail' p.id %}">{{ p.id }}</a></td>
+                    <td>
+                      <div class="km-cell-title">
+                        <a class="km-link-strong" href="{% url 'dashboard:project_detail' p.id %}" title="{{ p.project_name|escape }}">{{ p.project_name }}</a>
+                      </div>
+                    </td>
+                    <td><div class="km-cell-config" title="{{ p.project_origin|escape }}">{{ p.project_origin }}</div></td>
+                    <td><div class="km-cell-title"><a class="km-link-strong" href="{% url 'dashboard:vendor_details'%}?vendorname={{ p.vendor_name }}" title="{{ p.vendor_name|escape }}">{{ p.vendor_name }}</a></div></td>
+                    <td class="km-td-nowrap">{{ p.version }}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
     </div>
 
     {% csrf_token %}
@@ -81,34 +96,36 @@
 
 <div class="box box-success">
     <div class="box-header with-border">
-      <h3 class="box-title">Vendor {{ vendor_name }} Vuls</h3>
+      <h3 class="box-title">依赖 {{ vendor_name }} 的漏洞</h3>
     </div>
     <!-- /.box-header -->
     <div class="box-body table-responsive no-padding">
-      <table class="table table-hover">
-            <tbody><tr>
-              <th>ID</th>
-              <th>Vuln ID</th>
-              <th>Title</th>
-              <th>Severity</th>
-              <th>Cve</th>
-              <th>Vendor Name</th>
-              <th>Vendor Version</th>
-            </tr>
-            {% for vuln in vvulns %}
-            <tr>
-                <td>{{ vuln.id }}</td>
-                <td><a href="{{ vuln.reference }}">{{ vuln.vuln_id }}</a></td>
-
-                <td><a href="{% url 'dashboard:vendor_vulns_details' vuln.id %}">{{ vuln.title }}</a></td>
-                  <td>{{ vuln.severity }}</td>
-                  <td>{{ vuln.cves }}</td>
-                  <td>{{ vuln.vendor_name }}</td>
-                  <td>{{ vuln.affected_versions }}</td>
-
-              </tr>
-            {% endfor %}
-          </tbody></table>
+      <table class="table table-hover km-table km-table-wide">
+        <thead>
+          <tr>
+            <th class="km-col-id">ID</th>
+            <th class="km-td-nowrap">Vuln ID</th>
+            <th>标题</th>
+            <th class="km-td-nowrap">严重性</th>
+            <th class="km-td-nowrap">CVE</th>
+            <th>依赖名</th>
+            <th>影响版本</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for vuln in vvulns %}
+          <tr>
+            <td class="km-td-nowrap">{{ vuln.id }}</td>
+            <td class="km-td-nowrap"><a href="{{ vuln.reference }}">{{ vuln.vuln_id }}</a></td>
+            <td><div class="km-cell-title"><a class="km-link-strong" href="{% url 'dashboard:vendor_vulns_details' vuln.id %}" title="{{ vuln.title|escape }}">{{ vuln.title }}</a></div></td>
+            <td class="km-td-nowrap">{{ vuln.severity }}</td>
+            <td class="km-td-nowrap">{{ vuln.cves }}</td>
+            <td><div class="km-cell-config" title="{{ vuln.vendor_name|escape }}">{{ vuln.vendor_name }}</div></td>
+            <td><div class="km-cell-config" title="{{ vuln.affected_versions|escape }}">{{ vuln.affected_versions }}</div></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
 <!-- /.box-body -->
 </div>
