@@ -210,8 +210,8 @@ def load_kunlunmignore():
 
         regex_rule = re.escape(line)
 
-        regex_rule = regex_rule.replace('\*', '\w+')
-        regex_rule = regex_rule.replace('/', '[\/\\\\]')
+        regex_rule = regex_rule.replace(r'\*', r'\w+')
+        regex_rule = regex_rule.replace('/', r'[/\\]')
 
         # if regex_rule.startswith('!'):
         #     regex_rule = "[^({})]".format(regex_rule[1:])
