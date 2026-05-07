@@ -84,6 +84,9 @@ parsetab.py
 result/*
 *.csv
 
+# CI artifacts
+artifacts/
+
 # real_test
 tests/real_test/*
 tests/*
