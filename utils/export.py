@@ -128,7 +128,7 @@ def write_to_file(target, sid, output_format='', filename=None):
     if not filename:
         logger.info('[EXPORT] No filename given, save into default path(result/).')
 
-        targetlist = re.split("[\\\/]", target)
+        targetlist = re.split(r"[\\/]", target)
         if target.endswith("/") or target.endswith("\\"):
             filename = targetlist[-2]
         else:

@@ -1,5 +1,5 @@
-# Kunlun-M runtime dependencies (Python 3.13)
-# Install: python3.13 -m pip install -r requirements.txt
+# Kunlun-M runtime dependencies (Python 3.11+)
+# Install: python -m pip install -r requirements.txt
 
 # Web framework
 django>=4.2,<6

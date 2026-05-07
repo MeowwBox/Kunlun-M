@@ -157,6 +157,16 @@ python3 kunlun.py show tamper         # 展示所有的tamper
 
 使用不同子模式的-h可以查看详细的帮助文档。
 
+### CI/CD scan driver
+
+在 CI/CD 中跑扫描并做门禁（稳定 JSON 报告 + 明确退出码）：
+
+```
+python tools/ci_scan.py --target . --output artifacts/kunlun-ci.json --fail-on high
+```
+
+更多参数、退出码、报告结构与 GitHub Actions/GitLab CI/Jenkins 示例见 [docs/ci.md](./docs/ci.md)
+
 
 ### web mode
 KunLun-M Dashbroad，并且允许通过apitoken来访问api获取数据

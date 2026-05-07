@@ -1,0 +1,40 @@
+{
+  "meta": {
+    "target": "tmp/ci-fixtures/vuln-js",
+    "task_id": 11,
+    "project_id": 11,
+    "started_at": "2026-05-07T04:18:27.372643+00:00",
+    "finished_at": "2026-05-07T04:18:27.559703+00:00",
+    "fail_on": "low",
+    "include_unconfirm": false,
+    "with_vendor": false,
+    "settings_module": "Kunlun_M.settings_ci"
+  },
+  "summary": {
+    "total": 1,
+    "by_severity": {
+      "critical": 0,
+      "high": 1,
+      "medium": 0,
+      "low": 0
+    },
+    "max_severity": "high"
+  },
+  "vulnerabilities": [
+    {
+      "id": 6,
+      "cvi_id": "3011",
+      "rule_name": "executeScript中参数拼接",
+      "severity": "high",
+      "language": "javascript",
+      "file": "rce.js:2",
+      "is_unconfirm": false,
+      "result_type": "Regex-only-match",
+      "source_code": "chrome.tabs.executeScript(tabId, { code: \"alert(1)"
+    }
+  ],
+  "exit": {
+    "code": 2,
+    "reason": "threshold_reached"
+  }
+}

@@ -32,8 +32,7 @@ def init_match_rule(data):
                     break
                 index += 1
 
-            # curl_setopt\s*\(.*,\s*CURLOPT_URL\s*,(.*)\)
-            match = "(?:\A|\s|\\b)" + function_name + "\s*\("
+            match = r"(?:\A|\s|\b)" + function_name + r"\s*\("
             for i in range(len(function_params)):
                 if i != 0:
                     match += ","
@@ -42,14 +41,14 @@ def init_match_rule(data):
                         match += "?"
 
                 if i == index:
-                    match += "([^,\)]*)"
+                    match += r"([^,\)]*)"
                 else:
-                    match += "[^,\)]*"
+                    match += r"[^,\)]*"
 
-            match += "\)"
+            match += r"\)"
 
             # 去除定义函数
-            match2 = "function\s+" + function_name
+            match2 = r"function\s+" + function_name
             vul_function = function_name
             origin_func_name = data[2]
 
@@ -65,7 +64,7 @@ def init_match_rule(data):
                 index += 1
 
             # $A = new a($x, $y);
-            match = "new\s*" + class_name + "\s*\("
+            match = r"new\s*" + class_name + r"\s*\("
 
             for i in range(len(class_params)):
                 if i != 0:
@@ -75,14 +74,14 @@ def init_match_rule(data):
                         match += "?"
 
                 if i == index:
-                    match += "([^,\)]*)"
+                    match += r"([^,\)]*)"
                 else:
-                    match += "[^,\)]*"
+                    match += r"[^,\)]*"
 
-            match += "\)"
+            match += r"\)"
 
             # 去除定义类，类定义和调用方式不一样，但是为了不影响结构，依然赋值
-            match2 = "class\s+" + class_name + "\s*{"
+            match2 = r"class\s+" + class_name + r"\s*{"
             vul_function = class_name
             origin_func_name = data[3]
 

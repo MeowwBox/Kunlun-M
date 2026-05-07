@@ -39,11 +39,11 @@ def init_match_rule(data):
             object_name = object
             index = -1
 
-            match = "(?:\A|\s|\\b)(\w+\s*\=\s*{}\\b)|({}\s*\([^\)]*\))"
+            match = r"(?:\A|\s|\b)(\w+\s*=\s*{}\b)|({}\s*\([^\)]*\))"
 
             match = match.format(object_name, object_name)
 
-            match2 = "function\s+{}\\b".format(object_name)
+            match2 = r"function\s+{}\b".format(object_name)
             vul_function = object_name
 
         elif type == "evalmethod":
@@ -53,11 +53,11 @@ def init_match_rule(data):
             object_name = object.split('.')[0]
             method_name = object.split('.')[-1]
 
-            match = "((?:\A|\s|\\b|\=)(({}.{})|(this\.{}))\s*(\([^\)]*\))?)"
+            match = r"((?:\A|\s|\b|=)(({}.{})|(this\.{}))\s*(\([^\)]*\))?)"
 
             match = match.format(object_name, method_name, method_name)
 
-            match2 = "function\s+{}\\b".format(object_name)
+            match2 = r"function\s+{}\b".format(object_name)
             vul_function = "{}.{}".format(object_name.strip("\\"), method_name)
 
         elif hasattr(object, "type") and object.type == "FunctionDeclaration":
@@ -71,8 +71,8 @@ def init_match_rule(data):
                 index += 1
 
             # curl_setopt\s*\(.*,\s*CURLOPT_URL\s*,(.*)\)
-            match_header = "(?:\A|\s|\\b|\=)"
-            match = "\s*\("
+            match_header = r"(?:\A|\s|\b|=)"
+            match = r"\s*\("
             for i in range(len(function_params)):
                 if i != 0:
                     match += ","
@@ -81,18 +81,18 @@ def init_match_rule(data):
                         match += "?"
 
                 if i == index:
-                    match += "([^,\)]*)"
+                    match += r"([^,\)]*)"
                 else:
-                    match += "[^,\)]*"
+                    match += r"[^,\)]*"
 
-            match += "\)"
+            match += r"\)"
 
             # js除了函数调用以外，还存在对象传递
             # var check=timeMsg
-            match = "({}\s*{}\s*(({})|\\b))".format(match_header, function_name, match)
+            match = r"({}\s*{}\s*(({})|\b))".format(match_header, function_name, match)
 
             # 去除定义函数
-            match2 = "function\s+" + function_name
+            match2 = r"function\s+" + function_name
             vul_function = function_name
 
         elif hasattr(object, "type") and object.type == "Identifier":
@@ -100,23 +100,23 @@ def init_match_rule(data):
             function_name = get_member_data(object)
             index = 0
 
-            match_header = "(?:\A|\s|\\b|\=)"
-            match = "\([^\)]*\)"
+            match_header = r"(?:\A|\s|\b|=)"
+            match = r"\([^\)]*\)"
 
             # js除了函数调用以外，还存在对象传递
             # var check=timeMsg
-            match = "({}\s*{}\s*(({})|\\b))".format(match_header, function_name, match)
+            match = r"({}\s*{}\s*(({})|\b))".format(match_header, function_name, match)
 
             # 去除定义函数
-            match2 = "function\s+" + function_name
+            match2 = r"function\s+" + function_name
             vul_function = function_name
 
         else:
             index = 0
 
-            match = "(?:\A|\s|\\b)" + object + "\s*\([^\)]*\)"
+            match = r"(?:\A|\s|\b)" + object + r"\s*\([^\)]*\)"
 
-            match2 = "function\s+" + object
+            match2 = r"function\s+" + object
             vul_function = object
 
         # elif isinstance(object, php.Class):

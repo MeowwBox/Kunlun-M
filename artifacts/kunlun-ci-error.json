@@ -1,0 +1,7 @@
+{
+  "exit": {
+    "code": 1,
+    "reason": "exception"
+  },
+  "error": "Traceback (most recent call last):\n  File \"D:\\program\\Kunlun_M\\tools\\ci_scan.py\", line 100, in main\n    raise FileNotFoundError('target not found: {t}'.format(t=args.target))\nFileNotFoundError: target not found: tmp/ci-fixtures/not-exist\n"
+}

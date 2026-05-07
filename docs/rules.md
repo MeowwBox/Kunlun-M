@@ -26,7 +26,7 @@ rules/<language>/CVI_<id>.py
 - `vul_function`：用于语义分析的敏感函数集合（按 match_mode 决定是否使用）
 
 ## match_mode（常见模式）
-- `regex-only-match`：纯正则命中，命中即视为结果（不进入语义分析）
+- `only-regex`：纯正则命中，命中即视为结果（不进入参数可控性回溯）
 - `function-param-regex`：匹配敏感函数调用点，并对参数做可控性回溯（PHP/JS）
 - `vustomize-match`：先正则命中，再调用规则 `main()` 抽取需回溯的参数列表
 - `regex-return-regex`：命中后生成二次正则进行进一步匹配
@@ -45,4 +45,3 @@ python kunlun.py config load
 - 用 `scan -r <id1,id2>` 只跑少量规则定位问题
 - 用 `scan -d` 开启 debug 输出
 - 用 `show rule -k <language>` 快速确认规则是否可被加载与识别
-

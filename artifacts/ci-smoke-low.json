@@ -1,0 +1,40 @@
+{
+  "meta": {
+    "target": "tmp/ci_smoke",
+    "task_id": 13,
+    "project_id": 13,
+    "started_at": "2026-05-07T06:47:07.228174+00:00",
+    "finished_at": "2026-05-07T06:47:07.383377+00:00",
+    "fail_on": "low",
+    "include_unconfirm": false,
+    "with_vendor": false,
+    "settings_module": "Kunlun_M.settings_ci"
+  },
+  "summary": {
+    "total": 1,
+    "by_severity": {
+      "critical": 0,
+      "high": 0,
+      "medium": 0,
+      "low": 1
+    },
+    "max_severity": "low"
+  },
+  "vulnerabilities": [
+    {
+      "id": 8,
+      "cvi_id": "5001",
+      "rule_name": "硬编码密码",
+      "severity": "low",
+      "language": "base",
+      "file": "sample.txt",
+      "is_unconfirm": false,
+      "result_type": "Regex-only-match",
+      "source_code": "password = \"abc123"
+    }
+  ],
+  "exit": {
+    "code": 2,
+    "reason": "threshold_reached"
+  }
+}

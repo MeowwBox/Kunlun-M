@@ -9,6 +9,7 @@
 ## 目录
 - [architecture.md](./architecture.md)：项目架构与模块分层
 - [cli.md](./cli.md)：CLI 子命令与常用用法
+- [ci.md](./ci.md)：CI/CD 扫描驱动（门禁/JSON 报告/示例配置）
 - [web.md](./web.md)：Web/Dashboard/API 的启动与鉴权
 - [configuration.md](./configuration.md)：settings 关键配置与运行方式
 - [rules.md](./rules.md)：规则开发与调试要点
