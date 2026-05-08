@@ -1,4 +1,7 @@
 ## 更新日志
+- 2026-05-08
+  - KunLun-M 2.8.0
+  - 新增内置的Skill，支持AI Agent（OpenClaw / Codex / Claude Code / Hermes 等）一键接入工具，快速扫描漏洞
 - 2026-05-07
   - KunLun-M 2.7.4
   - 新增CI相关支持，支持快捷接入CI扫描流程
