@@ -413,7 +413,7 @@ def get_safe_ex_string(ex, encoding=None):
 
 
 def secure_filename(filename):
-    _filename_utf8_strip_re = re.compile(u"[^\u4e00-\u9fa5A-Za-z0-9_.\-\+]")
+    _filename_utf8_strip_re = re.compile(r"[^\u4e00-\u9fa5A-Za-z0-9_.\-+]")
     _windows_device_files = ('CON', 'AUX', 'COM1', 'COM2', 'COM3', 'COM4', 'LPT1', 'LPT2', 'LPT3', 'PRN', 'NUL')
 
     text_type = str      # Python 3
@@ -763,7 +763,7 @@ def del_sensitive_for_config(param_config):
 
 
 def abstract_version(vendor_version):
-    version_reg = '([0-9]+(\.[0-9]+)*)'
+    version_reg = r'([0-9]+(\.[0-9]+)*)'
     result_version = ''
 
     if re.search(version_reg, vendor_version, re.I):

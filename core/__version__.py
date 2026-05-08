@@ -12,7 +12,7 @@ __author__ = 'LoRexxar'
 __author_email__ = 'LoRexxar@gmail.com'
 __license__ = 'MIT License'
 __copyright__ = 'Copyright (C) 2017 LoRexxar. All Rights Reserved'
-__introduction__ = """
+__introduction__ = r"""
  _   __            _                      ___  ___
 | | / /           | |                     |  \/  |
 | |/ / _   _ _ __ | |    _   _ _ __       | .  . |

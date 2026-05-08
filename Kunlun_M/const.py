@@ -42,21 +42,21 @@ TAMPER_TYPE = ["Filter-Function", "Input-Function"]
 # eval ($test + $test2);
 # call_function ($exp);
 #
-fpc = '\s*\((.*)(?:\))'
+fpc = r'\s*\((.*)(?:\))'
 
-fpc_echo_statement_single = '[f]\s*[\'"]?(.+?)?\$(.+?)?[\'"]?(.+?)?;'
-fpc_echo_statement_multi = '(?:[f])\s*[\'"]?(.+?)?\$(.+?)?[\'"]?(.+?)?;'
+fpc_echo_statement_single = r"[f]\s*['\"]?(.+?)?\$(.+?)?['\"]?(.+?)?;"
+fpc_echo_statement_multi = r"(?:[f])\s*['\"]?(.+?)?\$(.+?)?['\"]?(.+?)?;"
 
 fpc_single = '[f]{fpc}'.format(fpc=fpc)
 fpc_multi = '(?:[f]){fpc}'.format(fpc=fpc)
-fpc_loose = '(?:(\A|\s|\\b)[f])({fpc})?\\b'.format(fpc=fpc)
+fpc_loose = r'(?:(\A|\s|\b)[f])({fpc})?\b'.format(fpc=fpc)
 
 #
 # Find All variables
 #
 # Hallo $var. blabla $var, $iam a var $varvarvar gfg djf jdfgjh fd $variable $_GET['req']
 #
-fav = '\$([a-zA-Z_\x7f-\xff][a-zA-Z0-9_\x7f-\xff]*)'
+fav = r'\$([a-zA-Z_\x7f-\xff][a-zA-Z0-9_\x7f-\xff]*)'
 
 ext_dict = {
     "php": ['.php', '.php3', '.php4', '.php5', '.php7', '.pht', '.phs', '.phtml'],

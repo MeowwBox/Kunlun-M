@@ -20,6 +20,8 @@
 python -m pip install -r requirements.txt
 ```
 
+建议 Python 版本：3.11+（以 requirements.txt 与 GitHub Actions 示例为准）。
+
 运行扫描（生成报告文件，按阈值失败）：
 
 ```bash
@@ -87,11 +89,12 @@ python tools/ci_scan.py --target . --output artifacts/kunlun-ci.json --fail-on h
   - 使用 `tools/ci_scan.py` 会在 target 不存在时返回 `1` 并写出 error JSON；请确保 CI job 的执行命令是 `python tools/ci_scan.py ...` 而不是只调用 `kunlun.py scan ...`
 - 需要提前执行 `python kunlun.py config load` 吗？
   - 不需要。CI 驱动会直接从 `rules/**/CVI_*.py` 加载规则元信息用于报告展示，并使用 `settings_ci.py` 的 SQLite 自动迁移初始化
+- 扫描后仓库里出现了新的空目录（例如 `rules/text/`）？
+  - 如果目标目录里包含大量非代码文件（txt、md 等），语言识别可能会带出对应“语言目录名”，而引擎会尝试为缺失的规则语言目录创建占位目录。CI 中建议显式指定扫描语言（例如 `--language php,javascript`），并配合 `--blackpath vendor,node_modules` 降低噪声与副作用。
 
 ## CI 配置示例
 
-- GitHub Actions：见 [.github/workflows/kunlun-scan.yml](file:///d:/program/Kunlun_M/.github/workflows/kunlun-scan.yml)
-- GitLab CI：见 [.gitlab-ci.yml](file:///d:/program/Kunlun_M/.gitlab-ci.yml)
-- Jenkins：见 [Jenkinsfile](file:///d:/program/Kunlun_M/Jenkinsfile)
+- GitHub Actions：见 [kunlun-scan.yml](../ci/github-actions/kunlun-scan.yml)（仓库内实际运行位置仍需放在 `.github/workflows/`）
+- GitLab CI：见 [kunlun-ci.yml](../ci/gitlab/kunlun-ci.yml)（根目录 `.gitlab-ci.yml` 已通过 include 引用）
+- Jenkins：见 [Jenkinsfile](../ci/jenkins/Jenkinsfile)（可在 Jenkins Job 中配置 Script Path 指向该文件）
  
-说明：仓库内的 `.travis.yml` 属于历史配置，不作为当前 CI 扫描驱动的维护示例。

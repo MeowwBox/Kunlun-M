@@ -49,12 +49,12 @@ class autorule:
     def main(self, regex_string):
         sql_sen = check_tuple(regex_string[0])
         if self.language.lower() == 'php':
-            reg = "\$\w+"
+            reg = r"\$\w+"
         elif self.language.lower() == 'javascript':
             if self.is_eval_object:
-                reg = "(?:\A|\s|\\b)(\\w+\\s*(?=\\=))|((?<=\\(|,)[^\\(\\)|,|\\'|\\\"]+)"
+                reg = r"(?:\A|\s|\b)(\w+\s*(?==))|((?<=\(|,)[^\(\)|,|'|\"]+)"
             else:
-                reg = "(?<=\\(|,|=)[^\\(\\)|,|\\'|\\\"]+"
+                reg = r"(?<=\(|,|=)[^\(\)|,|'|\"]+"
         else:
             return None
         if re.search(reg, sql_sen, re.I):

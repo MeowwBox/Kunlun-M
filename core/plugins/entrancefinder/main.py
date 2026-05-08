@@ -76,7 +76,7 @@ class EntranceFinder(BasePluginClass):
     def load_files(self):
         target = self.target
 
-        targetlist = re.split("[\\\/]", target)
+        targetlist = re.split(r"[\\/]", target)
         if target.endswith("/") or target.endswith("\\"):
             filename = targetlist[-2]
         else:

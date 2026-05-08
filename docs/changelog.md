@@ -1,5 +1,7 @@
 ## 更新日志
-
+- 2026-05-07
+  - KunLun-M 2.7.4
+  - 新增CI相关支持，支持快捷接入CI扫描流程
 - 2026-05-07
   - KunLun-M 2.7.3
   - Web Dashboard UI/UX 优化与暗色模式修复
@@ -11,17 +13,14 @@
   - 文档页改为动态加载 docs/ 下 Markdown：支持渲染/源码切换，并移除“打开 .md/复制”入口
   - 顶部用户下拉菜单重构、移除侧边栏“主菜单” header
   - 主题切换按钮可理解/可见（图标 + 文案 + 无障碍属性），并补齐顶栏/表格等暗色样式
-  - 新增 CI/CD 扫描任务驱动：提供 tools/ci_scan.py、settings_ci.py 以及 GitHub Actions/GitLab CI/Jenkins 示例配置
 - 2026-04-30
   - KunLun-M 2.7.2
   - 为组件扫描漏洞增加开关，并增加新数据源，默认关闭
-
-* 2026-04-30
+- 2026-04-30
   - KunLun-M 2.7.1
   - 为phpunserializechain增加生成poc功能，并测试PHPSerialize-labs完全支持
   - 修复部分bug
   - 更新文档
-
 - 2026-04-27
   - KunLun-M 2.7.0
   - 感谢AI时代，让我以极低的代价可以重新维护更新该项目，后面将会在这个基础上做更大胆的尝试

@@ -746,9 +746,9 @@ class Core(object):
         """
         Is annotation
         :method: Judgment by matching comment symbols (skipped when self.is_match_only_rule condition is met)
-               - PHP:  `#` `//` `\*` `*`
+               - PHP:  `#` `//` `\\*` `*`
                     //asdfasdf
-                    \*asdfasdf
+                    \\*asdfasdf
                     #asdfasdf
                     *asdfasdf
                - Java:
