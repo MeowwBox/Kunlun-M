@@ -2,6 +2,14 @@
 
 这个文档面向“落地执行”：所有操作优先通过 skill 自带脚本完成（下载/初始化/扫描/生成/回归/可选同步）。
 
+## 触发场景（你在做什么时会用到它）
+
+Kunlun-M 是静态白盒漏洞扫描工具，可用于扫描 PHP / JavaScript / Solidity / Chrome Extension 等源代码。满足任一条件就可以触发使用本 skill：
+
+- 你要运行 `python kunlun.py scan ...` 对源码目录做扫描
+- 你要运行 `python kunlun.py generate rule ...` 定义/调整 sink（危险点）
+- 你要运行 `python kunlun.py generate tamper ...` 定义/调整 source（输入源）与 repair（净化函数）
+
 ## 1) 一键准备环境（没项目也能跑）
 
 在任意工作目录执行：
@@ -61,3 +69,12 @@ python skills/kunlun-m-general/scripts/kunlun_ops.py --repo-root ./Kunlun-M sync
 - CLI： [cli.md](./cli.md)
 - Rule： [rules.md](./rules.md)
 - Tamper： [tamper.md](./tamper.md)
+
+## 测试命令（冒烟验证）
+
+```bash
+python skills/kunlun-m-general/scripts/bootstrap_kunlunm.py --repo-dir ./Kunlun-M --force
+python skills/kunlun-m-general/scripts/kunlun_ops.py --repo-root ./Kunlun-M gen-rule -lan php --name "Skill Smoke Rule" --match "echo|print" --force
+python skills/kunlun-m-general/scripts/kunlun_ops.py --repo-root ./Kunlun-M gen-tamper --name skill_smoke --controlled "$_GET,$_POST" --force
+python skills/kunlun-m-general/scripts/kunlun_ops.py --repo-root ./Kunlun-M scan -t ./Kunlun-M/tests -lan php -d
+```

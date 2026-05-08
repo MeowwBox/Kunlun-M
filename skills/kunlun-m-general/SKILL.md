@@ -1,6 +1,6 @@
 ---
 name: kunlun-m-general
-description: "自动化 Kunlun-M 工作流：下载/初始化 Kunlun-M，运行 CLI 扫描漏洞，生成 rule/tamper，并提供回归验证与可选同步。"
+description: "当你要用 Kunlun-M（静态白盒漏洞扫描）扫描 PHP/JS/Solidity/Chrome Ext 源码，或需要通过命令 scan/generate 快速落地 source/sink（tamper/rule）并回归验证时使用。触发命令：kunlun.py scan / kunlun.py generate rule / kunlun.py generate tamper。"
 compatibility: "需要 Python 3 + pip；需要联网；可选依赖 git（优先 clone）与 unzip（zip 回退路径）。"
 metadata:
   repo: "https://github.com/LoRexxar/Kunlun-M"
@@ -54,6 +54,17 @@ python skills/kunlun-m-general/scripts/kunlun_ops.py --repo-root ./Kunlun-M sync
 - 污点策略（tamper）≈ source + repair：要定义输入源或净化函数就生成/调整 tamper，然后用 `scan -tp <name>` 回归
 
 更详细的概念与场景说明见：[concepts.md](file:///d:/program/Kunlun_M/skills/kunlun-m-general/references/concepts.md)
+
+## 3. 测试命令（冒烟验证）
+
+在本仓库根目录执行（或把 `--repo-root` 指向你的 Kunlun-M 目录）：
+
+```bash
+python skills/kunlun-m-general/scripts/bootstrap_kunlunm.py --repo-dir ./Kunlun-M --force
+python skills/kunlun-m-general/scripts/kunlun_ops.py --repo-root ./Kunlun-M gen-rule -lan php --name "Skill Smoke Rule" --match "echo|print" --force
+python skills/kunlun-m-general/scripts/kunlun_ops.py --repo-root ./Kunlun-M gen-tamper --name skill_smoke --controlled "$_GET,$_POST" --force
+python skills/kunlun-m-general/scripts/kunlun_ops.py --repo-root ./Kunlun-M scan -t ./Kunlun-M/tests -lan php -d
+```
 
 ## 多平台结构（同一份内容）
 
