@@ -78,3 +78,12 @@ python skills/kunlun-m-general/scripts/kunlun_ops.py --repo-root ./Kunlun-M gen-
 python skills/kunlun-m-general/scripts/kunlun_ops.py --repo-root ./Kunlun-M gen-tamper --name skill_smoke --controlled "$_GET,$_POST" --force
 python skills/kunlun-m-general/scripts/kunlun_ops.py --repo-root ./Kunlun-M scan -t ./Kunlun-M/tests -lan php -d
 ```
+
+## 报告（给 skill/CI 使用的稳定输出）
+
+Kunlun-M 自带 CI 报告脚本 [ci_scan.py](file:///d:/program/Kunlun_M/tools/ci_scan.py)，默认输出 JSON 报告（`meta/summary/vulnerabilities/exit`），适合 skill 消费。
+
+```bash
+python tools/ci_scan.py --target ./Kunlun-M/tests --output artifacts/kunlun-ci.json --fail-on none
+python skills/kunlun-m-general/scripts/render_ci_report.py --input artifacts/kunlun-ci.json --output artifacts/kunlun-ci.md
+```

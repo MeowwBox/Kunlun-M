@@ -66,6 +66,17 @@ python skills/kunlun-m-general/scripts/kunlun_ops.py --repo-root ./Kunlun-M gen-
 python skills/kunlun-m-general/scripts/kunlun_ops.py --repo-root ./Kunlun-M scan -t ./Kunlun-M/tests -lan php -d
 ```
 
+## 4. 报告（给 skill 输出稳定结果）
+
+已有 CI 报告产出脚本：`tools/ci_scan.py`，输出稳定的 JSON（`meta/summary/vulnerabilities/exit`），适合 skill/CI 使用。
+
+```bash
+python tools/ci_scan.py --target ./Kunlun-M/tests --output artifacts/kunlun-ci.json --fail-on none
+python skills/kunlun-m-general/scripts/render_ci_report.py --input artifacts/kunlun-ci.json --output artifacts/kunlun-ci.md
+```
+
+报告模板参考： [report_template.md](file:///d:/program/Kunlun_M/skills/kunlun-m-general/references/report_template.md)
+
 ## 多平台结构（同一份内容）
 
 - 该 skill 不维护多份表述；不同平台主要差异是“放在哪个目录/可选元数据文件”

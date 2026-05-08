@@ -159,16 +159,13 @@ python3 kunlun.py show tamper         # 展示所有的tamper
 
 ### skill automation
 
-提供 `kunlun-m-general` skill（脚本化工作流）：在“环境里没有 Kunlun-M 项目”时自动下载并初始化；并用统一脚本封装 scan / 生成 rule（sink）/ 生成 tamper（source+repair）/ 回归验证。
+如果你是在用 AI Agent（OpenClaw / Codex / Claude Code / Hermes 等）跑 Kunlun-M，可以直接把下面这句话发给你的 Agent 作为“基础安装指令”：
 
-```
-python3 skills/kunlun-m-general/scripts/bootstrap_kunlunm.py --repo-dir ./Kunlun-M
-python3 skills/kunlun-m-general/scripts/kunlun_ops.py --repo-root ./Kunlun-M scan -t <target> -lan php -d
-python3 skills/kunlun-m-general/scripts/kunlun_ops.py --repo-root ./Kunlun-M gen-rule -lan php --name "<rule_name>" --match "<sink_regex>"
-python3 skills/kunlun-m-general/scripts/kunlun_ops.py --repo-root ./Kunlun-M gen-tamper --name <proj> --controlled "<sources>"
-```
+> 下载 `https://github.com/LoRexxar/Kunlun-M.git`，并加载其 skill（kunlun-m-general）。
 
-更多说明见 [docs/skill_kunlunm_general.md](./docs/skill_kunlunm_general.md)
+Agent 通常会自动识别仓库里的 `skills/kunlun-m-general/`，并按文档完成初始化与后续扫描工作。
+
+需要更细的脚本化流程与测试/报告命令见 [docs/skill_kunlunm_general.md](./docs/skill_kunlunm_general.md)。
 
 ### CI/CD scan driver
 
