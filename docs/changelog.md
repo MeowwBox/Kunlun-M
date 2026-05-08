@@ -1,4 +1,12 @@
 ## 更新日志
+- 2026-05-08
+  - CLI 扫描结果导出增强
+    - JSON：补充 `meta/summary`，并规范化 `vulnerabilities` 字段（如 `severity/location/relative_file/is_unconfirm`）
+    - 新增 `-f md`：生成 Markdown 报告（包含全部漏洞详情）
+    - `-f html`：单文件自包含 HTML 报告，支持搜索、按严重度筛选、展开/收起全部，并对报告 UI 进行浅色高级风格重构（统计卡、概览卡片行、项目信息区）
+  - 文档更新
+    - `docs/cli.md`、`README.md` 补充导出示例与说明
+    - 新增示例报告 `docs/sample-cli-report.html`
 - 2026-05-07
   - KunLun-M 2.7.4
   - 新增CI相关支持，支持快捷接入CI扫描流程
