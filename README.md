@@ -1,8 +1,8 @@
-中文 | [English](README.en.md)
+[中文](README.zh.md) | English
 
-- <big>**自 Cobra-W 2.0 版本起，Cobra-W 正式更名为 Kunlun-M（昆仑镜）。**</big>
-- **建议使用 Python 3.10+ 运行（推荐 Python 3.13+）；Python 2.7 已停止维护。**
-- 感谢AI时代，允许我以极低的成本解决该项目的基础维护问题，尽管该项目的理念相对于现在并不先进，但是项目内核稳定依旧是不错的工具参考，我后续将会用codex以极低的成本快速迭代更新，大胆尝试更新功能，**尝试用ai时代的方法完成一个可能很好用的工具**。
+- <big>**Since Cobra-W 2.0, Cobra-W has been officially renamed to Kunlun-M（昆仑镜）.**</big>
+- **Python 3.10+ is recommended (Python 3.13+ preferred); Python 2.7 has reached end-of-life.**
+- Thanks to the AI era, I can address the project's basic maintenance issues at extremely low cost. Although the project's concepts may not be cutting-edge by today's standards, the stable core still serves as a solid tool reference. I will continue to iterate rapidly using Codex at minimal cost, boldly experiment with new features, and **attempt to build a potentially very useful tool using AI-era methods**.
 
 # Kunlun-Mirror
 -[![GitHub release](https://img.shields.io/github/release/LoRexxar/Kunlun-M/all.svg)](https://github.com/LoRexxar/Kunlun-M/releases)
@@ -47,129 +47,129 @@ Usage:
 ```
 
 ## Introduction
-Cobra是一款**源代码安全审计**工具，支持检测多种开发语言源代码中的**大部分显著**的安全问题和漏洞。
+Cobra is a **source code security audit** tool that supports detecting **most significant** security issues and vulnerabilities in source code written in multiple programming languages.
 [https://github.com/wufeifei/cobra](https://github.com/wufeifei/cobra)
 
-Cobra-W是从Cobra2.0发展而来的分支，将工具重心从尽可能的发现威胁转变为提高发现漏洞的准确率以及精度。
+Cobra-W is a fork evolved from Cobra 2.0, shifting the tool's focus from discovering as many threats as possible to improving the accuracy and precision of vulnerability detection.
 [https://github.com/LoRexxar/Kunlun-M/tree/cobra-w](https://github.com/LoRexxar/Kunlun-M/tree/cobra-w)
 
-Kunlun-Mirror是从Cobra-W2.0发展而来，在经历了痛苦的维护改进原工具之后，昆仑镜将工具的发展重心放在安全研究员的使用上，将会围绕工具化使用不断改进使用体验。
+Kunlun-Mirror evolved from Cobra-W 2.0. After going through the painful process of maintaining and improving the original tool, Kunlun-Mirror (昆仑镜) shifts the tool's focus towards serving security researchers, continuously improving the user experience around practical tool-based usage.
 
-目前工具主要支持**php、javascript**的语义分析，以及**chrome ext, solidity**的基础扫描.
-新增了内置的Skill，**支持使用AI Agent（OpenClaw / Codex / Claude Code / Hermes 等）一键接入工具**，快速扫描目标漏洞.
+The tool currently primarily supports semantic analysis for **PHP and JavaScript**, as well as basic scanning for **Chrome extensions and Solidity**.
+Built-in Skills have been added, **supporting one-click integration with AI Agents (OpenClaw / Codex / Claude Code / Hermes, etc.)** for rapid vulnerability scanning.
 
-## Stargazers 
+## Stargazers
 
 <div align=center><a href="https://github.com/LoRexxar/Kunlun-M"><img src="https://api.star-history.com/svg?repos=LoRexxar/Kunlun-M&type=Timeline"></a></div>
 
 ## why KunLun-M
 
-KunLun-M可能是市面上唯一的开源并长期维护的自动化代码审计工具，希望开源工具可以推动白盒审计的发展:>.
+KunLun-M is perhaps the only open-source and actively maintained automated code audit tool on the market. We hope this open-source tool can help advance the development of white-box auditing:>.
 
-## 更新日志
+## Changelog
 
 [changelog.md](./docs/changelog.md)
 
 
-## 安装
+## Installation
 
-首先需要安装依赖
+First, install the dependencies:
 ```
 pip install -r requirements.txt
 ```
 
-配置文件迁移
+Migrate the configuration file:
 ```
 cp Kunlun_M/settings.py.bak Kunlun_M/settings.py
 ```
 
 
-初始化数据库，默认采用sqlite作为数据库
+Initialize the database (SQLite is used by default):
 ```
 python kunlun.py init initialize
 ```
 
-加载规则进数据库（每次修改规则文件都需要加载）
+Load rules into the database (required every time rule files are modified):
 ```
 python kunlun.py config load
 ```
 
-### docker安装
+### Docker Installation
 
-通过docker安装，默认启动web模式
+Install via Docker, which starts web mode by default:
 
 ```
 sudo docker build -t kunlun-m -f ./docker/Dockerfile .
 ```
 
-配合链接同Mysql可以实现本地扫描，web端查看结果。
+By linking with MySQL, you can perform local scanning and view results through the web interface.
 
 ## Usage
 
 ### cli mode
 
-使用scan模式扫描各类源代码
+Use scan mode to scan various source code:
 ```
 python3 kunlun.py scan -t ./tests/vulnerabilities/
 ```
 
-导出报告（JSON/Markdown/HTML）：
+Export reports (JSON/Markdown/HTML):
 ```
 python3 kunlun.py scan -t ./tests/vulnerabilities/ -f json -o /tmp/report.json
 python3 kunlun.py scan -t ./tests/vulnerabilities/ -f md -o /tmp/report.md
 python3 kunlun.py scan -t ./tests/vulnerabilities/ -f html -o /tmp/report.html
 ```
 
-使用config模式加载本地的rule/tamper
+Use config mode to load local rules/tampers:
 ```
-python3 kunlun.py config load         # 加载rule进数据库
-python3 kunlun.py config recover      # 将数据库中的rule恢复到文件
-python3 kunlun.py config loadtamper   # 加载tamper进数据库
-python3 kunlun.py config retamper     # 将数据库中的tamper恢复到文件
+python3 kunlun.py config load         # Load rules into the database
+python3 kunlun.py config recover      # Restore rules from the database to files
+python3 kunlun.py config loadtamper   # Load tampers into the database
+python3 kunlun.py config retamper     # Restore tampers from the database to files
 
 ```
 
-使用show模式查看目前的所有rule/tamper
+Use show mode to view all current rules/tampers:
 ```
-python3 kunlun.py show rule           # 展示所有的rule
-python3 kunlun.py show rule -k php    # 展示所有php的rule
-python3 kunlun.py show tamper         # 展示所有的tamper
+python3 kunlun.py show rule           # Show all rules
+python3 kunlun.py show rule -k php    # Show all PHP rules
+python3 kunlun.py show tamper         # Show all tampers
 ```
 
-使用不同子模式的-h可以查看详细的帮助文档。
+Use the -h flag with any sub-command to view detailed help documentation.
 
 ### skill automation
 
-如果你是在用 AI Agent（OpenClaw / Codex / Claude Code / Hermes 等）跑 Kunlun-M，可以直接把下面这句话发给你的 Agent 作为“基础安装指令”：
+If you are using an AI Agent (OpenClaw / Codex / Claude Code / Hermes, etc.) to run Kunlun-M, you can simply send the following message to your Agent as a "basic installation instruction":
 
-> 下载 `https://github.com/LoRexxar/Kunlun-M.git`，并加载其 skill（kunlun-m-general）。
+> Download `https://github.com/LoRexxar/Kunlun-M.git` and load its skill (kunlun-m-general).
 
-Agent 通常会自动识别仓库里的 `skills/kunlun-m-general/`，并按文档完成初始化与后续扫描工作。
+The Agent will typically automatically recognize the `skills/kunlun-m-general/` directory in the repository, and follow the documentation to complete initialization and subsequent scanning.
 
-需要更细的脚本化流程与测试/报告命令见 [docs/skill_kunlunm_general.md](./docs/skill_kunlunm_general.md)。
+For a more detailed scripted workflow with test/report commands, see [docs/skill_kunlunm_general.md](./docs/skill_kunlunm_general.md).
 
 ### CI/CD scan driver
 
-在 CI/CD 中跑扫描并做门禁（稳定 JSON 报告 + 明确退出码）：
+Run scans in CI/CD with gating (stable JSON reports + clear exit codes):
 
 ```
 python tools/ci_scan.py --target . --output artifacts/kunlun-ci.json --fail-on high
 ```
 
-更多参数、退出码、报告结构与 GitHub Actions/GitLab CI/Jenkins 示例见 [docs/ci.md](./docs/ci.md)
+For more parameters, exit codes, report structure, and GitHub Actions/GitLab CI/Jenkins examples, see [docs/ci.md](./docs/ci.md)
 
 
 ### web mode
-KunLun-M Dashbroad，并且允许通过apitoken来访问api获取数据
+KunLun-M Dashboard, with the ability to access APIs via apitoken to retrieve data.
 
-默认9999端口
+Default port is 9999:
 ```
 python3 .\kunlun.py web -p 9999
 ```
 
 ![](docs/web.png)
 
-修改 `Kunlun_M/settings.py` 中的 `API_TOKEN`，通过 `?apitoken=...` 访问 API 获取数据
+Modify `API_TOKEN` in `Kunlun_M/settings.py`, and access the API via `?apitoken=...` to retrieve data:
 ```
 # api profile
 API_TOKEN = "secret_api_token"
@@ -177,19 +177,19 @@ API_TOKEN = "secret_api_token"
 
 Api List
 ```
-/api/task/list                                       查看task列表
-/api/task/<int:task_id>                              查看task详细信息
-/api/task/<int:task_id>/result                       查看task扫描结果
-/api/task/<int:task_id>/resultflow                   查看task扫描结果流
-/api/task/<int:task_id>/newevilfunc                  查看task扫描后生成的新恶意函数
+/api/task/list                                       View task list
+/api/task/<int:task_id>                              View task details
+/api/task/<int:task_id>/result                       View task scan results
+/api/task/<int:task_id>/resultflow                   View task scan result flow
+/api/task/<int:task_id>/newevilfunc                  View new malicious functions generated after scan
 
-/api/rule/list                                       查看规则列表
-/api/rule/<int:rule_id>                              查看规则细节
+/api/rule/list                                       View rule list
+/api/rule/<int:rule_id>                              View rule details
 ```
 
 ### console mode
 
-**建议使用console模式**
+**Console mode is recommended:**
 ```
 python3 kunlun.py console
 
@@ -218,15 +218,15 @@ Global commands:
 KunLun-M (root) >
 ```
 
-#### 使用KunLun-M 查看 rules 和 tampers
+#### Using KunLun-M to view rules and tampers
 
 [![asciicast](https://asciinema.org/a/360842.svg)](https://asciinema.org/a/360842)
 
-#### 使用KunLun-M 扫描漏洞
+#### Using KunLun-M to scan for vulnerabilities
 
 [![asciicast](https://asciinema.org/a/360843.svg)](https://asciinema.org/a/360843)
 
-#### 使用KunLun-M 查看扫描结果
+#### Using KunLun-M to view scan results
 
 [![asciicast](https://asciinema.org/a/360845.svg)](https://asciinema.org/a/360845)
 
@@ -235,17 +235,17 @@ KunLun-M (root) >
 
 #### phpunserializechain
 
-一个自动化寻找php反序列化链的简单模型
+A simple model for automatically finding PHP deserialization chains.
 
-**如果是旧版本更新并使用该插件扫描同一目标，请使用-r参数renew数据库**
+**If you are updating from an older version and scanning the same target, please use the -r parameter to renew the database.**
 
 ```
 python3 .\kunlun.py plugin php_unserialize_chain_tools -t {target_path}
 ```
 
-如果插件识别到完整 php 反序列化链，会在目标目录自动生成 `.kunlunm_unserialize_poc/`，包含链路 JSON 摘要、`chain_XX.php`（一条链一个 PoC）以及批量执行脚本 `poc_all_chains.php`。
-生成的 `chain_XX.php` 会优先使用扫描递归过程保存的层级关系与属性信息来组装对象图；若信息不足，再回退到属性路径提取与兜底关系。
-同时会针对隐式魔术方法链（`__toString` / `__call` / `__wakeup` / `__invoke`）输出对应触发语法。
+If the plugin identifies a complete PHP deserialization chain, it will automatically generate `.kunlunm_unserialize_poc/` in the target directory, containing the chain JSON summary, `chain_XX.php` (one PoC per chain), and the batch execution script `poc_all_chains.php`.
+The generated `chain_XX.php` will preferentially use the hierarchical relationships and property information saved during the recursive scanning process to assemble the object graph; if insufficient information is available, it falls back to property path extraction and fallback relationships.
+It also outputs corresponding trigger syntax for implicit magic method chains (`__toString` / `__call` / `__wakeup` / `__invoke`).
 
 ```
 python3 .\kunlun.py plugin php_unserialize_chain_tools -t {target_path} -o /tmp/unser_poc
@@ -256,7 +256,7 @@ python3 .\kunlun.py plugin php_unserialize_chain_tools -t {target_path} -o /tmp/
 
 #### EntranceFinder
 
-一个有趣的小工具，用于解决在审计大量的php代码时，快速发现存在可能的入口页面（或是开发者都遗漏的）。
+An interesting little tool designed to help quickly discover potential entry pages (or ones that developers may have overlooked) when auditing large amounts of PHP code.
 
 ```
 python3 .\kunlun.py plugin entrance_finder -t {target_path} -l 3
@@ -264,55 +264,55 @@ python3 .\kunlun.py plugin entrance_finder -t {target_path} -l 3
 
 ![](docs/entrancefinder.png)
 
-## 开发文档
+## Development Documentation
 
-文档索引与开发说明：
+Documentation index and development notes:
 
 - [docs/README.md](./docs/README.md)
 - [docs/dev.md](./docs/dev.md)
 
-### 规则插件开发
+### Rule Plugin Development
 
-规则插件开发遵循
+Rule plugins follow this structure:
 ```
-rules/{语言类型}/CVI_xxxx.py
+rules/{language_type}/CVI_xxxx.py
 ```
 
-在规则目录下，只有命名符合规定的规则会被成功加载，命名格式严格为`CVI_编号.py`
+In the rules directory, only properly named rules will be loaded successfully. The naming format must strictly follow `CVI_{number}.py`.
 
-规则模板可以参考rules/rule.template
+You can refer to `rules/rule.template` as a rule template.
 
 ### .kunlunmignore
 
-.kunlunmignore 用于忽略扫描路径。当前实现仅支持 `*` 通配（会被转换成正则的 `\\w+`），适合忽略类似 `vendor/*`、`node_modules/*` 这类目录或文件模式。
+`.kunlunmignore` is used to ignore scan paths. The current implementation only supports the `*` wildcard (which is converted to regex `\\w+`), suitable for ignoring directory or file patterns like `vendor/*` or `node_modules/*`.
 
-相匹配到的文件不会被扫描。
+Matched files will not be scanned.
 
-也可以使用 `scan -b` 指定黑名单路径列表（逗号分隔，例如 `-b vendor,node_modules`）。
+You can also use `scan -b` to specify a comma-separated blacklist of paths (e.g., `-b vendor,node_modules`).
 
 ## 404StarLink Project
 ![](https://github.com/knownsec/404StarLink-Project/raw/master/logo.png)
 
-KunLun-M 是 404Team [星链计划](https://github.com/knownsec/404StarLink-Project)中的一环，如果对KunLun-M有任何疑问又或是想要找小伙伴交流，可以参考星链计划的加群方式。
+KunLun-M is part of the 404Team [StarLink Project](https://github.com/knownsec/404StarLink-Project). If you have any questions about KunLun-M or want to connect with other community members, please refer to the StarLink Project's group joining method.
 
 - [https://github.com/knownsec/404StarLink#%E4%BA%A4%E6%B5%81community](https://github.com/knownsec/404StarLink#%E4%BA%A4%E6%B5%81community)
 
 ## Contributors
 
-感谢如下贡献者对本工具发展过程中的贡献：
+Thanks to the following contributors for their contributions to the development of this tool:
 
-核心开发者：
+Core Developer:
 
 -  [LoRexxar](https://github.com/LoRexxar)
 
-重要贡献者：
+Important Contributors:
 
 - Vidar-Team [LuckC4t](https://github.com/LuckyC4t)
 
 - Dubhe [Sissel](https://github.com/boke1208)
 
-次要贡献者：
-- Dubhe [Sndav](https://github.com/Sndav)
+Minor Contributors:
+- Dubhe [Sissel](https://github.com/Sndav)
 - [#jax777](https://github.com/jax777)
 - [lavon321](https://github.com/lavon321)
 - [Raul1718](https://github.com/Raul1718)
