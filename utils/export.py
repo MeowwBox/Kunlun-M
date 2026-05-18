@@ -21,10 +21,15 @@ from datetime import datetime
 
 from prettytable import PrettyTable
 
-from Kunlun_M.settings import RUNNING_PATH, EXPORT_PATH, DEFAULT_RESULT_PATH
+from Kunlun_M.settings import RUNNING_PATH, EXPORT_PATH, DEFAULT_RESULT_PATH, HTML_TEMPLATE_PATH
 from utils.log import logger
 
 import html
+
+try:
+    import jinja2
+except ImportError:
+    jinja2 = None
 
 try:
     # Python 2
@@ -268,12 +273,7 @@ def _html_escape(s):
     return html.escape(_safe_str(s), quote=True)
 
 
-def _render_html(report):
-    meta = report.get("meta") or {}
-    summary = report.get("summary") or {}
-    vulns = list(report.get("vulnerabilities") or [])
-
-    css = """
+_BUILTIN_CSS = """
     :root{--bg:#f4f6fb;--panel:#ffffff;--panel2:#f7f9ff;--text:#0f172a;--muted:#64748b;--border:rgba(15,23,42,.12);--shadow:0 18px 55px rgba(2,6,23,.08);--shadow2:0 10px 28px rgba(2,6,23,.06);--radius:16px;--accent:#2563eb;--good:#10b981;--warn:#f59e0b;--bad:#ef4444;--crit:#7c3aed}
     *{box-sizing:border-box}
     body{margin:0;background:radial-gradient(1100px 760px at 14% 10%,rgba(37,99,235,.14),transparent 62%),radial-gradient(900px 620px at 86% 14%,rgba(124,58,237,.10),transparent 58%),linear-gradient(180deg,#ffffff,var(--bg));color:var(--text);font:14px/1.6 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,"PingFang SC","Microsoft YaHei",sans-serif}
@@ -358,6 +358,74 @@ def _render_html(report):
     @media print{body{background:#fff}.hero,.table,details,.card,.kv{box-shadow:none} .btn,.toolbar{display:none}}
     """
 
+
+def _render_html(report, template_path=None):
+    """渲染 HTML 报告，支持自定义 Jinja2 模板。"""
+    meta = report.get("meta") or {}
+    summary = report.get("summary") or {}
+    vulnerabilities = list(report.get("vulnerabilities") or [])
+
+    # 确定模板路径：优先使用参数，其次使用全局配置
+    tpl = template_path
+    if (not tpl or not os.path.isfile(tpl)):
+        tpl = HTML_TEMPLATE_PATH if HTML_TEMPLATE_PATH and os.path.isfile(HTML_TEMPLATE_PATH) else None
+
+    if tpl and jinja2 is not None:
+        try:
+            env = jinja2.Environment(
+                loader=jinja2.FileSystemLoader(os.path.dirname(os.path.abspath(tpl))),
+                autoescape=True,
+            )
+            tpl_obj = env.get_template(os.path.basename(tpl))
+            project_name = os.path.basename(os.path.normpath(_safe_str(meta.get("target")))) or _safe_str(meta.get("target"))
+
+            js = """
+    (function(){
+      var q = document.getElementById('q');
+      var sevBtns = Array.prototype.slice.call(document.querySelectorAll('[data-filter-sev]'));
+      var rows = Array.prototype.slice.call(document.querySelectorAll('tr.row'));
+      var items = Array.prototype.slice.call(document.querySelectorAll('details.item'));
+      var activeSev = 'all';
+      function apply(){
+        var text = (q.value || '').toLowerCase().trim();
+        function ok(el){
+          var sev = el.getAttribute('data-sev') || 'unknown';
+          var hay = el.getAttribute('data-text') || '';
+          if(activeSev !== 'all' && sev !== activeSev) return false;
+          if(text && hay.indexOf(text) === -1) return false;
+          return true;
+        }
+        rows.forEach(function(r){ r.style.display = ok(r) ? '' : 'none'; });
+        items.forEach(function(d){ d.style.display = ok(d) ? '' : 'none'; });
+      }
+      sevBtns.forEach(function(b){
+        b.addEventListener('click', function(){
+          sevBtns.forEach(function(x){ x.classList.remove('active'); });
+          b.classList.add('active');
+          activeSev = b.getAttribute('data-filter-sev') || 'all';
+          apply();
+        });
+      });
+      q.addEventListener('input', apply);
+      document.getElementById('expand').addEventListener('click', function(){ items.forEach(function(d){ d.open = true; }); });
+      document.getElementById('collapse').addEventListener('click', function(){ items.forEach(function(d){ d.open = false; }); });
+      apply();
+    })();
+    """
+
+            return tpl_obj.render(
+                report=report,
+                meta=meta,
+                summary=summary,
+                vulnerabilities=vulnerabilities,
+                project_name=project_name,
+                css=_BUILTIN_CSS,
+                js=js,
+            )
+        except Exception as e:
+            logger.warning("[EXPORT] Jinja2 template rendering failed ({}), falling back to builtin.".format(e))
+
+    # fallback: 内置字符串拼接逻辑
     def _tag(sev):
         s = _safe_str(sev).lower() or "unknown"
         s = s if s in ["critical", "high", "medium", "low", "unknown"] else "unknown"
@@ -382,7 +450,7 @@ def _render_html(report):
     cards.append(_card(summary.get("unconfirmed_total", 0), "Unconfirmed", "unconfirmed", "Needs Review"))
 
     rows = []
-    for idx, v in enumerate(vulns, 1):
+    for idx, v in enumerate(vulnerabilities, 1):
         lang = _safe_str(v.get("language")).strip()
         cvi = _safe_str(v.get("id")).strip()
         loc = _safe_str(v.get("location")).strip()
@@ -425,7 +493,7 @@ def _render_html(report):
         )
 
     details_blocks = []
-    for idx, v in enumerate(vulns, 1):
+    for idx, v in enumerate(vulnerabilities, 1):
         sev = _safe_str(v.get("severity")).lower() or "unknown"
         sev = sev if sev in ["critical", "high", "medium", "low", "unknown"] else "unknown"
         title = "{}. {} ({})".format(idx, _safe_str(v.get("rule_name") or "Unknown"), sev.upper())
@@ -565,7 +633,7 @@ def _render_html(report):
       <script>{js}</script>
     </body>
     </html>""".format(
-        css=css,
+        css=_BUILTIN_CSS,
         target=_html_escape(meta.get("target")),
         project=_html_escape(os.path.basename(os.path.normpath(_safe_str(meta.get("target")))) or _safe_str(meta.get("target"))),
         kv_pairs="".join(kv_pairs),
@@ -621,7 +689,7 @@ def dict_to_pretty_table(vul_list):
     return row_list
 
 
-def write_to_file(target, sid, output_format='', filename=None):
+def write_to_file(target, sid, output_format='', filename=None, template_path=None):
     """
     Export scan result to file.
     :param target: scan target
@@ -729,7 +797,7 @@ def write_to_file(target, sid, output_format='', filename=None):
 
     elif output_format in ['html', 'htm', 'HTML', 'HTM']:
         with open(filename, 'w+', encoding='utf-8', errors='ignore') as f:
-            f.write(_render_html(rich_scan_data))
+            f.write(_render_html(rich_scan_data, template_path=template_path))
 
     else:
         logger.warning('[EXPORT] Unknown output format.')

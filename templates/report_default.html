@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Kunlun-M 扫描结果报告</title>
+  <style>{{ css }}</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hero">
+      <div class="hero-top">
+        <div>
+          <div class="title">
+            <h1>Kunlun-M 扫描结果报告</h1>
+            <div class="subtitle">{{ meta.target | e }}</div>
+          </div>
+          <div class="cards">
+            {% set total = summary.total_vulns | default(0) %}
+            {% set files = summary.files_affected | default(0) %}
+            {% set unconfirmed = summary.unconfirmed_total | default(0) %}
+            <div class="card total">
+              <div class="cap"><div class="label">Total Findings</div><div class="hint">All</div></div>
+              <div class="n">{{ total }}</div>
+            </div>
+            <div class="card files">
+              <div class="cap"><div class="label">Files Affected</div><div class="hint">Unique</div></div>
+              <div class="n">{{ files }}</div>
+            </div>
+            <div class="card unconfirmed">
+              <div class="cap"><div class="label">Unconfirmed</div><div class="hint">Needs Review</div></div>
+              <div class="n">{{ unconfirmed }}</div>
+            </div>
+          </div>
+        </div>
+        <div class="sidebar">
+          <div class="sidebox">
+            <div class="t">Project</div>
+            <div class="v">{{ project_name | e }}</div>
+            <div class="sub">Target</div>
+          </div>
+          <div class="sidebox">
+            <div class="t">Details</div>
+            <div class="kvs">
+              {% for k in ["sid", "exported_at", "schema_version", "generator", "target_directory", "language", "framework"] %}
+              {% if meta.get(k) is not none and meta.get(k) | string | trim %}
+              <div class="kvrow"><div class="k">{{ k | e }}</div><div class="v">{{ meta[k] | e }}</div></div>
+              {% endif %}
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="toolbar">
+        <div class="search"><input id="q" type="search" placeholder="搜索：规则名 / 文件 / 代码 / 分析…"/></div>
+        <button class="btn active" data-filter-sev="all">ALL</button>
+        <button class="btn" data-filter-sev="critical">CRITICAL</button>
+        <button class="btn" data-filter-sev="high">HIGH</button>
+        <button class="btn" data-filter-sev="medium">MEDIUM</button>
+        <button class="btn" data-filter-sev="low">LOW</button>
+        <button class="btn" data-filter-sev="unknown">UNKNOWN</button>
+        <button class="btn" id="expand">展开全部</button>
+        <button class="btn" id="collapse">收起全部</button>
+      </div>
+    </div>
+
+    <div class="table">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Severity</th>
+            <th>Finding</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for v in vulnerabilities %}
+          {% set sev = (v.severity or "unknown") | string | lower %}
+          {% if sev not in ["critical", "high", "medium", "low", "unknown"] %}{% set sev = "unknown" %}{% endif %}
+          {% set lang = (v.language or "") | string | trim %}
+          {% set cvi = (v.id or "") | string | trim %}
+          {% set loc = (v.location or "") | string | trim %}
+          {% set rule_name = (v.rule_name or "") | string | trim %}
+          <tr class="row" data-sev="{{ sev | e }}" data-text="{{ [rule_name, lang, loc, v.analysis | default(''), v.code_content | default('')] | join(' ') | lower | e }}">
+            <td colspan="3">
+            <div class="rowcard">
+              <div class="rc-idx">{{ loop.index }}</div>
+              <div class="rc-sev"><span class="tag sev-{{ sev }}"><span class="dot"></span>{{ sev | upper }}</span></div>
+              <div class="rc-main">
+                <div class="finding-top">
+                  <span class="finding-rule">{{ rule_name | e }}</span>
+                  <span class="finding-code">CVI-{{ cvi | e }}</span>
+                  {% if lang %}<span class="chip">{{ lang | e }}</span>{% endif %}
+                  {% if v.is_unconfirm %}<span class="chip chip-warn">UNCONFIRMED</span>{% endif %}
+                </div>
+                <div class="finding-sub">
+                  <span class="finding-loc">{{ loc | e }}</span>
+                </div>
+              </div>
+            </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div style="margin-top:14px">
+      {% for v in vulnerabilities %}
+      {% set sev = (v.severity or "unknown") | string | lower %}
+      {% if sev not in ["critical", "high", "medium", "low", "unknown"] %}{% set sev = "unknown" %}{% endif %}
+      {% set title = "{}. {} ({})".format(loop.index, v.rule_name | default("Unknown"), sev | upper) %}
+      {% set analysis = v.analysis or "" %}
+      {% set code_content = v.code_content or "" %}
+      {% set chain = v.chain %}
+      <details class="item" data-sev="{{ sev | e }}" data-text="{{ [title, v.location | default(''), analysis, code_content] | join(' ') | lower | e }}">
+        <summary>
+          <div class="sumline">
+            <span class="tag sev-{{ sev }}"><span class="dot"></span>{{ sev | upper }}</span>
+            <span class="main">{{ title | e }}</span>
+            <span class="muted">{{ (v.location or "") | e }}</span>
+            {% if v.is_unconfirm %}<span class="tag"><span class="dot" style="background:var(--warn)"></span>UNCONFIRMED</span>{% endif %}
+          </div>
+        </summary>
+        <div class="body">
+          <div class="grid">
+            <div class="panel"><div class="k">cvi_id</div><div class="v">{{ (v.id or "") | e }}</div></div>
+            <div class="panel"><div class="k">language</div><div class="v">{{ (v.language or "") | e }}</div></div>
+            <div class="panel"><div class="k">commit_author</div><div class="v">{{ (v.commit_author or "") | e }}</div></div>
+          </div>
+          {% if analysis %}
+          <div class="panel" style="margin-top:10px"><div class="k">analysis</div><pre><code>{{ analysis | e }}</code></pre></div>
+          {% endif %}
+          {% if code_content %}
+          <div class="panel" style="margin-top:10px"><div class="k">code_content</div><pre><code>{{ code_content | e }}</code></pre></div>
+          {% endif %}
+          {% if chain %}
+          <div class="panel" style="margin-top:10px"><div class="k">chain</div><pre><code>{{ chain | tojson(indent=2) | e }}</code></pre></div>
+          {% endif %}
+          <div class="panel" style="margin-top:10px"><div class="k">raw</div><pre><code>{{ v | tojson(indent=2) | e }}</code></pre></div>
+        </div>
+      </details>
+      {% endfor %}
+    </div>
+
+    <div class="footer">Generated at {{ (meta.exported_at or "") | e }}</div>
+  </div>
+  <script>{{ js }}</script>
+</body>
+</html>

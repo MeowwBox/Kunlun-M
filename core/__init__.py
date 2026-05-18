@@ -113,6 +113,7 @@ def main():
         parser_group_scan.add_argument('-l', '--log', dest='log', action='store', default=None, metavar='<log>', help='log name')
         parser_group_scan.add_argument('-lan', '--language', dest='language', action='store', default=None, help='set target language')
         parser_group_scan.add_argument('-b', '--blackpath', dest='black_path', action='store', default=None, help='black path list')
+        parser_group_scan.add_argument('-ht', '--html-template', dest='html_template', action='store', default=None, metavar='<template>', help='custom Jinja2 HTML template for report')
 
         # for api
         parser_group_scan.add_argument('-a', '--api', dest='api', action='store_true', default=False,
@@ -413,7 +414,7 @@ def main():
         s.save()
 
         try:
-            cli.start(args.target, args.format, args.output, args.special_rules, sid, args.language, args.tamper_name, args.black_path, args.unconfirm, args.unprecom)
+            cli.start(args.target, args.format, args.output, args.special_rules, sid, args.language, args.tamper_name, args.black_path, args.unconfirm, args.unprecom, template_path=args.html_template)
         except Exception as e:
             s.is_finished = 0
             s.finished_at = timezone.now()

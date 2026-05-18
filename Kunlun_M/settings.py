@@ -208,6 +208,9 @@ WEB_UPLOAD_MAX_MB = 50
 WEB_PACKAGE_RETENTION_DAYS = 7
 WEB_SCAN_MAX_CONCURRENCY = 1
 
+# HTML 报告自定义模板路径（为空则使用内置默认模板）
+HTML_TEMPLATE_PATH = ''
+
 # vendor vuln scan
 WITH_VENDOR = False
 ACTIVE_SCA_SYSTEM = ['osv', 'depsdev', 'ossindex']

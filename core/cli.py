@@ -187,7 +187,7 @@ def display_result(scan_id, is_ask=False):
         logger.info("[MainThread] Scan id {} has no Result.".format(scan_id))
 
 
-def start(target, formatter, output, special_rules, a_sid=None, language=None, tamper_name=None, black_path=None, is_unconfirm=False, is_unprecom=False):
+def start(target, formatter, output, special_rules, a_sid=None, language=None, tamper_name=None, black_path=None, is_unconfirm=False, is_unprecom=False, template_path=None):
     """
     Start CLI
     :param black_path: 
@@ -279,7 +279,7 @@ def start(target, formatter, output, special_rules, a_sid=None, language=None, t
         raise
 
     # 输出写入文件
-    write_to_file(target=target, sid=s_sid, output_format=formatter, filename=output)
+    write_to_file(target=target, sid=s_sid, output_format=formatter, filename=output, template_path=template_path)
 
 
 def show_info(type, key):
