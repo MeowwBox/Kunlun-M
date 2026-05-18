@@ -33,7 +33,7 @@ def get_vulns_from_source(language, vendor_name, vendor_version, sources=None):
             raise
 
         except:
-            logger.error("[Vendor Scan] EcoSystem {} get error.\n{}".format(source, traceback.format_exc()))
+            logger.error("[组件扫描] 生态系统 {} 获取出错。\n{}".format(source, traceback.format_exc()))
 
     return result
 

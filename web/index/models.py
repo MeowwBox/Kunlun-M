@@ -47,6 +47,11 @@ class Project(models.Model):
     project_hash = models.CharField(max_length=32)
 
 
+def _escape_like(value):
+    """转义 LIKE 查询中的特殊字符 % 和 _，防止用户输入被当作通配符"""
+    return value.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\')
+
+
 def search_project_by_name(project_name):
     """
         支持*语法的查询
@@ -57,19 +62,23 @@ def search_project_by_name(project_name):
         ps = Project.objects.all().order_by('-id')
         return ps
 
+    # 去除自定义 * 通配符后，转义 SQL LIKE 通配符 % 和 _
+    stripped = project_name.strip('*')
+    safe_name = _escape_like(stripped)
+
     if project_name.startswith('*'):
         if project_name.endswith('*'):
-            ps = Project.objects.filter(project_name__icontains=project_name.strip('*')).order_by('-id')
+            ps = Project.objects.filter(project_name__icontains=safe_name).order_by('-id')
 
         else:
-            ps = Project.objects.filter(project_name__iendswith=project_name.strip('*')).order_by('-id')
+            ps = Project.objects.filter(project_name__iendswith=safe_name).order_by('-id')
 
     else:
         if project_name.endswith('*'):
-            ps = Project.objects.filter(project_name__istartswith=project_name.strip('*')).order_by('-id')
+            ps = Project.objects.filter(project_name__istartswith=safe_name).order_by('-id')
 
         else:
-            ps = Project.objects.filter(project_name__iexact=project_name.strip('*')).order_by('-id')
+            ps = Project.objects.filter(project_name__iexact=safe_name).order_by('-id')
 
     return ps
 

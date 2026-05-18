@@ -111,6 +111,11 @@ def tasklogtail(req, task_id):
         offset = 0
 
     log_path = os.path.join(LOGS_PATH, "ScanTask_{}.log".format(task_id))
+
+    # 验证路径仍在 LOGS_PATH 目录内，防止路径遍历
+    if not _is_path_under_allowed_dir(log_path, LOGS_PATH):
+        return JsonResponse({"code": 400, "status": False, "message": "Bad request."})
+
     if not os.path.exists(log_path):
         return JsonResponse({"code": 200, "status": True, "message": {"offset": offset, "data": "", "eof": True}})
 
@@ -145,6 +150,10 @@ def debuglog(req, task_id):
 
     debuglog_filename = os.path.join(LOGS_PATH, 'ScanTask_{}.log'.format(task_id))
 
+    # 验证路径仍在 LOGS_PATH 目录内，防止路径遍历
+    if not _is_path_under_allowed_dir(debuglog_filename, LOGS_PATH):
+        return HttpResponse("Ooooops, bad request...", status=400)
+
     if not os.path.exists(debuglog_filename):
         return HttpResponse("Ooooops, Log file not found...")
 
@@ -169,6 +178,10 @@ def downloadlog(req, task_id):
         return redirect("dashboard:tasks_list")
 
     debuglog_filename = os.path.join(LOGS_PATH, 'ScanTask_{}.log'.format(task_id))
+
+    # 验证路径仍在 LOGS_PATH 目录内，防止路径遍历
+    if not _is_path_under_allowed_dir(debuglog_filename, LOGS_PATH):
+        return HttpResponse("Ooooops, bad request...", status=400)
 
     if not os.path.exists(debuglog_filename):
         return HttpResponse("Ooooops, Log file not found...")

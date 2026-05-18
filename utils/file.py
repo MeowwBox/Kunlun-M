@@ -70,34 +70,58 @@ def un_zip(target_path):
         logger.warn("[Pre][Unzip] Target file {} is't exist...pass".format(target_path))
         return False
 
-    zip_file = zipfile.ZipFile(target_path)
     target_file_path = target_path + "_files/"
+    abs_target = os.path.abspath(target_file_path)
 
     if os.path.isdir(target_file_path):
         logger.debug("[Pre][Unzip] Target files {} is exist...continue".format(target_file_path))
         return target_file_path
     else:
-        os.mkdir(target_file_path)
+        os.makedirs(target_file_path, exist_ok=True)
 
-    for names in zip_file.namelist():
-        zip_file.extract(names, target_file_path)
+    # 安全解压：逐个检查解压路径，防止 ZIP 路径遍历攻击（如 ../../etc/passwd）
+    with zipfile.ZipFile(target_path) as zip_file:
+        for info in zip_file.infolist():
+            name = info.filename
+            if not name:
+                continue
+            if name.endswith("/") or name.endswith("\\"):
+                # 自动创建目录结构
+                dir_path = os.path.abspath(os.path.join(abs_target, name))
+                if dir_path.startswith(abs_target + os.sep) or dir_path == abs_target:
+                    if not os.path.isdir(dir_path):
+                        os.makedirs(dir_path, exist_ok=True)
+                continue
 
-        # 对其中部分文件中为js的时候，将js代码格式化便于阅读
-        if names.endswith(".js"):
-            file_path = os.path.join(target_file_path, names)
-            file = codecs.open(file_path, 'r+', encoding='utf-8', errors='ignore')
-            file_content = file.read()
-            file.close()
+            joined = os.path.abspath(os.path.join(abs_target, name))
+            if not (joined == abs_target or joined.startswith(abs_target + os.sep)):
+                logger.warning("[Pre][Unzip] 跳过不安全路径: {}".format(name))
+                continue
 
-            new_file = codecs.open(file_path, 'w+', encoding='utf-8', errors='ignore')
+            parent = os.path.dirname(joined)
+            if not os.path.isdir(parent):
+                os.makedirs(parent, exist_ok=True)
 
-            opts = jsbeautifier.default_options()
-            opts.indent_size = 2
+            with zip_file.open(info) as src, open(joined, "wb") as dst:
+                while True:
+                    chunk = src.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    dst.write(chunk)
 
-            new_file.write(jsbeautifier.beautify(file_content, opts))
-            new_file.close()
+            # 对其中部分文件中为js的时候，将js代码格式化便于阅读
+            if name.endswith(".js"):
+                try:
+                    with codecs.open(joined, 'r+', encoding='utf-8', errors='ignore') as f:
+                        file_content = f.read()
 
-    zip_file.close()
+                    opts = jsbeautifier.default_options()
+                    opts.indent_size = 2
+
+                    with codecs.open(joined, 'w+', encoding='utf-8', errors='ignore') as new_file:
+                        new_file.write(jsbeautifier.beautify(file_content, opts))
+                except Exception as e:
+                    logger.warning("[Pre][Unzip] JS格式化失败 {}: {}".format(joined, str(e)))
 
     return target_file_path
 

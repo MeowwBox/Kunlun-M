@@ -1,5 +1,8 @@
 import json
 import requests
+import time
+
+from utils.log import logger
 
 __OSV_QUERY_URL = "https://api.osv.dev/v1/query"
 __OSV_QUERYBATCH_URL = "https://api.osv.dev/v1/querybatch"
@@ -13,6 +16,29 @@ __SEVERITY_DICT = {
     "HIGH": 7,
     "CRITICAL": 10,
 }
+
+# 默认超时时间（秒）
+_DEFAULT_TIMEOUT = 10
+# 重试次数
+_MAX_RETRIES = 2
+# 重试间隔（秒）
+_RETRY_DELAY = 1
+
+
+def _request_with_retry(method, url, **kwargs):
+    """带重试机制的 HTTP 请求封装，防止 API 调用失败导致扫描中断"""
+    kwargs.setdefault("timeout", _DEFAULT_TIMEOUT)
+    last_exc = None
+    for attempt in range(_MAX_RETRIES):
+        try:
+            return requests.request(method, url, **kwargs)
+        except requests.exceptions.RequestException as e:
+            last_exc = e
+            logger.warning("[OSV API] 请求失败 (第{}次): {} {}".format(attempt + 1, url, str(e)))
+            if attempt < _MAX_RETRIES - 1:
+                time.sleep(_RETRY_DELAY)
+    logger.error("[OSV API] 请求最终失败: {} {}".format(url, str(last_exc)))
+    raise last_exc
 
 
 def _osv_severity_to_score(vuln):
@@ -60,7 +86,7 @@ def _osv_to_vuln_dict(vuln, version):
     }
 
 
-def query_osv_batch(ecosystem, items, timeout=8, chunk_size=100):
+def query_osv_batch(ecosystem, items, timeout=_DEFAULT_TIMEOUT, chunk_size=100):
     result = {}
     items = [(n, v) for (n, v) in items if n and v]
     if not items:
@@ -77,13 +103,26 @@ def query_osv_batch(ecosystem, items, timeout=8, chunk_size=100):
             ]
         }
 
-        resp = requests.post(__OSV_QUERYBATCH_URL, json=body, timeout=timeout)
+        try:
+            resp = _request_with_retry("POST", __OSV_QUERYBATCH_URL, json=body, timeout=timeout)
+        except requests.exceptions.RequestException:
+            for k in chunk:
+                result[k] = []
+            continue
+
         if resp.status_code != 200:
             for k in chunk:
                 result[k] = []
             continue
 
-        data = json.loads(resp.content)
+        try:
+            data = json.loads(resp.content)
+        except (json.JSONDecodeError, ValueError):
+            logger.warning("[OSV API] 响应解析失败")
+            for k in chunk:
+                result[k] = []
+            continue
+
         results = data.get("results", [])
         for (name, version), one in zip(chunk, results):
             vulns = []
@@ -96,20 +135,28 @@ def query_osv_batch(ecosystem, items, timeout=8, chunk_size=100):
 
 
 def get_vulns_from_osv(ecosystem, package_name, version):
-    r = query_osv_batch(ecosystem, [(package_name, version)], timeout=8, chunk_size=1)
+    r = query_osv_batch(ecosystem, [(package_name, version)], timeout=_DEFAULT_TIMEOUT, chunk_size=1)
     return r.get((package_name, version), [])
 
 
-def query_osv_single(ecosystem, package_name, version, timeout=8):
+def query_osv_single(ecosystem, package_name, version, timeout=_DEFAULT_TIMEOUT):
     body = {"package": {"ecosystem": ecosystem, "name": package_name}, "version": version}
-    resp = requests.post(__OSV_QUERY_URL, json=body, timeout=timeout)
+
+    try:
+        resp = _request_with_retry("POST", __OSV_QUERY_URL, json=body, timeout=timeout)
+    except requests.exceptions.RequestException:
+        return []
+
     if resp.status_code != 200:
         return []
 
-    data = json.loads(resp.content)
+    try:
+        data = json.loads(resp.content)
+    except (json.JSONDecodeError, ValueError):
+        return []
+
     vulns = []
     for v in data.get("vulns", []) if isinstance(data, dict) else []:
         if isinstance(v, dict):
             vulns.append(_osv_to_vuln_dict(v, version))
     return vulns
-

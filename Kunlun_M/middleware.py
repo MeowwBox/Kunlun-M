@@ -9,8 +9,25 @@
 
 '''
 
+import time
 
 from web.index.models import ScanTask, ScanResultTask, Rules, Tampers, Project, VendorVulns
+
+# 内存缓存：存储统计查询结果，避免每次请求都查询数据库
+_cache = {}
+_CACHE_TTL = 30  # 缓存有效期 30 秒
+
+
+def _get_cached_count(key, query_func):
+    """获取缓存计数，过期则重新查询数据库"""
+    now = time.time()
+    if key in _cache:
+        value, expiry = _cache[key]
+        if now < expiry:
+            return value
+    value = query_func()
+    _cache[key] = (value, now + _CACHE_TTL)
+    return value
 
 
 class SDataMiddleware:
@@ -21,13 +38,20 @@ class SDataMiddleware:
         response = self.get_response(request)
 
         if request.user.is_authenticated:
-            request.session["rules_count"] = Rules.objects.count()
-            request.session["project_count"] = Project.objects.count()
-            request.session["tasks_count"] = ScanTask.objects.count()
-            request.session["tasks_finished_count"] = ScanTask.objects.filter(is_finished=1).count()
-            request.session["tampers_count"] = Tampers.objects.all().count()
-            request.session["vendor_vuls_count"] = VendorVulns.objects.count()
-
-            request.session["vul_count"] = ScanResultTask.objects.filter(is_active=1).count()
+            # 使用缓存查询统计计数，减少数据库访问次数
+            request.session["rules_count"] = _get_cached_count(
+                "rules_count", lambda: Rules.objects.count())
+            request.session["project_count"] = _get_cached_count(
+                "project_count", lambda: Project.objects.count())
+            request.session["tasks_count"] = _get_cached_count(
+                "tasks_count", lambda: ScanTask.objects.count())
+            request.session["tasks_finished_count"] = _get_cached_count(
+                "tasks_finished_count", lambda: ScanTask.objects.filter(is_finished=1).count())
+            request.session["tampers_count"] = _get_cached_count(
+                "tampers_count", lambda: Tampers.objects.all().count())
+            request.session["vendor_vuls_count"] = _get_cached_count(
+                "vendor_vuls_count", lambda: VendorVulns.objects.count())
+            request.session["vul_count"] = _get_cached_count(
+                "vul_count", lambda: ScanResultTask.objects.filter(is_active=1).count())
 
         return response

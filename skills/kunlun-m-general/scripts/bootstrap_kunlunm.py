@@ -35,8 +35,37 @@ def _download(url: str, out_path: str) -> None:
 
 
 def _extract_zip(zip_path: str, dst_dir: str) -> str:
+    # 安全解压：逐个检查解压路径，防止 ZIP 路径遍历攻击
+    abs_dst = os.path.abspath(dst_dir)
+    os.makedirs(abs_dst, exist_ok=True)
+
     with zipfile.ZipFile(zip_path) as zf:
-        zf.extractall(dst_dir)
+        for info in zf.infolist():
+            name = info.filename
+            if not name:
+                continue
+            if name.endswith("/") or name.endswith("\\"):
+                dir_path = os.path.abspath(os.path.join(abs_dst, name))
+                if dir_path.startswith(abs_dst + os.sep) or dir_path == abs_dst:
+                    if not os.path.isdir(dir_path):
+                        os.makedirs(dir_path, exist_ok=True)
+                continue
+
+            joined = os.path.abspath(os.path.join(abs_dst, name))
+            if not (joined == abs_dst or joined.startswith(abs_dst + os.sep)):
+                raise ValueError("Unsafe zip entry: {}".format(name))
+
+            parent = os.path.dirname(joined)
+            if not os.path.isdir(parent):
+                os.makedirs(parent, exist_ok=True)
+
+            with zf.open(info) as src, open(joined, "wb") as dst:
+                while True:
+                    chunk = src.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    dst.write(chunk)
+
         names = [n for n in zf.namelist() if n.endswith("/") or n.endswith("\\")]
         top = None
         for n in names:
