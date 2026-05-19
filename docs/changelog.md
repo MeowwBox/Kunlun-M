@@ -1,4 +1,16 @@
 ## 更新日志
+- 2026-05-19
+  - KunLun-M 2.8.2
+  - 新增 Rule 类热重载支持
+  - 新增自定义 HTML 报告模板功能（基于 Jinja2）
+  - 重构 engine.py，拆分为 filters/matcher/scanner/rule_generator 四个模块
+  - 增强 VulnerabilityResult 数据模型，消除重复代码
+  - 解耦 utils/status.py 与 web 层，采用依赖注入方式
+  - 安全加固：uploadlog 与 API token 检查、错误处理、性能与日志统一
+  - 修复 settings_ci 中缺失的 HTML_TEMPLATE_PATH 配置项
+  - 恢复 core/ 模块中的英文日志消息
+  - 新增英文 README 并设为默认，中文移至 README.zh.md
+  - 移除 README 中的社区工具部分
 - 2026-05-08
   - KunLun-M 2.8.1
   - CLI 扫描结果导出增强
