@@ -17,6 +17,8 @@ from .matcher import VulnerabilityMatcher as Core
 from .filters import VulnerabilityFilter
 from .rule_generator import init_match_rule, NewCore
 
+VulnerabilityMatcher = Core
+
 __all__ = [
     'scan', 'scan_single', 'Running', 'score2level', 'SingleRule',
     'Core', 'VulnerabilityMatcher', 'VulnerabilityFilter',

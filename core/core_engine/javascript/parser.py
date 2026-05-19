@@ -1412,11 +1412,11 @@ def analysis_params(expression, back_node, vul_function, vul_lineno, file_path, 
     if isexternal:
         scan_chain = ['start']
         param_list = [check_param(expression, vul_lineno=vul_lineno)]
-
-        if type(ast_object.get_nodes(file_path, vul_lineno=vul_lineno, lan='javascript')) is list:
-            back_node = ast_object.get_nodes(file_path, vul_lineno=vul_lineno, lan='javascript')
+        _nodes = ast_object.get_nodes(file_path, vul_lineno=vul_lineno, lan='javascript')
+        if (not _nodes) or type(_nodes) is list:
+            back_node = _nodes if type(_nodes) is list else []
         else:
-            back_node = ast_object.get_nodes(file_path, vul_lineno=vul_lineno, lan='javascript').body
+            back_node = getattr(_nodes, 'body', []) or []
 
     elif is_function:
         param_list = [check_param(expression, vul_lineno=vul_lineno)]
@@ -1668,11 +1668,11 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
         scan_results = []
         is_repair_functions = repair_functions
         is_controlled_params = controlled_params.copy()
-
-        if type(ast_object.get_nodes(file_path)) is list:
+        _nodes = ast_object.get_nodes(file_path)
+        if (not _nodes) or type(_nodes) is list:
             all_nodes = []
         else:
-            all_nodes = ast_object.get_nodes(file_path).body
+            all_nodes = getattr(_nodes, 'body', []) or []
 
         for func in sensitive_func:  # 循环判断代码中是否存在敏感函数，若存在，递归判断参数是否可控;对文件内容循环判断多次
             back_node = []

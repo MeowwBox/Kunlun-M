@@ -15,6 +15,7 @@ beautifulsoup4>=4.12.3
 # Output & utilities
 colorlog>=6.8.2
 prettytable>=3.10.0
+Jinja2>=3.1.4
 portalocker>=2.8.2
 requests>=2.32.3
 rarfile>=4.2

@@ -698,6 +698,7 @@ def write_to_file(target, sid, output_format='', filename=None, template_path=No
     :param filename: filename to save
     :return:
     """
+    _base_cwd = os.getcwd()
     if not filename:
         logger.info('[EXPORT] No filename given, save into default path(result/).')
 
@@ -708,6 +709,13 @@ def write_to_file(target, sid, output_format='', filename=None, template_path=No
             filename = targetlist[-1]
         filename = os.path.join(DEFAULT_RESULT_PATH, filename + "." + output_format)
     #     return False
+    if not os.path.isabs(filename):
+        filename = os.path.abspath(os.path.join(_base_cwd, filename))
+    if template_path and (not os.path.isabs(template_path)):
+        template_path = os.path.abspath(os.path.join(_base_cwd, template_path))
+    _parent = os.path.dirname(filename)
+    if _parent:
+        os.makedirs(_parent, exist_ok=True)
 
     scan_data_file = os.path.join(RUNNING_PATH, '{sid}_data'.format(sid=sid))
 

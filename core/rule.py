@@ -233,8 +233,13 @@ class RuleCheck:
             self.rule_dict[lan] = list_parse(rule_lan_path)
 
     def load_rules(self, ruleclass):
-
-        main_function_content = inspect.getsource(ruleclass.main)
+        main_function_content = ""
+        _main = getattr(ruleclass, "main", None)
+        if callable(_main):
+            try:
+                main_function_content = inspect.getsource(_main)
+            except Exception:
+                main_function_content = ""
         match_name = ""
         black_list = ""
         unmatch = ""
@@ -280,6 +285,9 @@ class RuleCheck:
                 return False
             else:
                 logger.warning("[INIT][Rule Check] whether load new {} from Rule File(Y/N):".format(config))
+                if (not hasattr(sys, "stdin")) or (not sys.stdin) or (not sys.stdin.isatty()):
+                    setattr(nowrule, config, ruleconfig_content)
+                    return True
                 if input().lower() != 'n':
                     setattr(nowrule, config, ruleconfig_content)
                     return True
@@ -301,7 +309,13 @@ class RuleCheck:
                 is_changed = self.check_and_update_rule_database(ruleconfig_content, nowrule, config1) or is_changed
 
             else:
-                main_function_content = inspect.getsource(ruleclass.main)
+                main_function_content = ""
+                _main = getattr(ruleclass, "main", None)
+                if callable(_main):
+                    try:
+                        main_function_content = inspect.getsource(_main)
+                    except Exception:
+                        main_function_content = ""
                 config1 = "main_function"
 
                 is_changed = self.check_and_update_rule_database(main_function_content, nowrule, config1) or is_changed

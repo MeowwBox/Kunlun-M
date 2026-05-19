@@ -41,7 +41,7 @@ from core.console import KunlunInterpreter
 from web.index.models import ScanTask, check_and_new_project_id
 
 # 注册 scan_id 提供者回调，解耦 utils/status.py 对 web 层的直接依赖
-set_scan_id_provider(lambda: ScanTask.objects.order_by("-id").first().id)
+set_scan_id_provider(lambda: (lambda o: o.id if o else -1)(ScanTask.objects.order_by("-id").first()))
 
 from Kunlun_M.settings import LOGS_PATH, IS_OPEN_REMOTE_SERVER, REMOTE_URL
 

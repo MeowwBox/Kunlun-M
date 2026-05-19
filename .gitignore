@@ -76,6 +76,7 @@ scheduler/reports/
 # venv
 cobra-venv/*
 venv/*
+.venv/*
 
 # phply
 parsetab.py

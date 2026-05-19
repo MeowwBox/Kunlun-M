@@ -508,8 +508,14 @@ class FileParseAll:
                     name.remove(n)
 
             for n in name:
-                matchs_tmp = [match.replace("=padding=", n) for match in matchs]
-                unmatchs_tmp = [unmatch.replace("=padding=", n) for unmatch in unmatchs]
+                n_str = n
+                if not isinstance(n_str, str):
+                    if isinstance(n_str, tuple) and len(n_str) > 0 and isinstance(n_str[-1], str):
+                        n_str = n_str[-1]
+                    else:
+                        n_str = str(n_str)
+                matchs_tmp = [match.replace("=padding=", n_str) for match in matchs]
+                unmatchs_tmp = [unmatch.replace("=padding=", n_str) for unmatch in unmatchs]
                 
                 re_flag = True
                 line_number = 0
@@ -525,8 +531,8 @@ class FileParseAll:
                 if re_flag:
                     # 例如CVI2100中，没有match，只要不含unmatch即为漏洞的，没有行数
                     if matchs_tmp == []:
-                        result.append(tuple([filepath, str(line_number), 'name:<'+n+'>']))
-                        logger.debug('[DEBUG] [MATCH_REGEX_RETURN_REGEX] success match:{0} in line {1}'.format(n, str(line_number)))
+                        result.append(tuple([filepath, str(line_number), 'name:<'+n_str+'>']))
+                        logger.debug('[DEBUG] [MATCH_REGEX_RETURN_REGEX] success match:{0} in line {1}'.format(n_str, str(line_number)))
                         continue
 
                     # 正常的match，但条件为或
@@ -536,7 +542,7 @@ class FileParseAll:
                         if result_list_tmp is not None and result_list_tmp != []:
                             for result_tmp in result_list_tmp:
                                 result.append(tuple([filepath, str(line_number), 'name:<'+result_tmp[0]+'>, point:<'+result_tmp[1]+'>']))
-                                logger.debug('[DEBUG] [MATCH_REGEX_RETURN_REGEX] success match:{0} in line {1}'.format(n, str(line_number)))
+                                logger.debug('[DEBUG] [MATCH_REGEX_RETURN_REGEX] success match:{0} in line {1}'.format(n_str, str(line_number)))
                         else:
                             re_flag = False
 
