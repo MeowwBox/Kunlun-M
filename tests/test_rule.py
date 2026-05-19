@@ -1,12 +1,13 @@
 import os
-from core.rule import Rule
 
-# for django
+# for django (必须在 import core 之前)
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'Kunlun_M.settings')
 
 import django
 
 django.setup()
+
+from core.rule import Rule
 
 def test_vulnerabilities():
     vulnerabilities = Rule().vulnerabilities

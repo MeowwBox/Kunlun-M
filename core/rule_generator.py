@@ -37,32 +37,6 @@ def init_match_rule(data, lan='php'):
         return js_init_match_rule(data)
 
 
-def auto_parse_match(single_match, svid, language):
-    mr = VulnerabilityResult()
-    # grep result
-    #
-    # Rules
-    #
-    # (u'D:\\program\\core-w\\tests\\vulnerabilities/v.php', 10, 'echo($callback . ";");\n')
-    try:
-        mr.line_number = single_match[1]
-        mr.code_content = single_match[2]
-        mr.file_path = single_match[0]
-    except Exception:
-        logger.warning('match line parse exception')
-        mr.file_path = ''
-        mr.code_content = ''
-        mr.line_number = 0
-
-    # vulnerability information
-    mr.rule_name = 'Auto rule'
-    mr.id = svid
-    mr.language = language
-    mr.commit_author = 'Kunlun-M'
-
-    return mr
-
-
 def NewCore(old_single_rule, target_directory, new_rules, files, count=0, languages=None, tamper_name=None,
             is_unconfirm=False, newcore_function_list=[]):
     """
@@ -155,7 +129,10 @@ def NewCore(old_single_rule, target_directory, new_rules, files, count=0, langua
         if origin_vulnerability == ():
             logger.debug(' > continue...')
             continue
-        vulnerability = auto_parse_match(origin_vulnerability, svid, language)
+        vulnerability = VulnerabilityResult.from_match(origin_vulnerability, svid=svid,
+                                                        language=language,
+                                                        rule_name='Auto rule',
+                                                        author='Kunlun-M')
         if vulnerability is None:
             logger.debug('Not vulnerability, continue...')
             continue

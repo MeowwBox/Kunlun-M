@@ -101,19 +101,115 @@ VENDOR_CVIID = 9999
 
 
 class VulnerabilityResult:
+    """扫描结果数据模型
+
+    表示一次规则匹配命中的漏洞结果。
+
+    Attributes:
+        id: 规则编号（对应 ScanResultTask.cvi_id）
+        file_path: 文件绝对路径
+        line_number: 行号
+        code_content: 命中的代码片段（可能为 bytes 或 str）
+        rule_name: 漏洞名称（如 "SSRF"、"Reflected XSS"）
+        language: 目标语言（php/javascript/solidity/chromeext）
+        analysis: 分析结论/原因（matcher 返回的 reason，对应 ScanResultTask.result_type）
+        chain: 污点传播链，list[tuple] 格式 [(node_type, node_content, node_path, node_lineno), ...]
+               空结果时为空列表 []
+        commit_author: 规则作者
+        is_unconfirm: 是否未确认（默认从 analysis 自动推断，也可手动设置）
+    """
+
     def __init__(self):
         self.id = ''
         self.file_path = None
         self.analysis = ''
-        self.chain = ""
-
+        self.chain = []           # 默认空列表
         self.rule_name = ''
         self.language = ''
         self.line_number = None
         self.code_content = None
         self.commit_author = 'Unknown'
+        self.is_unconfirm = None  # None 表示未手动设置（延迟推断）
+
+    @property
+    def is_unconfirmed(self):
+        """推断是否未确认漏洞。优先使用手动设置的值，否则从 analysis 文本判断。"""
+        if self.is_unconfirm is not None:
+            return self.is_unconfirm
+        if self.analysis:
+            return "unconfirmed" in str(self.analysis).lower()
+        return False
+
+    @classmethod
+    def from_match(cls, single_match, svid, language, rule_name='', author='Unknown'):
+        """工厂方法：从正则匹配元组构造实例
+
+        消除 scanner.parse_match 和 rule_generator.auto_parse_match 的重复逻辑。
+
+        Args:
+            single_match: 正则匹配结果元组 (file_path, line_number, code_content)
+            svid: 规则编号
+            language: 目标语言
+            rule_name: 漏洞名称（默认空字符串）
+            author: 作者（默认 'Unknown'）
+
+        Returns:
+            VulnerabilityResult 实例
+        """
+        mr = cls()
+        try:
+            mr.line_number = single_match[1]
+            mr.code_content = single_match[2]
+            mr.file_path = single_match[0]
+        except Exception:
+            from utils.log import logger
+            logger.warning('[ENGINE] match line parse exception')
+            mr.file_path = ''
+            mr.code_content = ''
+            mr.line_number = 0
+        mr.rule_name = rule_name
+        mr.id = svid
+        mr.language = language
+        mr.commit_author = author
+        return mr
+
+    def to_db_params(self, target_directory=''):
+        """生成保存到 ScanResultTask 所需的参数字典
+
+        统一字段映射，消除 scanner.py 中散落的手写映射。
+
+        Args:
+            target_directory: 项目根目录（用于计算相对路径 trigger）
+
+        Returns:
+            dict: 包含 cvi_id, language, vulfile_path, source_code, result_type, is_unconfirm
+        """
+        try:
+            code = self.code_content[:50].strip() if self.code_content else ''
+        except AttributeError:
+            code = str(self.code_content)[:50].strip() if self.code_content else ''
+
+        # 处理 bytes
+        if isinstance(code, bytes):
+            try:
+                code = code.decode('utf-8')[:100].strip()
+            except (UnicodeDecodeError, AttributeError):
+                code = str(code)[:100].strip()
+
+        trigger = '{}:{}'.format(
+            self.file_path.replace(target_directory, '') if target_directory and self.file_path else (self.file_path or ''),
+            self.line_number or 0
+        )
+
+        return {
+            'cvi_id': str(self.id),
+            'language': self.language,
+            'vulfile_path': trigger,
+            'source_code': code.replace('\r\n', ' ').replace('\n', ' '),
+            'result_type': self.analysis,
+            'is_unconfirm': self.is_unconfirmed,
+        }
 
     def convert_to_dict(self):
-        _dict = {}
-        _dict.update(self.__dict__)
-        return _dict
+        """转换为字典（保持向后兼容）"""
+        return dict(self.__dict__)

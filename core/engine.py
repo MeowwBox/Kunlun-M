@@ -15,10 +15,10 @@
 from .scanner import scan, scan_single, Running, score2level, SingleRule
 from .matcher import VulnerabilityMatcher as Core
 from .filters import VulnerabilityFilter
-from .rule_generator import init_match_rule, auto_parse_match, NewCore
+from .rule_generator import init_match_rule, NewCore
 
 __all__ = [
     'scan', 'scan_single', 'Running', 'score2level', 'SingleRule',
     'Core', 'VulnerabilityMatcher', 'VulnerabilityFilter',
-    'init_match_rule', 'auto_parse_match', 'NewCore',
+    'init_match_rule', 'NewCore',
 ]

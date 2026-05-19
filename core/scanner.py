@@ -209,24 +209,16 @@ def scan(target_directory, a_sid=None, s_sid=None, special_rules=None, language=
     trigger_rules = []
     for idx, x in enumerate(find_vulnerabilities):
 
-        trigger = '{fp}:{ln}'.format(fp=x.file_path.replace(target_directory, ""), ln=x.line_number)
+        db_params = x.to_db_params(target_directory=target_directory)
+        trigger = db_params['vulfile_path']
+        code_content = db_params['source_code']
         commit = u'@{author}'.format(author=x.commit_author)
-        try:
-            code_content = x.code_content[:50].strip()
-        except AttributeError as e:
-            code_content = x.code_content.decode('utf-8')[:100].strip()
         row = [idx + 1, x.id, x.rule_name, x.language, trigger, commit,
-               code_content.replace('\r\n', ' ').replace('\n', ' '), x.analysis]
+               code_content, x.analysis]
         row2 = [idx + 1, x.chain]
 
-        is_unconfirm_result = False
-        if "unconfirmed" in x.analysis.lower():
-            is_unconfirm_result = True
-
         # save to database
-        sr = check_update_or_new_scanresult(scan_task_id=a_sid, cvi_id=x.id, language=x.language,
-                                            vulfile_path=trigger, source_code=code_content.replace('\r\n', ' ').replace('\n', ' '),
-                                            result_type=x.analysis, is_unconfirm=is_unconfirm_result, is_active=True)
+        sr = check_update_or_new_scanresult(scan_task_id=a_sid, is_active=True, **db_params)
 
         if sr:
             for chain in x.chain:
@@ -471,7 +463,10 @@ class SingleRule(object):
             if origin_vulnerability == ():
                 logger.debug(' > continue...')
                 continue
-            vulnerability = self.parse_match(origin_vulnerability)
+            vulnerability = VulnerabilityResult.from_match(origin_vulnerability, svid=self.sr.svid,
+                                                            language=self.sr.language,
+                                                            rule_name=self.sr.vulnerability,
+                                                            author=self.sr.author)
             if vulnerability is None:
                 logger.debug('Not vulnerability, continue...')
                 continue
@@ -521,28 +516,3 @@ class SingleRule(object):
         logger.debug('[CVI-{cvi}] {vn} Vulnerabilities: {count}'.format(cvi=self.sr.svid, vn=self.sr.vulnerability,
                                                                         count=len(self.rule_vulnerabilities)))
         return self.rule_vulnerabilities
-
-    def parse_match(self, single_match):
-        mr = VulnerabilityResult()
-        # grep result
-        #
-        # Rules
-        #
-        # (u'D:\\program\\core-w\\tests\\vulnerabilities/v.php', 10, 'echo($callback . ";");\n')
-        try:
-            mr.line_number = single_match[1]
-            mr.code_content = single_match[2]
-            mr.file_path = single_match[0]
-        except Exception:
-            logger.warning('[ENGINE] match line parse exception')
-            mr.file_path = ''
-            mr.code_content = ''
-            mr.line_number = 0
-
-        # vulnerability information
-        mr.rule_name = self.sr.vulnerability
-        mr.id = self.sr.svid
-        mr.language = self.sr.language
-        mr.commit_author = self.sr.author
-
-        return mr
