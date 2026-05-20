@@ -22,7 +22,7 @@ class CVI_6002():
         self.language = "java"
         self.author = "KunLun-M"
         self.vulnerability = "Reflected XSS"
-        self.description = "直接将用户输入（如getParameter获取的参数）输出到响应中，未进行编码转义，可能导致反射型XSS漏洞。"
+        self.description = "直接将用户输入（如getParameter获取的参数）输出到响应中，未进行编码转义，可能导致反射型XSS漏洞。更精确的追踪请参见CVI-6022。"
         self.level = 6
 
         # status

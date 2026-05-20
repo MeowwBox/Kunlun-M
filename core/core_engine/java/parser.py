@@ -205,6 +205,178 @@ def _find_annotated_param_names(method_node):
     return annotated_params
 
 
+def _is_passthrough_method(method_node, param_name, repair_functions, class_methods=None, depth=0, max_depth=3):
+    """
+    检查方法的某个参数是否被直接透传返回（或经安全方法处理后返回）
+    
+    透传条件：
+    1. 方法体有 ReturnStatement，返回的是该参数或其方法调用
+    2. 返回链上没有经过修复函数
+    
+    :param method_node: 方法 AST 节点
+    :param param_name: 参数名
+    :param repair_functions: 修复函数列表
+    :param class_methods: 同类其他方法的 dict（用于递归分析）
+    :param depth: 当前递归深度
+    :param max_depth: 最大递归深度
+    :return: True 表示参数被透传
+    """
+    if depth >= max_depth or not method_node or not method_node.body:
+        return False
+
+    for stmt in method_node.body:
+        if isinstance(stmt, javalang.tree.ReturnStatement) and stmt.expression:
+            expr = stmt.expression
+
+            # 直接返回参数引用
+            if isinstance(expr, javalang.tree.MemberReference):
+                if expr.member == param_name:
+                    return True
+
+            # 返回参数的方法调用 (如 s.trim(), s.toLowerCase())
+            if isinstance(expr, javalang.tree.MethodInvocation):
+                # 检查是否是修复函数
+                if expr.member in repair_functions:
+                    return False
+
+                # qualifier 是参数名
+                if isinstance(expr.qualifier, str) and expr.qualifier == param_name:
+                    return True
+                if isinstance(expr.qualifier, javalang.tree.MemberReference):
+                    if expr.qualifier.member == param_name:
+                        return True
+
+                # 递归检查：返回的是另一个同类方法调用
+                # 如 return otherMethod(s) → 检查 otherMethod
+                if class_methods and expr.member in class_methods and depth + 1 < max_depth:
+                    # 检查参数是否是传入的 param_name
+                    arg_is_param = False
+                    if expr.arguments:
+                        for arg in expr.arguments:
+                            if isinstance(arg, javalang.tree.MemberReference) and arg.member == param_name:
+                                arg_is_param = True
+                    if arg_is_param:
+                        target_method = class_methods[expr.member]
+                        if _is_passthrough_method(target_method, param_name, repair_functions,
+                                                  class_methods, depth + 1, max_depth):
+                            return True
+
+    return False
+
+
+def _build_class_method_map(tree):
+    """从 AST 树中构建 类名→方法 的映射"""
+    class_methods = {}
+    for path, node in tree.filter(javalang.tree.MethodDeclaration):
+        class_methods[node.name] = node
+    return class_methods
+
+
+def _propagate_controllable_across_calls(method_node, tree, controllable, repair_functions, max_depth=3):
+    """
+    跨方法污点传播：分析方法体中的方法调用赋值，追踪可控变量传递
+    
+    处理模式：String data = someMethod(input) where input is controllable
+    如果 someMethod 透传了参数，则 data 也标记为可控
+    
+    :param method_node: 当前方法 AST 节点
+    :param tree: 整个文件的 AST 树（用于查找被调方法）
+    :param controllable: 当前可控变量集合（会被原地修改）
+    :param repair_functions: 修复函数列表
+    :param max_depth: 传播递归深度上限
+    """
+    if not method_node.body:
+        return
+
+    # 构建同文件的方法映射
+    class_methods = _build_class_method_map(tree)
+
+    # 多轮传播，直到不再有新变量加入
+    changed = True
+    rounds = 0
+    while changed and rounds < max_depth:
+        changed = False
+        rounds += 1
+
+        for stmt in method_node.body:
+            if not isinstance(stmt, javalang.tree.LocalVariableDeclaration):
+                continue
+
+            for declarator in stmt.declarators:
+                if not declarator.initializer:
+                    continue
+
+                init = declarator.initializer
+                target_var = declarator.name
+
+                # 已经是可控的，跳过
+                if target_var in controllable:
+                    continue
+
+                # 模式1: String x = someMethod(y) where y is controllable
+                if isinstance(init, javalang.tree.MethodInvocation):
+                    # 检查参数中是否有可控变量
+                    call_args_controllable = False
+                    if init.arguments:
+                        for arg in init.arguments:
+                            refs = _collect_member_references(arg)
+                            if set(refs) & controllable:
+                                call_args_controllable = True
+                                break
+
+                    if call_args_controllable:
+                        # 检查被调方法是否是透传
+                        called_method_name = init.member
+                        if called_method_name in class_methods:
+                            called_method = class_methods[called_method_name]
+                            # 找到被传的可控参数名
+                            if called_method.parameters:
+                                # 简单情况：第一个参数
+                                for arg in init.arguments:
+                                    refs = _collect_member_references(arg)
+                                    for ref in refs:
+                                        if ref in controllable:
+                                            if _is_passthrough_method(called_method, called_method.parameters[0].name,
+                                                                     repair_functions, class_methods, 0, max_depth):
+                                                controllable.add(target_var)
+                                                logger.debug("[AST][Java] Cross-method propagation: {} → {} via {}()".format(
+                                                    ref, target_var, called_method_name))
+                                                changed = True
+                                                break
+                                    if target_var in controllable:
+                                        break
+
+                # 模式2: String x = y + z (字符串拼接), 其中 y 或 z 可控
+                elif isinstance(init, javalang.tree.BinaryOperation):
+                    refs = _collect_member_references(init)
+                    if set(refs) & controllable:
+                        controllable.add(target_var)
+                        logger.debug("[AST][Java] Propagation via concatenation: {} is controllable".format(target_var))
+                        changed = True
+
+                # 模式3: String x = (String) y (类型转换)
+                elif isinstance(init, javalang.tree.Cast):
+                    refs = _collect_member_references(init.expression)
+                    if set(refs) & controllable:
+                        controllable.add(target_var)
+                        changed = True
+
+                # 模式4: String x = y.toString() / String.valueOf(y)
+                elif isinstance(init, javalang.tree.MethodInvocation):
+                    if init.member in ('toString', 'valueOf', 'format', 'String'):
+                        refs = []
+                        if init.qualifier and isinstance(init.qualifier, str):
+                            if init.qualifier in controllable:
+                                controllable.add(target_var)
+                                changed = True
+                        if init.arguments:
+                            for arg in init.arguments:
+                                refs.extend(_collect_member_references(arg))
+                        if set(refs) & controllable:
+                            controllable.add(target_var)
+                            changed = True
+
+
 def _has_repair_function(expr, repair_functions):
     """检查表达式中是否调用了修复函数"""
     if expr is None or not repair_functions:
@@ -377,6 +549,9 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
         # 加入外部指定的可控参数
         if controlled_params:
             controllable.update(controlled_params)
+
+        # 跨方法污点传播
+        _propagate_controllable_across_calls(method, _nodes, controllable, repair_functions)
 
         logger.debug("[AST][Java] Controllable vars: {}".format(controllable))
 

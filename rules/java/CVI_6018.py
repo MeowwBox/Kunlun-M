@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """
-    Java Insecure Reflection Rule
+    Java Insecure Reflection Rule (AST-enhanced)
     ~~~~
     :author:    KunLun-M
     :homepage:  https://github.com/LoRexxar/Kunlun-M
@@ -22,15 +22,15 @@ class CVI_6018():
         self.language = "java"
         self.author = "KunLun-M"
         self.vulnerability = "Insecure Reflection"
-        self.description = "使用了Class.forName、getDeclaredMethod、getMethod、invoke等反射调用，如果反射的目标类或方法名可控，可能导致远程代码执行。"
+        self.description = "Class.forName反射加载类，如果类名可控，可能导致任意类加载和远程代码执行。getDeclaredMethod/getMethod如果方法名可控同样存在风险。"
         self.level = 7
 
         # status
         self.status = True
 
         # 部分配置
-        self.match_mode = "only-regex"
-        self.match = [r"Class\.forName"]
+        self.match_mode = "function-param-regex"
+        self.match = "forName|getDeclaredMethod|getMethod"
 
         # for solidity
         self.match_name = None
@@ -42,7 +42,7 @@ class CVI_6018():
         # for regex
         self.unmatch = []
 
-        self.vul_function = None
+        self.vul_function = ["forName", "getDeclaredMethod", "getMethod"]
 
     def main(self, regex_string):
         pass
