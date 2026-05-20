@@ -168,7 +168,96 @@ def _collect_controllable_vars(method_node, request_var_names):
                             logger.debug("[AST][Java] Controllable var: {} from {}.get()".format(
                                 declarator.name, init.qualifier))
 
+    # 对象级污点传播：多轮传播直到稳定
+    # 处理: obj = new SomeClass(controllable_arg) → obj 可控
+    # 处理: obj = controllable.method() → obj 可控
+    # 处理: obj = other.method(controllable_arg) → obj 可控
+    _propagate_object_taint(method_node, controllable)
+
     return controllable
+
+
+def _propagate_object_taint(method_node, controllable, max_rounds=5):
+    """
+    对象级污点传播：追踪 new SomeClass(controllable) / controllable.method() 等赋值
+
+    :param method_node: 方法 AST 节点
+    :param controllable: 可控变量集合（会被原地修改）
+    :param max_rounds: 最大传播轮数
+    """
+    if not method_node.body:
+        return
+
+    changed = True
+    rounds = 0
+    while changed and rounds < max_rounds:
+        changed = False
+        rounds += 1
+
+        for stmt in method_node.body:
+            if not isinstance(stmt, javalang.tree.LocalVariableDeclaration):
+                continue
+
+            for declarator in stmt.declarators:
+                if not declarator.initializer or declarator.name in controllable:
+                    continue
+
+                init = declarator.initializer
+                target_var = declarator.name
+
+                # 模式A: obj = new SomeClass(controllable_arg)
+                # 如: ObjectInputStream ois = new ObjectInputStream(bytes)
+                # 如: URL url = new URL(userInput)
+                if isinstance(init, javalang.tree.ClassCreator):
+                    if init.arguments:
+                        for arg in init.arguments:
+                            refs = _collect_member_references(arg)
+                            if set(refs) & controllable:
+                                controllable.add(target_var)
+                                logger.debug("[AST][Java] Object taint propagation: {} = new {}(...) [from {}]".format(
+                                    target_var, init.type.name if init.type else "?", set(refs) & controllable))
+                                changed = True
+                                break
+
+                # 模式B: x = obj.method(controllable_arg) 或 x = controllable.method()
+                elif isinstance(init, javalang.tree.MethodInvocation):
+                    # B1: 方法参数包含可控变量
+                    if init.arguments:
+                        refs = set()
+                        for arg in init.arguments:
+                            refs.update(_collect_member_references(arg))
+                        if refs & controllable:
+                            controllable.add(target_var)
+                            logger.debug("[AST][Java] Object taint propagation: {} from {}.{}() args".format(
+                                target_var, init.qualifier or "?", init.member))
+                            changed = True
+
+                    # B2: qualifier 可控 (如 targetUrl.openConnection())
+                    if not changed and isinstance(init.qualifier, str) and init.qualifier in controllable:
+                        controllable.add(target_var)
+                        logger.debug("[AST][Java] Object taint propagation: {} = {}.{})() [qualifier]".format(
+                            target_var, init.qualifier, init.member))
+                        changed = True
+
+                # 模式C: 字符串拼接 x = y + z
+                elif isinstance(init, javalang.tree.BinaryOperation):
+                    refs = _collect_member_references(init)
+                    if set(refs) & controllable:
+                        controllable.add(target_var)
+                        changed = True
+
+                # 模式D: 类型转换 x = (Type) y
+                elif isinstance(init, javalang.tree.Cast):
+                    refs = _collect_member_references(init.expression)
+                    if set(refs) & controllable:
+                        controllable.add(target_var)
+                        changed = True
+
+                # 模式E: 赋值语句 x = y
+                elif isinstance(init, javalang.tree.MemberReference):
+                    if init.member in controllable:
+                        controllable.add(target_var)
+                        changed = True
 
 
 def _find_request_var_names(method_node):
@@ -405,9 +494,28 @@ def _has_repair_function(expr, repair_functions):
     return False
 
 
-def _analyze_call(sink_name, arguments, lineno, controllable, repair_functions, scan_chain):
-    """分析敏感函数/构造函数的参数可控性，返回 result dict 或 None"""
+def _analyze_call(sink_name, arguments, lineno, controllable, repair_functions, scan_chain,
+                  qualifier=None):
+    """分析敏感函数/构造函数的参数可控性，返回 result dict 或 None
+    
+    :param qualifier: 方法调用的 qualifier（如 ois.readObject() 中的 "ois"）
+    """
     if not arguments:
+        # 无参数方法：检查 qualifier 是否可控
+        # 如 ois.readObject() → qualifier="ois" → 如果 ois 可控则返回 code=1
+        if qualifier and isinstance(qualifier, str) and qualifier in controllable:
+            logger.debug("[AST][Java] No-arg method with controllable qualifier: {}.{}()".format(
+                qualifier, sink_name))
+            return {
+                "code": 1,
+                "source": [qualifier],
+                "source_lineno": lineno,
+                "sink": sink_name,
+                "sink_param:": qualifier,
+                "sink_lineno": lineno,
+                "chain": scan_chain + [qualifier, sink_name],
+            }
+        
         return {
             "code": 3,
             "source": [],
@@ -497,7 +605,14 @@ def _find_class_creators_in_body(method_node, target_line, sensitive_func):
                     results.append((type_name, creator.arguments, stmt_line))
         elif isinstance(stmt, javalang.tree.StatementExpression):
             expr = stmt.expression
-            if isinstance(expr, javalang.tree.Assignment):
+            # 直接 new SomeClass(...) 调用（如 new FileInputStream(filename);）
+            if isinstance(expr, javalang.tree.ClassCreator):
+                creator = expr
+                type_name = creator.type.name if creator.type else ""
+                if type_name in sensitive_func:
+                    results.append((type_name, creator.arguments, stmt_line))
+            # 赋值: x = new SomeClass(...)
+            elif isinstance(expr, javalang.tree.Assignment):
                 if isinstance(expr.value, javalang.tree.ClassCreator):
                     creator = expr.value
                     type_name = creator.type.name if creator.type else ""
@@ -570,7 +685,8 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
 
             logger.debug("[AST][Java] Found sensitive call: {}() at line {}".format(node.member, lineno))
             result = _analyze_call(node.member, node.arguments, lineno,
-                                   controllable, repair_functions, scan_chain)
+                                   controllable, repair_functions, scan_chain,
+                                   qualifier=node.qualifier)
             if result:
                 scan_results.append(result)
 
