@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import re
 import traceback
 import javalang
 from utils.log import logger
@@ -29,12 +30,9 @@ def _collect_member_references(expr, refs=None):
         if expr.arguments:
             for arg in expr.arguments:
                 _collect_member_references(arg, refs)
-        # qualifier 如果是变量名也收集
-        if expr.qualifier and not isinstance(expr.qualifier, javalang.tree.ASTNode):
-            # qualifier 是字符串表示变量名（如 request、stmt）
-            # 排除类名（首字母大写的通常是类名）
-            if expr.qualifier and expr.qualifier[0].islower():
-                refs.append(expr.qualifier)
+        # qualifier 如果是变量名也收集（排除类名：首字母大写）
+        if expr.qualifier and isinstance(expr.qualifier, str) and expr.qualifier[0].islower():
+            refs.append(expr.qualifier)
 
     elif isinstance(expr, javalang.tree.Cast):
         _collect_member_references(expr.expression, refs)
@@ -77,7 +75,7 @@ def _find_method_at_line(tree, target_line):
     return None
 
 
-def _collect_controllable_vars(method_node, request_var_names):
+def _collect_controllable_vars(method_node, request_var_names, source_lines=None):
     """
     收集方法体中的可控变量名集合
     可控来源：
@@ -172,18 +170,19 @@ def _collect_controllable_vars(method_node, request_var_names):
     # 处理: obj = new SomeClass(controllable_arg) → obj 可控
     # 处理: obj = controllable.method() → obj 可控
     # 处理: obj = other.method(controllable_arg) → obj 可控
-    _propagate_object_taint(method_node, controllable)
+    _propagate_object_taint(method_node, controllable, source_lines=source_lines)
 
     return controllable
 
 
-def _propagate_object_taint(method_node, controllable, max_rounds=5):
+def _propagate_object_taint(method_node, controllable, max_rounds=5, source_lines=None):
     """
     对象级污点传播：追踪 new SomeClass(controllable) / controllable.method() 等赋值
 
     :param method_node: 方法 AST 节点
     :param controllable: 可控变量集合（会被原地修改）
     :param max_rounds: 最大传播轮数
+    :param source_lines: 源码行列表（1-indexed），用于 javalang 解析失败时的文本 fallback
     """
     if not method_node.body:
         return
@@ -258,6 +257,32 @@ def _propagate_object_taint(method_node, controllable, max_rounds=5):
                     if init.member in controllable:
                         controllable.add(target_var)
                         changed = True
+
+    # 源码文本 fallback：javalang 无法正确解析链式调用时（如 Base64.getDecoder().decode(data)），
+    # 直接检查赋值语句的源码文本中是否包含可控变量名
+    # 排除字符串字面量内的匹配（避免 "SELECT * FROM users WHERE name=?" 中的 name 被误判）
+    if source_lines and controllable:
+        for stmt in method_node.body:
+            if not isinstance(stmt, javalang.tree.LocalVariableDeclaration):
+                continue
+            for declarator in stmt.declarators:
+                if declarator.name in controllable or not declarator.initializer:
+                    continue
+                # 用 AST position 定位到源码行
+                lineno = stmt.position.line if stmt.position else 0
+                if lineno <= 0 or lineno > len(source_lines):
+                    continue
+                line_text = source_lines[lineno - 1]
+                # 去掉字符串字面量（单引号和双引号内容），防止误判
+                code_only = re.sub(r'"[^"]*"', '""', line_text)
+                code_only = re.sub(r"'[^']*'", "''", code_only)
+                # 检查剩余文本中是否包含任何可控变量名（单词边界匹配）
+                for var in list(controllable):
+                    if re.search(r'\b' + re.escape(var) + r'\b', code_only):
+                        controllable.add(declarator.name)
+                        logger.debug("[AST][Java] Source-text fallback propagation: {} (line {} contains '{}')".format(
+                            declarator.name, lineno, var))
+                        break
 
 
 def _find_request_var_names(method_node):
@@ -657,9 +682,16 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
             logger.debug("[AST][Java] No method found at line {}".format(target_line))
             return scan_results
 
-        # 2. 收集可控变量
+        # 2. 收集可控变量（传入源码行用于文本 fallback）
+        source_lines = []
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                source_lines = f.readlines()
+        except Exception:
+            pass
+
         request_vars = _find_request_var_names(method)
-        controllable = _collect_controllable_vars(method, request_vars)
+        controllable = _collect_controllable_vars(method, request_vars, source_lines=source_lines)
 
         # 加入外部指定的可控参数
         if controlled_params:
