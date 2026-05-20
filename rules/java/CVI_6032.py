@@ -11,7 +11,7 @@ class CVI_6032():
         self.description = "通过AST分析检测Runtime.exec参数是否来自用户可控输入"
         self.level = 9
         self.status = True
-        self.match_mode = "function-param-regex"
+        self.match_mode = "java-function-param-regex"
         self.match = "exec"
         self.unmatch = []
         self.match_name = None

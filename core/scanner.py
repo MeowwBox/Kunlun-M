@@ -347,27 +347,24 @@ class SingleRule(object):
                 logger.debug(traceback.format_exc())
                 return None
 
-        elif self.sr.match_mode == const.mm_function_param_controllable:
+        elif self.sr.match_mode in (const.mm_function_param_controllable,
+                                     const.mm_java_function_param_controllable):
             # 函数匹配，直接匹配敏感函数，然后处理敏感函数的参数即可
             # param controllable
             
-            # 判断是否使用自定义 grep 正则（当 match 包含 \ 字符时认为是完整正则）
-            # 否则用 fpc 模板
             match = None
             
             if hasattr(self.sr, 'match') and self.sr.match:
-                # 如果有 vul_function 属性且为列表，match 作为完整 grep 正则
-                use_custom_regex = (
-                    hasattr(self.sr, 'vul_function') and 
-                    isinstance(self.sr.vul_function, list) and 
-                    len(self.sr.vul_function) > 0
-                )
-                
-                if use_custom_regex:
-                    # match 字段作为完整正则（可以是列表，逐个 grep 合并结果）
+                if self.sr.match_mode == const.mm_java_function_param_controllable:
+                    # Java 专用模式：match 字段直接作为 grep 正则，不套 fpc 模板
+                    match = self.sr.match
+                elif (hasattr(self.sr, 'vul_function') and
+                      isinstance(self.sr.vul_function, list) and
+                      len(self.sr.vul_function) > 0):
+                    # 有 vul_function → match 作为完整正则
                     match = self.sr.match
                 else:
-                    # 传统模式：match 是函数名，用 fpc 模板
+                    # 传统 PHP/JS 模式：match 是函数名，用 fpc 模板
                     if '|' in self.sr.match:
                         match = const.fpc_multi.replace('[f]', self.sr.match)
                         if self.sr.keyword == 'is_echo_statement':
@@ -377,7 +374,6 @@ class SingleRule(object):
                         if self.sr.keyword == 'is_echo_statement':
                             match = const.fpc_echo_statement_single.replace('[f]', self.sr.match)
 
-                    # 垃圾js毁一生，动态类型一时爽，静态分析火葬厂
                     if self.sr.language.lower() == "javascript":
                         match = const.fpc_loose.replace('[f]', self.sr.match)
 

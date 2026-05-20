@@ -408,7 +408,8 @@ class VulnerabilityMatcher(object):
                 logger.debug("[CVI-{cvi}] [REGEX-RETURN-REGEX]".format(cvi=self.cvi))
                 return True, 'Regex-return-regex'
 
-            elif self.rule_match_mode == const.mm_function_param_controllable:
+            elif self.rule_match_mode in (const.mm_function_param_controllable,
+                                           const.mm_java_function_param_controllable):
                 # 调用规则的 main() 做二次筛选（类似 PHP cast.py:212 的 self.sr.main()）
                 # 优先传完整源码行（而非 grep 片段），让 main() 能看到上下文
                 main_input = self.code_content

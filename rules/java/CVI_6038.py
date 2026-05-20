@@ -29,9 +29,9 @@ class CVI_6038():
         self.status = True
 
         # 部分配置
-        # ProcessBuilder 通过 ClassCreator 匹配，match 为类型名
-        self.match_mode = "function-param-regex"
-        self.match = "ProcessBuilder"
+        # ProcessBuilder 通过 ClassCreator 匹配，match 为精确正则避免匹配注释
+        self.match_mode = "java-function-param-regex"
+        self.match = r"new\s+ProcessBuilder\s*\("
 
         # for solidity
         self.match_name = None
@@ -43,7 +43,8 @@ class CVI_6038():
         # for regex
         self.unmatch = []
 
-        self.vul_function = None
+        # AST 分析搜索 ProcessBuilder ClassCreator
+        self.vul_function = ["ProcessBuilder"]
 
     def main(self, regex_string):
         pass

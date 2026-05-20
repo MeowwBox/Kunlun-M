@@ -29,7 +29,7 @@ class CVI_6034():
         self.status = True
 
         # 部分配置
-        self.match_mode = "function-param-regex"
+        self.match_mode = "java-function-param-regex"
         self.match = "openConnection"
 
         # for solidity

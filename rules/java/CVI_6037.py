@@ -18,7 +18,7 @@ class CVI_6037():
         self.level = 4
 
         self.status = True
-        self.match_mode = "function-param-regex"
+        self.match_mode = "java-function-param-regex"
         self.match = "parseObject|parse"
         self.match_name = None
         self.black_list = None
