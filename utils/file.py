@@ -729,10 +729,15 @@ class Directory(object):
                     directory = os.path.join(absolute_path, filename)
 
                     # check black path list
-                    # if self.black_path_list:
-                    #     for black_path in self.black_path_list:
-                    #         if black_path in filename:
-                    #             flag = 1
+                    is_black = False
+                    if self.black_path_list:
+                        for black_path in self.black_path_list:
+                            if black_path in filename:
+                                is_black = True
+                                break
+                    if is_black:
+                        continue
+
                     if not check_kunlunignore(directory):
                         continue
 
