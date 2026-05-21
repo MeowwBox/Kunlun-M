@@ -12,11 +12,29 @@ is_controlled_params = []
 scan_chain = []
 
 
+def _expr_to_text(expr, source_lines):
+    """将 AST 表达式转为源码文本（从源码行读取，fallback 用 str()）"""
+    if expr is None:
+        return ''
+    if isinstance(expr, str):
+        return expr
+    if hasattr(expr, 'position') and expr.position and source_lines:
+        lineno = expr.position.line
+        if 1 <= lineno <= len(source_lines):
+            return source_lines[lineno - 1]
+    return str(expr)
+
+
 def _collect_member_references(expr, refs=None):
     """递归收集表达式中的所有变量引用名（MemberReference.member）"""
     if refs is None:
         refs = []
     if expr is None:
+        return refs
+
+    if isinstance(expr, str):
+        # 纯字符串（源码文本 fallback 传入的参数名）
+        refs.append(expr)
         return refs
 
     if isinstance(expr, javalang.tree.MemberReference):
@@ -78,6 +96,21 @@ def _find_method_at_line(tree, target_line):
             upper = target + 1  # 最后一个方法，只要 >= start 就算
         if start <= target < upper:
             return method
+
+    # Fallback: grep 10行缓冲可能导致行号偏移，扩大搜索范围
+    for offset in range(1, 11):
+        for direction in (offset, -offset):
+            adj_target = target + direction
+            if adj_target < 1:
+                continue
+            for i, method in enumerate(methods):
+                start = method.position.line
+                if i + 1 < len(methods):
+                    upper = methods[i + 1].position.line
+                else:
+                    upper = adj_target + 1
+                if start <= adj_target < upper:
+                    return method
     return None
 
 
@@ -521,6 +554,13 @@ def _check_caller_controllability(current_method, ast_obj, repair_functions, glo
                             if expr.member == current_method_name and expr.arguments:
                                 call_expr = expr
                     
+                    # 查找 StatementExpression 中的方法调用（void 方法调用如 deserialize(data)）
+                    elif isinstance(stmt, javalang.tree.StatementExpression) and stmt.expression:
+                        expr = stmt.expression
+                        if isinstance(expr, javalang.tree.MethodInvocation):
+                            if expr.member == current_method_name and expr.arguments:
+                                call_expr = expr
+                    
                     if call_expr is None:
                         continue
                     
@@ -937,6 +977,33 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
 
         logger.debug("[AST][Java] Controllable vars: {}".format(controllable))
 
+        # 2b. 局部变量赋值传播：如果赋值表达式右边包含可控变量，左边也标记为可控
+        #     如 String query = "SELECT * FROM users WHERE name = '" + user.getName() + "'"
+        #     → user 可控 → query 可控
+        if controllable and source_lines:
+            changed = True
+            iterations = 0
+            while changed and iterations < 5:
+                changed = False
+                iterations += 1
+                for stmt in (method.body or []):
+                    if not isinstance(stmt, javalang.tree.LocalVariableDeclaration):
+                        continue
+                    for decl in stmt.declarators:
+                        if not hasattr(decl, 'initializer') or decl.initializer is None:
+                            continue
+                        if decl.name in controllable:
+                            continue
+                        # 检查 initializer 文本中是否包含任何可控变量名
+                        init_text = _expr_to_text(decl.initializer, source_lines)
+                        for cv in list(controllable):
+                            if re.search(r'\b' + re.escape(cv) + r'\b', init_text):
+                                controllable.add(decl.name)
+                                logger.debug("[AST][Java] Local var propagation: {} is controllable (init contains '{}')".format(
+                                    decl.name, cv))
+                                changed = True
+                                break
+
         # 3. 在方法体中找到目标行号的敏感函数调用
         if not method.body:
             return scan_results
@@ -971,6 +1038,35 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
                 if result:
                     scan_results.append(result)
 
+                if len(scan_results) > 0:
+                    break
+
+        # 3c. 源码文本 fallback：javalang 链式调用 bug 导致 AST 丢失 sink 时，
+        #     直接在源码文本中搜索 sink 函数名
+        if not scan_results and source_lines:
+            # 从 target_line 开始搜索附近行
+            for line_offset in range(0, 15):
+                check_line = target_line + line_offset
+                if check_line > len(source_lines):
+                    break
+                source_line = source_lines[check_line - 1]
+                for func_name in sensitive_func:
+                    # 精确匹配：func_name 后面紧跟 (
+                    pattern = r'(?<!\w)' + re.escape(func_name) + r'\s*\('
+                    if re.search(pattern, source_line):
+                        # 从源码文本提取参数（简单正则：取括号内第一个参数）
+                        arg_match = re.search(
+                            re.escape(func_name) + r'\s*\(\s*([^,)]+)', source_line)
+                        arg_name = arg_match.group(1).strip() if arg_match else ''
+                        logger.debug(
+                            "[AST][Java] Source-text fallback: found {}.{}() at line {} [arg={}]".format(
+                                func_name, '' if not arg_name else '', check_line, arg_name))
+                        result = _analyze_call(func_name, [arg_name], check_line,
+                                               controllable, repair_functions, scan_chain)
+                        if result:
+                            scan_results.append(result)
+                        if len(scan_results) > 0:
+                            break
                 if len(scan_results) > 0:
                     break
 

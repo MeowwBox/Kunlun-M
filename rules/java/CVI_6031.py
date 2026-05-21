@@ -12,12 +12,12 @@ class CVI_6031():
         self.level = 9
         self.status = True
         self.match_mode = "java-function-param-regex"
-        self.match = "executeQuery"
+        self.match = "executeQuery|executeUpdate"
         self.unmatch = []
         self.match_name = None
         self.black_list = []
         self.keyword = None
-        self.vul_function = None
+        self.vul_function = ["executeQuery", "executeUpdate"]
 
     def main(self, regex_string):
         pass
