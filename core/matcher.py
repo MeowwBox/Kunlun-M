@@ -198,7 +198,11 @@ class VulnerabilityMatcher(object):
                 return True, 'Function-param-controllable', r['chain']
 
         for r in result:
-            if r['code'] == 4:  # 新规则生成
+            if r['code'] == 4:  # 配置型漏洞 / 新规则生成
+                # 区分：如果有 chain 且包含 sink 名，视为配置型漏洞（code 1 等价）
+                # 否则视为新规则生成信号
+                if r.get('chain') and len(r['chain']) > 1:
+                    return True, 'Config-vulnerability-confirmed', r['chain']
                 return False, 'New Core', r['source']
 
         for r in result:
@@ -424,7 +428,6 @@ class VulnerabilityMatcher(object):
                 main_result = self.single_rule.main(main_input)
                 if main_result is not None and main_result is not False:
                     # main() 返回非 None/False → 通过二次筛选，继续 AST 分析
-                    # 如果 main() 返回列表（如参数列表），可用于进一步过滤
                     pass
                 elif main_result is False:
                     logger.debug('[CVI-{cvi}] main() returned False, skip'.format(cvi=self.cvi))
@@ -440,9 +443,12 @@ class VulnerabilityMatcher(object):
                     rule_match = self.rule_match.strip('()').split('|')
                 logger.debug('[RULE_MATCH] {r}'.format(r=rule_match))
                 try:
+                    # 获取规则是否声明为配置型漏洞
+                    is_config_vuln = getattr(self.single_rule, 'is_config_vuln', False)
                     result = java_scan_parser(rule_match, self.line_number, self.file_path,
                                               repair_functions=self.repair_functions,
-                                              controlled_params=self.controlled_list)
+                                              controlled_params=self.controlled_list,
+                                              is_config_vuln=is_config_vuln)
                     logger.debug('[AST] [RET] {c}'.format(c=result))
                     if len(result) > 0:
                         parsed = self._parse_ast_result(result)

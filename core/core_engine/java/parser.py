@@ -478,21 +478,48 @@ def _build_global_method_map(ast_obj, current_filepath):
         if not filepath.endswith('.java'):
             continue
         
-        tree = file_data.get('ast_nodes')
-        if not tree:
+        ast_nodes = file_data.get('ast_nodes')
+        if not ast_nodes:
             continue
         
         try:
-            for _, node in tree.filter(javalang.tree.MethodDeclaration):
-                param_count = len(node.parameters) if node.parameters else 0
-                key = (node.name, param_count)
-                if key not in global_methods:
-                    global_methods[key] = []
-                global_methods[key].append((tree, node, filepath))
+            for ast_tree in (ast_nodes if isinstance(ast_nodes, list) else [ast_nodes]):
+                for _, node in ast_tree.filter(javalang.tree.MethodDeclaration):
+                    param_count = len(node.parameters) if node.parameters else 0
+                    key = (node.name, param_count)
+                    if key not in global_methods:
+                        global_methods[key] = []
+                    global_methods[key].append((ast_tree, node, filepath))
         except Exception:
             continue
     
     return global_methods
+
+
+def _flatten_statements(body):
+    """递归展开方法体中的嵌套控制结构（TryStatement, IfStatement 等），返回扁平语句列表。"""
+    if not body:
+        return []
+    result = []
+    for stmt in body:
+        result.append(stmt)
+        # TryStatement: block, catches, finally_block
+        if isinstance(stmt, javalang.tree.TryStatement):
+            result.extend(_flatten_statements(stmt.block))
+            for catch in (stmt.catches or []):
+                result.extend(_flatten_statements(catch.block))
+            result.extend(_flatten_statements(stmt.finally_block))
+        # IfStatement: then_statement, else_statement
+        elif isinstance(stmt, javalang.tree.IfStatement):
+            result.extend(_flatten_statements(stmt.then_statement if isinstance(stmt.then_statement, list) else [stmt.then_statement] if stmt.then_statement else []))
+            result.extend(_flatten_statements(stmt.else_statement if isinstance(stmt.else_statement, list) else [stmt.else_statement] if stmt.else_statement else []))
+        # ForStatement, WhileStatement, DoStatement: body
+        elif hasattr(stmt, 'body') and isinstance(getattr(stmt, 'body', None), list):
+            result.extend(_flatten_statements(stmt.body))
+        # BlockStatement: statements
+        elif isinstance(stmt, javalang.tree.BlockStatement):
+            result.extend(_flatten_statements(stmt.statements))
+    return result
 
 
 def _check_caller_controllability(current_method, ast_obj, repair_functions, global_methods=None, depth=0, max_depth=3):
@@ -524,83 +551,85 @@ def _check_caller_controllability(current_method, ast_obj, repair_functions, glo
         if not filepath.endswith('.java'):
             continue
         
-        tree = file_data.get('ast_nodes')
-        if not tree:
+        ast_nodes = file_data.get('ast_nodes')
+        if not ast_nodes:
             continue
         
         try:
             # 找到所有方法声明，检查其方法体中是否调用了 current_method_name
-            for _, caller_method in tree.filter(javalang.tree.MethodDeclaration):
-                if not caller_method.body:
-                    continue
-                
-                for stmt in caller_method.body:
-                    call_expr = None
-                    
-                    # 查找 LocalVariableDeclaration 中的方法调用
-                    if isinstance(stmt, javalang.tree.LocalVariableDeclaration):
-                        for declarator in stmt.declarators:
-                            if not declarator.initializer:
-                                continue
-                            init = declarator.initializer
-                            if isinstance(init, javalang.tree.MethodInvocation):
-                                if init.member == current_method_name and init.arguments:
-                                    call_expr = init
-                    
-                    # 查找 ReturnStatement 中的方法调用
-                    elif isinstance(stmt, javalang.tree.ReturnStatement) and stmt.expression:
-                        expr = stmt.expression
-                        if isinstance(expr, javalang.tree.MethodInvocation):
-                            if expr.member == current_method_name and expr.arguments:
-                                call_expr = expr
-                    
-                    # 查找 StatementExpression 中的方法调用（void 方法调用如 deserialize(data)）
-                    elif isinstance(stmt, javalang.tree.StatementExpression) and stmt.expression:
-                        expr = stmt.expression
-                        if isinstance(expr, javalang.tree.MethodInvocation):
-                            if expr.member == current_method_name and expr.arguments:
-                                call_expr = expr
-                    
-                    if call_expr is None:
+            for ast_tree in (ast_nodes if isinstance(ast_nodes, list) else [ast_nodes]):
+                for _, caller_method in ast_tree.filter(javalang.tree.MethodDeclaration):
+                    if not caller_method.body:
                         continue
                     
-                    # 找到调用！分析调用者方法的可控变量
-                    request_vars = _find_request_var_names(caller_method)
-                    
-                    caller_source_lines = []
-                    try:
-                        with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
-                            caller_source_lines = f.readlines()
-                    except Exception:
-                        pass
-                    
-                    caller_controllable = _collect_controllable_vars(
-                        caller_method, request_vars, source_lines=caller_source_lines)
-                    
-                    # 跨方法传播（含跨文件）
-                    if global_methods:
-                        _propagate_controllable_across_calls(
-                            caller_method, tree, caller_controllable, repair_functions,
-                            global_methods=global_methods)
-                    
-                    # 如果调用者也没有可控变量，递归反向检查
-                    if not caller_controllable and depth + 1 < max_depth:
-                        reverse_params = _check_caller_controllability(
-                            caller_method, ast_obj, repair_functions, 
-                            global_methods=global_methods, depth=depth+1, max_depth=max_depth)
-                        if reverse_params:
-                            caller_controllable.update(reverse_params)
-                    
-                    # 检查调用参数是否可控
-                    for arg in call_expr.arguments:
-                        refs = _collect_member_references(arg)
-                        if set(refs) & caller_controllable:
-                            for param in current_method.parameters:
-                                controllable_params.add(param.name)
-                                logger.debug("[AST][Java] Reverse cross-file (depth={}): param '{}' of {}() is controllable (called from {}:{})".format(
-                                    depth, param.name, current_method_name, filepath,
-                                    caller_method.position.line if caller_method.position else '?'))
-                            return controllable_params  # 已找到可控来源，提前返回
+                    flat_stmts = _flatten_statements(caller_method.body)
+                    for stmt in flat_stmts:
+                        call_expr = None
+                        
+                        # 查找 LocalVariableDeclaration 中的方法调用
+                        if isinstance(stmt, javalang.tree.LocalVariableDeclaration):
+                            for declarator in stmt.declarators:
+                                if not declarator.initializer:
+                                    continue
+                                init = declarator.initializer
+                                if isinstance(init, javalang.tree.MethodInvocation):
+                                    if init.member == current_method_name and init.arguments:
+                                        call_expr = init
+                        
+                        # 查找 ReturnStatement 中的方法调用
+                        elif isinstance(stmt, javalang.tree.ReturnStatement) and stmt.expression:
+                            expr = stmt.expression
+                            if isinstance(expr, javalang.tree.MethodInvocation):
+                                if expr.member == current_method_name and expr.arguments:
+                                    call_expr = expr
+                        
+                        # 查找 StatementExpression 中的方法调用（void 方法调用如 deserialize(data)）
+                        elif isinstance(stmt, javalang.tree.StatementExpression) and stmt.expression:
+                            expr = stmt.expression
+                            if isinstance(expr, javalang.tree.MethodInvocation):
+                                if expr.member == current_method_name and expr.arguments:
+                                    call_expr = expr
+                        
+                        if call_expr is None:
+                            continue
+                        
+                        # 找到调用！分析调用者方法的可控变量
+                        request_vars = _find_request_var_names(caller_method)
+                        
+                        caller_source_lines = []
+                        try:
+                            with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+                                caller_source_lines = f.readlines()
+                        except Exception:
+                            pass
+                        
+                        caller_controllable = _collect_controllable_vars(
+                            caller_method, request_vars, source_lines=caller_source_lines)
+                        
+                        # 跨方法传播（含跨文件）
+                        if global_methods:
+                            _propagate_controllable_across_calls(
+                                caller_method, ast_tree, caller_controllable, repair_functions,
+                                global_methods=global_methods)
+                        
+                        # 如果调用者也没有可控变量，递归反向检查
+                        if not caller_controllable and depth + 1 < max_depth:
+                            reverse_params = _check_caller_controllability(
+                                caller_method, ast_obj, repair_functions, 
+                                global_methods=global_methods, depth=depth+1, max_depth=max_depth)
+                            if reverse_params:
+                                caller_controllable.update(reverse_params)
+                        
+                        # 检查调用参数是否可控
+                        for arg in call_expr.arguments:
+                            refs = _collect_member_references(arg)
+                            if set(refs) & caller_controllable:
+                                for param in current_method.parameters:
+                                    controllable_params.add(param.name)
+                                    logger.debug("[AST][Java] Reverse cross-file (depth={}): param '{}' of {}() is controllable (called from {}:{})".format(
+                                        depth, param.name, current_method_name, filepath,
+                                        caller_method.position.line if caller_method.position else '?'))
+                                return controllable_params  # 已找到可控来源，提前返回
         except Exception:
             continue
     
@@ -771,10 +800,10 @@ def _has_repair_function(expr, repair_functions):
 
 
 def _analyze_call(sink_name, arguments, lineno, controllable, repair_functions, scan_chain,
-                  qualifier=None):
+                  qualifier=None, is_config_vuln=False):
     """分析敏感函数/构造函数的参数可控性，返回 result dict 或 None
     
-    :param qualifier: 方法调用的 qualifier（如 ois.readObject() 中的 "ois"）
+    :param qualifier:...[truncated]
     """
     if not arguments:
         # 无参数方法：检查 qualifier 是否可控
@@ -804,10 +833,54 @@ def _analyze_call(sink_name, arguments, lineno, controllable, repair_functions, 
 
     # 提取参数中的所有变量引用
     param_var_refs = []
+    literal_values = []
     for arg in arguments:
         refs = _collect_member_references(arg)
         param_var_refs.extend(refs)
+        # 提取字面量参数值
+        if isinstance(arg, javalang.tree.Literal):
+            val = getattr(arg, 'value', None)
+            if val is not None:
+                literal_values.append(str(val))
     param_var_refs = list(set(param_var_refs))
+
+    # 字面量/常量参数危险行为检测：当所有参数都不是用户可控变量时，
+    # 检查是否构成危险配置。这类漏洞不依赖外部输入可控性。
+    # 如 setAutoTypeSupport(true) / enableDefaultTyping(NON_FINAL)
+    # 注意：仅对规则声明了 is_config_vuln=True 的 sink 生效，避免对普通 sink 误判
+    if is_config_vuln:
+        if not param_var_refs and literal_values:
+            # 字面量参数包含 true — 不安全配置
+            for lit in literal_values:
+                if lit.lower() == 'true':
+                    logger.debug("[AST][Java] Dangerous literal arg in {}: {}({}) — config vulnerability".format(
+                        sink_name, sink_name, ', '.join(literal_values)))
+                    return {
+                        "code": 4,
+                        "source": literal_values,
+                        "source_lineno": lineno,
+                        "sink": sink_name,
+                        "sink_param:": str(literal_values),
+                        "sink_lineno": lineno,
+                        "chain": scan_chain + literal_values + [sink_name],
+                    }
+        # 枚举/常量参数但无可控变量：如 enableDefaultTyping(ObjectMapper.DefaultTyping.OBJECT_AND_NON_CONCRETE)
+        # param_var_refs 可能包含枚举常量名，但它们不在 controllable 中
+        if param_var_refs and not (set(param_var_refs) & controllable):
+            # 所有参数引用都不在可控变量集合中 → 固定配置调用
+            # 提取参数文本描述
+            arg_desc = param_var_refs + literal_values
+            logger.debug("[AST][Java] Fixed-config call in {}: {}({}) — config vulnerability".format(
+                sink_name, sink_name, ', '.join(arg_desc)))
+            return {
+                "code": 4,
+                "source": arg_desc,
+                "source_lineno": lineno,
+                "sink": sink_name,
+                "sink_param:": str(arg_desc),
+                "sink_lineno": lineno,
+                "chain": scan_chain + arg_desc + [sink_name],
+            }
 
     # 检查是否有修复函数
     is_repaired = False
@@ -911,7 +984,7 @@ def _find_class_creators_in_body(method_node, target_line, sensitive_func):
     return results
 
 
-def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], controlled_params=[]):
+def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], controlled_params=[], is_config_vuln=False):
     """
     Java AST scan parser - 分析敏感函数参数是否可控
     :param sensitive_func: 要检测的敏感函数列表，如 ["executeQuery", "exec"]
@@ -1020,7 +1093,7 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
             logger.debug("[AST][Java] Found sensitive call: {}() at line {}".format(node.member, lineno))
             result = _analyze_call(node.member, node.arguments, lineno,
                                    controllable, repair_functions, scan_chain,
-                                   qualifier=node.qualifier)
+                                   qualifier=node.qualifier, is_config_vuln=is_config_vuln)
             if result:
                 scan_results.append(result)
 
@@ -1034,7 +1107,8 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
                 logger.debug("[AST][Java] Found sensitive constructor: new {}() at line {}".format(
                     type_name, lineno))
                 result = _analyze_call(type_name, arguments, lineno,
-                                       controllable, repair_functions, scan_chain)
+                                       controllable, repair_functions, scan_chain,
+                                       is_config_vuln=is_config_vuln)
                 if result:
                     scan_results.append(result)
 
@@ -1062,7 +1136,8 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
                             "[AST][Java] Source-text fallback: found {}.{}() at line {} [arg={}]".format(
                                 func_name, '' if not arg_name else '', check_line, arg_name))
                         result = _analyze_call(func_name, [arg_name], check_line,
-                                               controllable, repair_functions, scan_chain)
+                                               controllable, repair_functions, scan_chain,
+                                               is_config_vuln=is_config_vuln)
                         if result:
                             scan_results.append(result)
                         if len(scan_results) > 0:
