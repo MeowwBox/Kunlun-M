@@ -32,7 +32,7 @@ class CVI_6003():
 
         # 部分配置
         self.match_mode = "function-param-regex"
-        self.match = "exec|ProcessBuilder"
+        self.match = "(?<!execute)exec\\s*\\(|ProcessBuilder"
 
         # for solidity
         self.match_name = None

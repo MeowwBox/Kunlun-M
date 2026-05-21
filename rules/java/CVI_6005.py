@@ -31,8 +31,10 @@ class CVI_6005():
         self.status = True
 
         # 部分配置
-        self.match_mode = "function-param-regex"
-        self.match = "readObject|ObjectInputStream|XMLDecoder"
+        self.match_mode = "only-regex"
+        self.match = [
+            r"(?:new\s+ObjectInputStream|\.readObject\s*\(|new\s+XMLDecoder)",
+        ]
 
         # for solidity
         self.match_name = None
@@ -48,7 +50,7 @@ class CVI_6005():
             r"SafeObjectInputStream",
         ]
 
-        self.vul_function = ["readObject", "ObjectInputStream"]
+        self.vul_function = None
 
 
     def main(self, regex_string):

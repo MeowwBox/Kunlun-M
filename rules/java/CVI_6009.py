@@ -31,8 +31,7 @@ class CVI_6009():
         # 部分配置
         self.match_mode = "only-regex"
         self.match = [
-            r'(?:password|passwd|PASSWORD|secret|SECRET|apiKey|api_key|API_KEY|accessKey|access_key|secretKey|secret_key|private[_\-]?[Kk]ey|token|AUTH_TOKEN|credential)\s*=\s*"[^"]{4,}"',
-            r'(?:password|passwd|PASSWORD|secret|SECRET|apiKey|api_key|API_KEY|accessKey|access_key|secretKey|secret_key|private[_\-]?[Kk]ey|token|AUTH_TOKEN|credential)\s*=\s*new\s+String\s*\(\s*"[^"]{4,}"\s*\)',
+            r'(?:password|passwd|PASSWORD|secret|SECRET|apiKey|api_key|API_KEY|accessKey|access_key|secretKey|secret_key|private[_\-]?[Kk]ey|token|AUTH_TOKEN|credential)\s*=\s*(?:new\s+String\s*\(\s*)?"[^"]{4,}"(?:\s*\)?)?',
         ]
 
         # for solidity
