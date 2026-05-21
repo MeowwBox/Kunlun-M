@@ -21,7 +21,7 @@ mm_regex_return_regex = 'regex-return-regex'
 sp_crx_keyword_match = 'special-crx-keyword-match'  # crx特殊匹配
 file_path_regex_match = 'file-path-regex-match'  # 文件名或者路径匹配
 vendor_source_match = 'vendor_source_match'  # sca
-
+mm_framework_dependency = 'framework-dependency'  # 框架依赖版本检测 (pom.xml/build.gradle)
 
 match_modes = [
     mm_regex_only_match,
@@ -32,6 +32,7 @@ match_modes = [
     sp_crx_keyword_match,
     file_path_regex_match,
     vendor_source_match,
+    mm_framework_dependency,
 ]
 
 

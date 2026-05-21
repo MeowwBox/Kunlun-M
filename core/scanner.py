@@ -463,6 +463,53 @@ class SingleRule(object):
                 logger.debug(traceback.format_exc())
                 return None
 
+        elif self.sr.match_mode == const.mm_framework_dependency:
+            # 框架依赖版本检测: 解析 pom.xml/build.gradle, 版本范围匹配 + 配置特征二次确认
+            from utils.pom_parser import check_framework_dependency, search_code_patterns
+
+            result = []
+
+            try:
+                framework_deps = getattr(self.sr, 'framework_deps', [])
+                config_patterns = getattr(self.sr, 'config_patterns', [])
+                exclude_patterns = getattr(self.sr, 'exclude_patterns', [])
+
+                for dep_config in framework_deps:
+                    matched_deps = check_framework_dependency(self.target_directory, dep_config)
+
+                    for matched in matched_deps:
+                        pom_path = matched['pom']
+                        version = matched['version']
+                        cve = matched.get('cve', '')
+                        desc = matched.get('description', '')
+
+                        # 二次确认: config_patterns
+                        if config_patterns:
+                            config_files = search_code_patterns(self.target_directory, config_patterns)
+                            if not config_files:
+                                logger.debug(f'[FRAMEWORK] config patterns not found, skip {cve}')
+                                continue
+
+                        # 排除检查: exclude_patterns
+                        if exclude_patterns:
+                            exclude_files = search_code_patterns(self.target_directory, exclude_patterns)
+                            if exclude_files:
+                                logger.debug(f'[FRAMEWORK] exclude patterns found, skip {cve}')
+                                continue
+
+                        # 格式化为统一的 result tuple: (file_path, line_number, match_text)
+                        match_text = f"{dep_config['group_id']}:{dep_config['artifact_id']}:{version}"
+                        if cve:
+                            match_text += f" ({cve})"
+                        result.append((pom_path, "0", match_text))
+
+                if not result:
+                    result = None
+            except Exception as e:
+                logger.debug(f'framework-dependency match exception ({e})')
+                logger.debug(traceback.format_exc())
+                return None
+
         else:
             logger.warning('Exception match mode: {m}'.format(m=self.sr.match_mode))
             result = None
@@ -484,6 +531,22 @@ class SingleRule(object):
         if origin_results == '' or origin_results is None:
             logger.debug('[CVI-{cvi}] [ORIGIN] NOT FOUND!'.format(cvi=self.sr.svid))
             return None
+
+        # framework-dependency 模式: 直接生成结果，不需要 AST 分析
+        if self.sr.match_mode == const.mm_framework_dependency:
+            for index, origin_vulnerability in enumerate(origin_results):
+                vulnerability = VulnerabilityResult.from_match(origin_vulnerability, svid=self.sr.svid,
+                                                                language=self.sr.language,
+                                                                rule_name=self.sr.vulnerability,
+                                                                author=self.sr.author)
+                if vulnerability:
+                    cve_info = origin_vulnerability[2] if len(origin_vulnerability) > 2 else ''
+                    vulnerability.analysis = f"Framework dependency vulnerability: {cve_info}"
+                    vulnerability.chain = [("Dependency", cve_info, origin_vulnerability[0], 0)]
+                    self.rule_vulnerabilities.append(vulnerability)
+            logger.debug('[CVI-{cvi}] {vn} Vulnerabilities: {count}'.format(cvi=self.sr.svid, vn=self.sr.vulnerability,
+                                                                            count=len(self.rule_vulnerabilities)))
+            return self.rule_vulnerabilities
 
         origin_vulnerabilities = origin_results
         for index, origin_vulnerability in enumerate(origin_vulnerabilities):
