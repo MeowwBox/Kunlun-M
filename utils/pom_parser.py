@@ -10,6 +10,19 @@ import xml.etree.ElementTree as ET
 from utils.log import logger
 
 
+def _get_parent_version(root, prefix):
+    """从 parent 标签中获取版本号"""
+    parent = root.find(f'{prefix}parent')
+    if parent is None:
+        parent = root.find('{http://maven.apache.org/POM/4.0.0}parent')
+    if parent is not None:
+        for pfx in ['{http://maven.apache.org/POM/4.0.0}', '']:
+            ver = parent.findtext(f'{pfx}version', '')
+            if ver:
+                return ver
+    return None
+
+
 def parse_pom_dependencies(pom_path):
     """
     解析 pom.xml 提取所有依赖
@@ -27,6 +40,7 @@ def parse_pom_dependencies(pom_path):
         for prefix in ['{http://maven.apache.org/POM/4.0.0}', '']:
             dependencies = root.findall(f'.//{prefix}dependency')
             if dependencies:
+                parent_version = _get_parent_version(root, prefix)
                 for dep in dependencies:
                     gid = dep.findtext(f'{prefix}groupId', '')
                     aid = dep.findtext(f'{prefix}artifactId', '')
@@ -34,6 +48,9 @@ def parse_pom_dependencies(pom_path):
                     if gid and aid:
                         # 处理 ${property} 引用
                         ver = _resolve_version(ver, root, prefix)
+                        # 如果版本为空，尝试从 parent 继承
+                        if not ver and parent_version:
+                            ver = parent_version
                         deps.append({
                             "group_id": gid,
                             "artifact_id": aid,
