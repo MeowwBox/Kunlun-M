@@ -21,7 +21,7 @@ requests>=2.32.3
 rarfile>=4.2
 
 # Java source parsing
-ljavalang>=2.0.2
+ljavalang>=2.0.2,<3
 
 # Database drivers
 mysqlclient>=2.2.4
