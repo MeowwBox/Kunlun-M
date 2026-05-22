@@ -25,6 +25,25 @@ def _expr_to_text(expr, source_lines):
     return str(expr)
 
 
+def _flatten_chained_calls(node):
+    """展开 javalang MethodInvocation/Primary 的 selectors，返回所有链式调用节点列表。
+
+    javalang 解析 a.b().c(arg) 为：
+      MethodInvocation(member="b", qualifier="a", selectors=[
+          MethodInvocation(member="c", arguments=[arg], qualifier=None)
+      ])
+    本函数返回 [原始节点, selector[0], selector[1], ...]
+    """
+    if node is None:
+        return []
+    nodes = [node]
+    if hasattr(node, 'selectors') and node.selectors:
+        for sel in node.selectors:
+            if isinstance(sel, (javalang.tree.MethodInvocation, javalang.tree.MemberReference)):
+                nodes.append(sel)
+    return nodes
+
+
 def _collect_member_references(expr, refs=None):
     """递归收集表达式中的所有变量引用名（MemberReference.member）"""
     if refs is None:
@@ -51,6 +70,11 @@ def _collect_member_references(expr, refs=None):
         # qualifier 如果是变量名也收集（排除类名：首字母大写）
         if expr.qualifier and isinstance(expr.qualifier, str) and expr.qualifier[0].islower():
             refs.append(expr.qualifier)
+
+        # selectors traversal for chained calls
+        if hasattr(expr, 'selectors') and expr.selectors:
+            for sel in expr.selectors:
+                _collect_member_references(sel, refs)
 
     elif isinstance(expr, javalang.tree.Cast):
         _collect_member_references(expr.expression, refs)
@@ -276,6 +300,22 @@ def _propagate_object_taint(method_node, controllable, max_rounds=5, source_line
                         logger.debug("[AST][Java] Object taint propagation: {} = {}.{})() [qualifier]".format(
                             target_var, init.qualifier, init.member))
                         changed = True
+
+                    # 链式调用 selectors 传播：obj.b().c() → b() 结果可控则 c() 结果也可控
+                    if hasattr(init, 'selectors') and init.selectors:
+                        prev_result_controllable = target_var in controllable
+                        for sel in init.selectors:
+                            if isinstance(sel, javalang.tree.MethodInvocation):
+                                # 如果上一步结果可控，或者这一步的参数可控
+                                sel_refs = set()
+                                if sel.arguments:
+                                    for arg in sel.arguments:
+                                        sel_refs.update(_collect_member_references(arg))
+                                if prev_result_controllable or (sel_refs & controllable):
+                                    controllable.add(target_var)
+                                    prev_result_controllable = True
+                                    logger.debug("[AST][Java] Object taint (chain sel): {} is controllable via chain.{}".format(
+                                        target_var, sel.member))
 
                 # 模式C: 字符串拼接 x = y + z
                 elif isinstance(init, javalang.tree.BinaryOperation):
@@ -1081,22 +1121,28 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
         if not method.body:
             return scan_results
 
-        # 3a. 搜索 MethodInvocation
+        # 3a. 搜索 MethodInvocation（含 selectors 展开的链式调用）
         for path, node in _nodes.filter(javalang.tree.MethodInvocation):
-            if node.member not in sensitive_func:
-                continue
+            # 展开链式调用：a.b().c() → 检查 b() 和 c()
+            for mi in _flatten_chained_calls(node):
+                if not isinstance(mi, javalang.tree.MethodInvocation):
+                    continue
+                if mi.member not in sensitive_func:
+                    continue
 
-            lineno = node.position.line if node.position else 0
-            if lineno != target_line:
-                continue
+                lineno = mi.position.line if hasattr(mi, 'position') and mi.position else target_line
+                if lineno != target_line:
+                    continue
 
-            logger.debug("[AST][Java] Found sensitive call: {}() at line {}".format(node.member, lineno))
-            result = _analyze_call(node.member, node.arguments, lineno,
-                                   controllable, repair_functions, scan_chain,
-                                   qualifier=node.qualifier, is_config_vuln=is_config_vuln)
-            if result:
-                scan_results.append(result)
+                logger.debug("[AST][Java] Found sensitive call: {}() at line {}".format(mi.member, lineno))
+                result = _analyze_call(mi.member, mi.arguments, lineno,
+                                       controllable, repair_functions, scan_chain,
+                                       qualifier=mi.qualifier, is_config_vuln=is_config_vuln)
+                if result:
+                    scan_results.append(result)
 
+                if len(scan_results) > 0:
+                    break
             if len(scan_results) > 0:
                 break
 
@@ -1115,6 +1161,7 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
                 if len(scan_results) > 0:
                     break
 
+        # 注意：上面 3a 已修复 selectors 遍历，此 fallback 作为兜底仍保留
         # 3c. 源码文本 fallback：javalang 链式调用 bug 导致 AST 丢失 sink 时，
         #     直接在源码文本中搜索 sink 函数名
         if not scan_results and source_lines:
