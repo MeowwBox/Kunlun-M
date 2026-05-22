@@ -1,4 +1,11 @@
 ## 更新日志
+- 2026-05-22
+  - KunLun-M 2.9.1
+  - **修复 Java 链式调用漏报**
+    - javalang 解析器将链式方法调用（如 `Runtime.getRuntime().exec(cmd)`、`new ProcessBuilder(cmd).start()`）中的后续方法放入扁平的 `selectors` 列表，导致 sink 搜索和污点传播遗漏链式调用中的关键方法
+    - 新增 `_flatten_chained_calls()` 辅助函数展开 selectors，并在 sink 搜索、变量收集、对象污点传播三个环节增加 selectors 遍历支持
+    - 保留源码文本 fallback 作为兜底
+  - javalang 依赖规范化：从本地 Ljavalang fork 切回 PyPI 默认库（`javalang>=0.13.0`），链式调用兼容性已由 parser 侧修复覆盖
 - 2026-05-21
   - KunLun-M 2.9.0
   - **新增 Java 静态代码扫描引擎**
