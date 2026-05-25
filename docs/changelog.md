@@ -1,4 +1,14 @@
 ## 更新日志
+- 2026-05-25
+  - KunLun-M 2.9.3
+  - **依赖升级：phply → lphply**
+    - 从 `phply==1.0.0` 切换为 `lphply>=2.0.0`
+    - lphply 是 phply 的增强 fork，支持 PHP 5.6–8.5 新语法（null coalescing、match、enum、readonly、property hooks、pipe 等）
+    - 移除 `_repair_php_code_for_parser` 中的 `??` null coalescing 降级修复（lphply 原生支持）
+  - **PHP 扫描引擎适配**
+    - 适配 `NullsafeMethodCall` / `NullsafeProperty` AST 节点（`$obj?->method()` / `$obj?->prop`）
+    - parser.py 31 处 isinstance 检查统一使用类型别名元组，向前兼容
+    - `BASE_FUNCTIONCALL_LIST` 增加 `NullsafeMethodCall` / `NullsafeProperty`
 - 2026-05-22
   - KunLun-M 2.9.2
   - **依赖升级：javalang → ljavalang**

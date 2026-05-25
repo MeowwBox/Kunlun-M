@@ -142,10 +142,18 @@ class Pretreatment:
     @staticmethod
     def _repair_php_code_for_parser(code_content):
         """
-        尝试修复 phply 暂不支持的部分语法，避免整个文件 AST 预处理失败。
+        尝试修复 lphply 暂不支持的部分语法，避免整个文件 AST 预处理失败。
         当前处理：
-        1. ($a)() 这类「括号包裹变量再调用」语法；
-        2. PHP7 null coalescing（??）语法，降级为 ?: 以便 phply 继续解析。
+        1. ($a)() 这类「括号包裹变量再调用」语法。
+
+        注意：lphply >= 2.0.0 已原生支持以下语法，无需降级：
+        - PHP7 null coalescing（??）— lexer 识别为 COALESCE token
+        - PHP7 spaceship（<=>）— lexer 识别为 SPACESHIP token
+        - PHP8 match expression
+        - PHP8 named arguments
+        - PHP8.2 DNF types、enum、readonly
+        - PHP8.4 property hooks、new without parentheses
+        - PHP8.5 pipe operator、clone with arguments
         """
         repaired_content = code_content
         token_stream = lexer.clone()
@@ -161,17 +169,6 @@ class Pretreatment:
         # 仅在词法级别命中特定模式时进行修复，避免正则替换误伤字符串、注释等内容。
         edits = []
         token_count = len(tokens)
-
-        # 修复 phply 不支持的 null coalescing 运算符 ??。
-        # 这里仅做语法层面的降级（?? -> ?:），目标是让 AST 预处理不中断。
-        for index in range(token_count - 1):
-            token_q1 = tokens[index]
-            token_q2 = tokens[index + 1]
-
-            if token_q1.type == 'QUESTION' and token_q2.type == 'QUESTION':
-                start = token_q1.lexpos
-                end = token_q2.lexpos + len(token_q2.value)
-                edits.append((start, end, '?:'))
 
         # 修复 ( VARIABLE ) ( 语法模式。
         for index in range(token_count - 3):
