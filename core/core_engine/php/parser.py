@@ -25,6 +25,12 @@ from core.pretreatment import ast_object
 from core.internal_defines.php.functions import function_dict as php_function_dict
 from core.internal_defines.php.class_functions import function_dict as php_magic_function_dict
 
+# lphply >= 2.0.0 新增的等价节点类型（字段与原类型完全一致）
+_METHOD_CALL_TYPES = (php.MethodCall, getattr(php, 'NullsafeMethodCall', php.MethodCall))
+_OBJECT_PROPERTY_TYPES = (php.ObjectProperty, getattr(php, 'NullsafeProperty', php.ObjectProperty))
+_FUNCTION_CALL_TYPES = (php.FunctionCall, php.MethodCall, php.StaticMethodCall,
+                        getattr(php, 'NullsafeMethodCall', php.MethodCall))
+
 from web.index.models import NewEvilFunc
 
 with_line = True
@@ -34,7 +40,7 @@ is_controlled_params = []
 scan_chain = []  # 回溯链变量
 scan_function_stack = []  # 函数回溯栈，用于避免 A->B->A 这类互相递归导致的无限回溯
 all_nodes = []
-BASE_FUNCTIONCALL_LIST = ['FunctionCall', 'MethodCall', 'StaticMethodCall', 'ObjectProperty']
+BASE_FUNCTIONCALL_LIST = ['FunctionCall', 'MethodCall', 'StaticMethodCall', 'ObjectProperty', 'NullsafeMethodCall', 'NullsafeProperty']
 SPECIAL_FUNCTIONCALL_LIST = ['Eval', 'Echo', 'Print', 'Return', 'Break', 'Include',
                          'Require', 'Exit', 'Throw', 'Unset', 'Continue', 'Yield', 'Silence']
 
@@ -304,7 +310,7 @@ def get_expr_name(node):  # expr为'expr'中的值
         param_expr = get_binaryop_params(node)
         param_lineno = node.lineno
 
-    elif isinstance(node, php.MethodCall):  # 当赋值表达式为类方法时
+    elif isinstance(node, _METHOD_CALL_TYPES):  # 当赋值表达式为类方法时
         param_expr = get_all_params(node.params)  # 返回该方法参数列表
         param_lineno = node.lineno
 
@@ -330,10 +336,10 @@ def get_node_name(node):  # node为'node'中的元组
     if isinstance(node, php.Variable):
         return node.name  # 返回此节点中的变量名
 
-    if isinstance(node, php.MethodCall) or isinstance(node, php.FunctionCall):
+    if isinstance(node, _METHOD_CALL_TYPES) or isinstance(node, php.FunctionCall):
         return node.name
 
-    if isinstance(node, php.ObjectProperty):
+    if isinstance(node, _OBJECT_PROPERTY_TYPES):
         return node
 
     if isinstance(node, php.ArrayOffset):
@@ -480,10 +486,10 @@ def is_controllable(expr, flag=None):  # 获取表达式中的变量，看是否
                 return 1, array_name
             return 1, php.Variable(array_name)
 
-    if isinstance(expr, php.ObjectProperty):
+    if isinstance(expr, _OBJECT_PROPERTY_TYPES):
         return 3, expr
 
-    if isinstance(expr, php.New) or isinstance(expr, php.MethodCall) or isinstance(expr, php.FunctionCall) or isinstance(expr, php.StaticMethodCall):
+    if isinstance(expr, php.New) or isinstance(expr, _FUNCTION_CALL_TYPES):
         # 一个新的问题，输入可能不来自全局变量，可能来自函数，加入一次check
 
         # check is_repair
@@ -828,7 +834,7 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
         logger.warning("[AST] AST analysis error, return back.")
         return is_co, cp, expr_lineno
 
-    if (isinstance(param, php.FunctionCall) or isinstance(param, php.MethodCall) or isinstance(param, php.StaticMethodCall)) and is_co != 1:  # 当污点为寻找函数时，递归进入寻找函数
+    if isinstance(param, _FUNCTION_CALL_TYPES) and is_co != 1:  # 当污点为寻找函数时，递归进入寻找函数
         logger.debug("[AST] AST analysis for FunctionCall or MethodCall {} in line {}".format(param.name, param.lineno))
         is_co, cp, expr_lineno = function_back(param, nodes, function_params, file_path=file_path, isback=isback)
         return is_co, cp, expr_lineno
@@ -989,7 +995,7 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
                     #                                                              isback=isback,
                     #                                                              parent_node=node)
 
-            if param_name == param_node and isinstance(node.expr, php.MethodCall):
+            if param_name == param_node and isinstance(node.expr, _METHOD_CALL_TYPES):
                 # 当右值为方法调用时，暂时按照和function类似的分析方式
 
                 class_node = node.expr.node.name
@@ -1026,7 +1032,7 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
             if param_name == param_node and isinstance(param_expr, list):
 
                 # 这里检测的是函数参数列表...如果为空不一定不可控？
-                if len(param_expr) <= 0 and not (isinstance(node.expr, php.FunctionCall) or isinstance(node.expr, php.MethodCall)):
+                if len(param_expr) <= 0 and not (isinstance(node.expr, php.FunctionCall) or isinstance(node.expr, _METHOD_CALL_TYPES)):
                     is_co = -1
                     cp = param
                     return is_co, cp, 0
@@ -1890,8 +1896,7 @@ def anlysis_function(node, back_node, vul_function, function_params, vul_lineno,
                             analysis_variable_node(param.node, back_node, vul_function, vul_lineno, function_params,
                                                    file_path=file_path)
 
-                        if isinstance(param.expr, php.FunctionCall) or isinstance(param.expr, php.MethodCall) or isinstance(
-                                param.expr, php.StaticMethodCall):
+                        if isinstance(param.expr, _FUNCTION_CALL_TYPES):
                             analysis_functioncall_node(param.expr, back_node, vul_function, vul_lineno, function_params,
                                                        file_path=file_path)
 
@@ -1915,8 +1920,7 @@ def anlysis_function(node, back_node, vul_function, function_params, vul_lineno,
                             analysis_variable_node(param.left, back_node, vul_function, vul_lineno, function_params,
                                                    file_path=file_path)
 
-                        if isinstance(param.right, php.FunctionCall) or isinstance(param.right, php.MethodCall) or isinstance(
-                                param.right, php.StaticMethodCall):
+                        if isinstance(param.right, _FUNCTION_CALL_TYPES):
                             analysis_functioncall_node(param.right, back_node, vul_function, vul_lineno, function_params,
                                                        file_path=file_path)
 
@@ -2250,8 +2254,7 @@ def analysis_echo_print(node, back_node, vul_function, vul_lineno, function_para
         if isinstance(node, php.Print):
             param_node_typename = node.node.__class__.__name__
 
-            if isinstance(node.node, php.FunctionCall) or isinstance(node.node, php.MethodCall) or isinstance(node.node,
-                                                                                                              php.StaticMethodCall):
+            if isinstance(node.node, _FUNCTION_CALL_TYPES):
                 analysis_functioncall_node(node.node, back_node, vul_function, vul_lineno, function_params,
                                            file_path=file_path)
 
@@ -2278,8 +2281,7 @@ def analysis_echo_print(node, back_node, vul_function, vul_lineno, function_para
             for k_node in node.nodes:
                 param_node_typename = k_node.__class__.__name__
 
-                if isinstance(k_node, php.FunctionCall) or isinstance(k_node, php.MethodCall) or isinstance(
-                        k_node, php.StaticMethodCall):
+                if isinstance(k_node, _FUNCTION_CALL_TYPES):
                     # 判断节点中是否有函数调用节点
                     analysis_functioncall_node(k_node, back_node, vul_function, vul_lineno, function_params,
                                                file_path=file_path)  # 将含有函数调用的节点进行分析
@@ -2302,8 +2304,7 @@ def analysis_echo_print(node, back_node, vul_function, vul_lineno, function_para
                 if isinstance(k_node, php.Assignment) and vul_function == 'echo':
                     analysis_variable_node(k_node.node, back_node, vul_function, vul_lineno, function_params,
                                            file_path=file_path)
-                    if isinstance(k_node.expr, php.FunctionCall) or isinstance(k_node.expr, php.MethodCall) or isinstance(
-                            k_node.expr, php.StaticMethodCall):
+                    if isinstance(k_node.expr, _FUNCTION_CALL_TYPES):
                         analysis_functioncall_node(k_node.expr, back_node, vul_function, vul_lineno, function_params,
                                                    file_path=file_path)
 
@@ -2325,8 +2326,7 @@ def analysis_echo_print(node, back_node, vul_function, vul_lineno, function_para
                 if isinstance(k_node, php.AssignOp) and vul_function == 'echo':
                     analysis_variable_node(k_node.left, back_node, vul_function, vul_lineno, function_params,
                                            file_path=file_path)
-                    if isinstance(k_node.right, php.FunctionCall) or isinstance(k_node.right, php.MethodCall) or isinstance(
-                            k_node.right, php.StaticMethodCall):
+                    if isinstance(k_node.right, _FUNCTION_CALL_TYPES):
                         analysis_functioncall_node(k_node.right, back_node, vul_function, vul_lineno, function_params,
                                                    file_path=file_path)
 
@@ -2366,8 +2366,7 @@ def analysis_return(node, back_node, vul_function, vul_lineno, function_params=N
     if int(vul_lineno) == int(node.lineno) and isinstance(node, php.Return):
         param_node_typename = node.node.__class__.__name__
 
-        if isinstance(node.node, php.FunctionCall) or isinstance(node.node, php.MethodCall) or isinstance(node.node,
-                                                                                                          php.StaticMethodCall):
+        if isinstance(node.node, _FUNCTION_CALL_TYPES):
             analysis_functioncall_node(node.node, back_node, vul_function, vul_lineno, function_params,
                                        file_path=file_path)
 
@@ -2414,7 +2413,7 @@ def analysis_eval(node, vul_function, back_node, vul_lineno, function_params=Non
         if isinstance(node.expr, php.Variable):
             analysis_variable_node(node.expr, back_node, vul_function, vul_lineno, function_params, file_path=file_path)
 
-        if isinstance(node.expr, php.FunctionCall) or isinstance(node.expr, php.MethodCall) or isinstance(node.expr, php.StaticMethodCall):
+        if isinstance(node.expr, _FUNCTION_CALL_TYPES):
             analysis_functioncall_node(node.expr, back_node, vul_function, vul_lineno, function_params,
                                        file_path=file_path)
 
@@ -2424,11 +2423,7 @@ def analysis_eval(node, vul_function, back_node, vul_lineno, function_params=Non
         if isinstance(node.expr, php.ArrayOffset):
             analysis_arrayoffset_node(node.expr, vul_function, vul_lineno)
 
-        if isinstance(node.expr, php.ObjectProperty):
-            analysis_objectproperry_node(node.expr, back_node, vul_function, vul_lineno, function_params,
-                                         file_path=file_path)
-
-        if isinstance(node.expr, php.Silence):
+        if isinstance(node.expr, _OBJECT_PROPERTY_TYPES):
             nodes = get_silence_params(node.expr)
             analysis(nodes, vul_function, back_node, vul_lineno, file_path)
 
@@ -2458,8 +2453,7 @@ def analysis_file_inclusion(node, vul_function, back_node, vul_lineno, function_
         if isinstance(node.expr, php.Variable):
             analysis_variable_node(node.expr, back_node, vul_function, vul_lineno, function_params, file_path=file_path)
 
-        if isinstance(node.expr, php.FunctionCall) or isinstance(node.expr, php.MethodCall) or isinstance(node.expr,
-                                                                                                          php.StaticMethodCall):
+        if isinstance(node.expr, _FUNCTION_CALL_TYPES):
             analysis_functioncall_node(node.expr, back_node, vul_function, vul_lineno, function_params,
                                        file_path=file_path)
 
@@ -2469,7 +2463,7 @@ def analysis_file_inclusion(node, vul_function, back_node, vul_lineno, function_
         if isinstance(node.expr, php.ArrayOffset):
             analysis_arrayoffset_node(node.expr, vul_function, vul_lineno)
 
-        if isinstance(node.expr, php.ObjectProperty):
+        if isinstance(node.expr, _OBJECT_PROPERTY_TYPES):
             analysis_objectproperry_node(node.expr, back_node, vul_function, vul_lineno, function_params,
                                          file_path=file_path)
 
@@ -2530,13 +2524,12 @@ def analysis(nodes, vul_function, back_node, vul_lineno, file_path=None, functio
 
         node_typename = node.__class__.__name__
 
-        if isinstance(node, php.FunctionCall) or isinstance(node, php.MethodCall) or isinstance(node, php.StaticMethodCall) or node_typename in SPECIAL_FUNCTIONCALL_LIST:
+        if isinstance(node, _FUNCTION_CALL_TYPES) or node_typename in SPECIAL_FUNCTIONCALL_LIST:
             # 函数直接调用，不进行赋值
             anlysis_function(node, back_node, vul_function, function_params, vul_lineno, file_path=file_path)
 
         elif isinstance(node, php.Assignment):  # 函数调用在赋值表达式中
-            if isinstance(node.expr, php.FunctionCall) or isinstance(node.expr, php.MethodCall) or isinstance(node.expr,
-                                                                                                              php.StaticMethodCall):
+            if isinstance(node.expr, _FUNCTION_CALL_TYPES):
                 anlysis_function(node.expr, back_node, vul_function, function_params, vul_lineno, file_path=file_path)
 
             if isinstance(node.expr, php.Eval):
@@ -2557,8 +2550,7 @@ def analysis(nodes, vul_function, back_node, vul_lineno, file_path=None, functio
             analysis(nodes, vul_function, back_node, vul_lineno, file_path)
 
         elif isinstance(node, php.AssignOp):
-            if isinstance(node.right, php.FunctionCall) or isinstance(node.right, php.MethodCall) or isinstance(node.right,
-                                                                                                              php.StaticMethodCall):
+            if isinstance(node.right, _FUNCTION_CALL_TYPES):
                 anlysis_function(node.right, back_node, vul_function, function_params, vul_lineno, file_path=file_path)
 
             if isinstance(node.right, php.Eval):
@@ -2569,7 +2561,7 @@ def analysis(nodes, vul_function, back_node, vul_lineno, file_path=None, functio
                 analysis(buffer_, vul_function, back_node, vul_lineno, file_path, function_params)
 
         elif isinstance(node, php.BinaryOp):
-            if isinstance(node.left, php.FunctionCall) or isinstance(node.right, php.MethodCall) or isinstance(node.right,                                                                                                             php.StaticMethodCall):
+            if isinstance(node.left, _FUNCTION_CALL_TYPES):
                 anlysis_function(node.left, back_node, vul_function, function_params, vul_lineno, file_path=file_path)
 
             if isinstance(node.left, php.Eval):
@@ -2579,7 +2571,7 @@ def analysis(nodes, vul_function, back_node, vul_lineno, file_path=None, functio
                 buffer_.append(node.left)
                 analysis(buffer_, vul_function, back_node, vul_lineno, file_path, function_params)
 
-            if isinstance(node.right, php.FunctionCall) or isinstance(node.right, php.MethodCall) or isinstance(node.right,                                                                                                             php.StaticMethodCall):
+            if isinstance(node.right, _FUNCTION_CALL_TYPES):
                 anlysis_function(node.right, back_node, vul_function, function_params, vul_lineno, file_path=file_path)
 
             if isinstance(node.right, php.Eval):

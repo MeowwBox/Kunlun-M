@@ -231,14 +231,15 @@ $s = "($a)() should stay";
 
 def test_repair_php_code_for_parser_null_coalesce():
     """
-    回归测试：PHP7 null coalescing（??）语法应被降级修复为可解析形式。
+    回归测试：lphply >= 2.0.0 原生支持 ?? (null coalescing) 语法，
+    不需要降级修复，代码应保持不变。
     """
     code = """<?php
 $a = $_GET["name"] ?? "guest";
 """
     repaired = Pretreatment._repair_php_code_for_parser(code)
-    assert '??' not in repaired
-    assert '?:' in repaired
+    # lphply 原生支持 ??，不再降级为 ?:
+    assert '??' in repaired
 
 
 def test_pre_ast_php_null_coalesce_operator():
