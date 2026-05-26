@@ -326,10 +326,9 @@ def _trace_in_function(param_name, func_node, vul_lineno, file_path,
                         repair_functions, controlled_params,
                         visited_funcs, depth, tree):
     """在函数体内追踪变量来源"""
-    func_name = func_node.name
-    if func_name in visited_funcs:
-        return -1, None
-    visited_funcs = visited_funcs | {func_name}
+    # 注意：不把当前函数名加入 visited_funcs
+    # 因为同一函数内可能需要追踪多个变量的来源（如 full_cmd → arg）
+    # visited_funcs 用于防止跨函数循环追踪，由 parameters_back 的调用者管理
 
     stmts = func_node.body
     return _trace_in_stmts(param_name, stmts, vul_lineno, file_path,
@@ -484,10 +483,9 @@ def _trace_stmt(param_name, stmt, vul_lineno, file_path,
                         return result
 
     # --- return 语句 ---
-    elif isinstance(stmt, ast.Return) and stmt.value:
-        if _contains_name(stmt.value, param_name):
-            # 变量被返回了，需要在调用者中继续追踪
-            return 3, None
+    # return 语句不阻断追踪：变量出现在 return 中只是说明它被使用了，
+    # 不影响在之前的赋值语句中找到它的来源
+    # （不返回任何结果，让遍历继续到之前的赋值语句）
 
     return None
 
@@ -846,7 +844,7 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
                                 for caller_node in ast.walk(tree):
                                     if isinstance(caller_node, ast.Call):
                                         cn = _get_call_name(caller_node)
-                                        if cn == func_def.name and hasattr(caller_node, 'lineno'):
+                                        if cn and (cn == func_def.name or cn.endswith('.' + func_def.name)) and hasattr(caller_node, 'lineno'):
                                             # 找到调用点，检查实参
                                             for caller_arg in (caller_node.args or []):
                                                 ca_str = _expr_to_str(caller_arg)
