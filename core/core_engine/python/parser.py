@@ -443,7 +443,23 @@ def _trace_self_attribute(attr_name, class_node, vul_lineno, file_path,
             break
 
     if not init_method:
-        # 没有 __init__，可能在类级别直接定义（class attribute）
+        # 当前类没有 __init__，检查父类
+        for base in class_node.bases:
+            base_name = _get_name(base)
+            if base_name:
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.ClassDef) and node.name == base_name:
+                        for item in node.body:
+                            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name == '__init__':
+                                init_method = item
+                                break
+                        if init_method:
+                            break
+                if init_method:
+                    break
+
+    if not init_method:
+        # 没有任何 __init__（含父类），检查类级别属性
         for item in class_node.body:
             if isinstance(item, ast.Assign):
                 for t in item.targets:
@@ -477,6 +493,65 @@ def _trace_self_attribute(attr_name, class_node, vul_lineno, file_path,
                                     attr, rhs_name))
                                 return 4, init_method
 
+    # 如果 __init__ 中没找到赋值，检查是否有 @property 方法
+    # 支持类继承：先在当前类找，找不到去父类找
+    attr = attr_name[5:]  # 去掉 'self.' 前缀
+    classes_to_check = [class_node]
+    # 收集父类
+    for base in class_node.bases:
+        base_name = _get_name(base)
+        if base_name:
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ClassDef) and node.name == base_name:
+                    classes_to_check.append(node)
+                    break
+
+    for check_class in classes_to_check:
+        for item in check_class.body:
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name == attr:
+                # 检查是否被 @property 装饰
+                for dec in item.decorator_list:
+                    dec_name = _get_name(dec) if dec else None
+                    if dec_name == 'property':
+                        logger.debug("[AST][Python] self.{} is @property (in {}), tracing getter".format(
+                            attr, check_class.name))
+                        return _trace_property_getter(item, vul_lineno, file_path,
+                                                       repair_functions, controlled_params,
+                                                       visited_funcs, depth, tree)
+
+    return None
+
+
+def _trace_property_getter(prop_func, vul_lineno, file_path,
+                            repair_functions, controlled_params,
+                            visited_funcs, depth, tree):
+    """追踪 @property getter 的返回值是否可控
+    
+    在 getter 内找到 return 语句，追踪返回值表达式。
+    如果返回值包含 self.xxx，递归追踪到 __init__。
+    """
+    # 收集 getter 体内的赋值关系（与 _trace_function_return 类似）
+    # 但 @property 通常无参数（除了 self），所以主要追踪 self.xxx 属性
+    for node in ast.walk(prop_func):
+        if isinstance(node, ast.Return) and node.value:
+            # 追踪返回值表达式
+            result = _trace_expr('return_value', node.value, 
+                                  node.lineno if hasattr(node, 'lineno') else vul_lineno,
+                                  file_path, repair_functions, controlled_params,
+                                  visited_funcs, depth, tree)
+            if result and result[0] in (1, 2, 4):
+                return result
+            
+            # fallback: 收集 names，逐个追踪
+            names = _collect_names(node.value)
+            for name in names:
+                result = parameters_back(name, [], 
+                                          node.lineno if hasattr(node, 'lineno') else vul_lineno,
+                                          file_path, repair_functions, controlled_params,
+                                          visited_funcs, depth + 1)
+                if result and result[0] in (1, 4):
+                    return result
+    
     return None
 
 
@@ -775,8 +850,23 @@ def _trace_expr(param_name, expr, lineno, file_path,
 
     # code=4 候选排序：__init__ 优先级最低（需要类名匹配才能解析），
     # 普通函数优先级更高（有明确的调用者匹配）
+    # 对每个候选尝试 _resolve_code4，返回第一个成功的
     if code4_candidates:
         code4_candidates.sort(key=lambda r: 1 if hasattr(r[1], 'name') and r[1].name == '__init__' else 0)
+        # 先尝试 _resolve_code4 对每个候选
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                _src_lines = f.readlines()
+        except Exception:
+            _src_lines = []
+
+        for c4_code, c4_cp in code4_candidates:
+            r = _resolve_code4(c4_cp, tree, file_path,
+                                [], controlled_params, repair_functions,
+                                lineno, _src_lines, param_name)
+            if r and r.get('code') in (1, 2):
+                return r['code'], r.get('source', param_name)
+        # 所有候选的 _resolve_code4 都失败，返回第一个（让 scan_parser 的 _resolve_code4 继续尝试）
         return code4_candidates[0]
 
     return 3, None
@@ -887,6 +977,133 @@ def _trace_function_return(func_def, call_node, lineno, file_path,
 # ---------------------------------------------------------------------------
 # 入口函数
 # ---------------------------------------------------------------------------
+
+def _resolve_code4(func_def, tree, file_path, sensitive_func,
+                    controlled_params, repair_functions,
+                    target_line, source_lines, arg_str, depth=0):
+    """递归解析 code=4: 函数参数追踪调用者链
+
+    处理:
+    - __init__ → ClassName(...) 构造调用
+    - __call__ → instance(...) 实例调用
+    - 普通方法 → obj.method(...) / func(...)
+    - 递归: 调用者参数也是 code=4 时继续向上追踪
+    """
+    if depth > 3 or not isinstance(func_def, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return None
+
+    chain = ["{}:{}".format(target_line, source_lines[target_line - 1].strip()
+                            if target_line <= len(source_lines) else arg_str)]
+
+    # ---- 检查函数体内是否有敏感调用（直接或间接） ----
+    has_sink = _func_has_sink(func_def, sensitive_func)
+
+    # ---- 确定要匹配的调用名 ----
+    call_names_to_match = []
+    parent_class = _find_class_containing_method(tree, func_def)
+
+    if func_def.name == '__init__':
+        if parent_class:
+            call_names_to_match = [parent_class.name]
+            # 也匹配所有继承该类的子类的构造调用
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ClassDef) and node is not parent_class:
+                    for base in node.bases:
+                        base_name = _get_name(base)
+                        if base_name == parent_class.name:
+                            call_names_to_match.append(node.name)
+                            break
+    elif func_def.name == '__call__':
+        # __call__: 匹配 instance(args) 形式
+        # 需要找到所有 ClassName(...) 调用，然后追踪变量是否是 ClassName 实例
+        if parent_class:
+            call_names_to_match = [parent_class.name, func_def.name]
+    else:
+        call_names_to_match = [func_def.name]
+
+    if not has_sink and not call_names_to_match:
+        return None
+
+    # ---- 在整个文件中查找谁调用了这个函数 ----
+    # 收集所有文件的 AST（跨文件追踪）
+    all_trees = [(tree, file_path)]
+    pt = globals().get('_ast_object_singleton')
+    if pt and hasattr(pt, 'pre_result'):
+        for other_fp, other_data in pt.pre_result.items():
+            if other_fp != file_path and 'ast_nodes' in other_data:
+                all_trees.append((other_data['ast_nodes'], other_fp))
+    for src_tree, src_fp in all_trees:
+      for caller_node in ast.walk(src_tree):
+        if not isinstance(caller_node, ast.Call):
+            continue
+        cn = _get_call_name(caller_node)
+
+        matched = False
+        for match_name in call_names_to_match:
+            if cn and (cn == match_name or cn.endswith('.' + match_name)):
+                matched = True
+                break
+
+        # __call__ 特殊处理: 任何变量名() 调用都可能是 __call__
+        if not matched and func_def.name == '__call__' and parent_class:
+            if cn and '.' not in cn:
+                var_type = _resolve_variable_type(src_tree, cn, caller_node.lineno, {})
+                if var_type == parent_class.name:
+                    matched = True
+
+        if not matched or not hasattr(caller_node, 'lineno'):
+            continue
+
+        # 找到调用点，检查实参
+        found = False
+        for caller_arg in (caller_node.args or []):
+            ca_str = _expr_to_str(caller_arg)
+            if is_controllable(ca_str, controlled_params):
+                return {"code": 1, "chain": chain, "source": ca_str}
+
+            # 反向追踪实参中的变量
+            ca_names = _collect_names(caller_arg)
+            for can in ca_names:
+                ccode, ccp = parameters_back(can, [], caller_node.lineno, src_fp,
+                                              repair_functions, controlled_params)
+                if ccode == 1:
+                    return {"code": 1, "chain": chain, "source": ccp}
+
+                # 递归: 调用者参数也是函数参数(code=4)，继续向上追踪
+                if ccode == 4 and isinstance(ccp, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    # 递归时用调用者所在文件的 tree
+                    caller_tree = None
+                    if src_fp == file_path:
+                        caller_tree = tree
+                    else:
+                        pt_obj = globals().get('_ast_object_singleton')
+                        if pt_obj and hasattr(pt_obj, 'pre_result') and src_fp in pt_obj.pre_result:
+                            caller_tree = pt_obj.pre_result[src_fp].get('ast_nodes')
+                    result = _resolve_code4(ccp, caller_tree, src_fp, sensitive_func,
+                                            controlled_params, repair_functions,
+                                            target_line, source_lines, arg_str, depth + 1)
+                    if result and result.get('code') == 1:
+                        return result
+
+            found = True  # 标记已处理过有参数的调用点
+            break  # 只处理第一个参数
+        if found:
+            break  # 只处理第一个有参数的调用点
+
+    return None
+
+
+def _func_has_sink(func_def, sensitive_func):
+    """检查函数体内是否包含敏感调用（直接或间接通过 self.xxx()）"""
+    for inner_node in ast.walk(func_def):
+        if isinstance(inner_node, ast.Call):
+            inner_name = _get_call_name(inner_node)
+            if inner_name:
+                for sf in sensitive_func:
+                    if inner_name == sf or inner_name.endswith('.' + sf):
+                        return True
+    return False
+
 
 def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], controlled_params=[], svid=None):
     """
@@ -1005,9 +1222,24 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
 
                 # 收集参数中的变量名，反向追踪
                 arg_names = _collect_names(arg)
+                # 收集所有追踪结果，排序后优先处理有 sink 的函数
+                traced_results = []
                 for an in arg_names:
                     code, cp = parameters_back(an, [], target_line, file_path,
                                                 repair_functions, extended_controlled)
+                    traced_results.append((code, cp, an))
+                
+                # 排序：code=1/2 优先，code=4 中 __init__ 最低
+                def _sort_key(item):
+                    c, cp, _ = item
+                    if c in (1, 2): return (0, 0)
+                    if c == 4:
+                        fn = getattr(cp, 'name', '') if cp else ''
+                        return (1, 1 if fn == '__init__' else 0)
+                    return (2, 0)
+                traced_results.sort(key=_sort_key)
+                
+                for code, cp, an in traced_results:
 
                     chain = ["{}:{}".format(target_line, source_lines[target_line - 1].strip() if target_line <= len(source_lines) else arg_str)]
 
@@ -1019,68 +1251,33 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
                         break
                     elif code == 4:
                         # code=4: 变量是函数参数，需要继续追踪
-                        # cp 是包含该参数的 FunctionDef 对象
-                        # 策略：检查该函数是否包含敏感函数调用（参数间接流入 sink）
-                        # 同时检查调用处的实参是否可控
-                        func_def = cp
-                        if isinstance(func_def, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                            # 检查函数体内是否有敏感调用
-                            has_sink = False
-                            for inner_node in ast.walk(func_def):
-                                if isinstance(inner_node, ast.Call):
-                                    inner_name = _get_call_name(inner_node)
-                                    if inner_name:
-                                        for sf in sensitive_func:
-                                            if inner_name == sf or inner_name.endswith('.' + sf):
-                                                has_sink = True
-                                                break
-                                    if has_sink:
-                                        break
-
-                            if has_sink:
-                                # 确定要匹配的调用名
-                                # __init__ → 用类名匹配 ClassName(...)
-                                # 普通方法 → 用函数名匹配
-                                call_names_to_match = [func_def.name]
-                                if func_def.name == '__init__':
-                                    # 找到 __init__ 所属的类，用类名匹配
-                                    parent_class = _find_class_containing_method(tree, func_def)
-                                    if parent_class:
-                                        call_names_to_match = [parent_class.name]
-
-                                # 在整个文件中查找谁调用了这个函数
-                                for caller_node in ast.walk(tree):
-                                    if isinstance(caller_node, ast.Call):
-                                        cn = _get_call_name(caller_node)
-                                        matched = False
-                                        for match_name in call_names_to_match:
-                                            if cn and (cn == match_name or cn.endswith('.' + match_name)):
-                                                matched = True
-                                                break
-                                        if matched and hasattr(caller_node, 'lineno'):
-                                            # 找到调用点，检查实参
-                                            for caller_arg in (caller_node.args or []):
-                                                ca_str = _expr_to_str(caller_arg)
-                                                if is_controllable(ca_str, extended_controlled):
-                                                    scan_results.append({"code": 1, "chain": chain, "source": ca_str})
-                                                    break
-                                                # 反向追踪实参
-                                                ca_names = _collect_names(caller_arg)
-                                                for can in ca_names:
-                                                    ccode, ccp = parameters_back(can, [], caller_node.lineno, file_path,
-                                                                                  repair_functions, extended_controlled)
-                                                    if ccode == 1:
-                                                        scan_results.append({"code": 1, "chain": chain, "source": ccp})
-                                                        break
-                                                if scan_results:
-                                                    break
-                                            break  # 只处理第一个调用点
-                                if scan_results:
-                                    break
-
-                        if not scan_results:
-                            scan_results.append({"code": 4, "chain": chain, "source": arg_str})
-                        break
+                        result = _resolve_code4(cp, tree, file_path, sensitive_func,
+                                                extended_controlled, repair_functions,
+                                                target_line, source_lines, arg_str)
+                        if result and result.get('code') in (1, 2):
+                            # 找到可控路径，替换之前的 fallback
+                            scan_results = [result]
+                            break
+                        # 如果候选不是 __init__，也尝试 self.xxx 的 __init__ 路径
+                        # 因为 _trace_expr 排序时普通函数优先于 __init__
+                        if hasattr(cp, 'name') and cp.name != '__init__':
+                            for other_an in arg_names:
+                                if other_an.startswith('self.') and other_an != an:
+                                    init_code, init_cp = parameters_back(other_an, [], target_line, file_path,
+                                                                          repair_functions, extended_controlled)
+                                    if init_code == 4 and hasattr(init_cp, 'name') and init_cp.name == '__init__':
+                                        init_result = _resolve_code4(init_cp, tree, file_path, sensitive_func,
+                                                                      extended_controlled, repair_functions,
+                                                                      target_line, source_lines, arg_str)
+                                        if init_result and init_result.get('code') in (1, 2):
+                                            scan_results = [init_result]
+                                            break
+                            if scan_results and any(r.get('code') in (1, 2) for r in scan_results):
+                                break
+                        # 如果还没找到更好的结果，保存 code=4 作为 fallback
+                        if not any(r.get('code') in (1, 2) for r in scan_results):
+                            scan_results = [{"code": 4, "chain": chain, "source": arg_str}]
+                        # 继续处理下一个参数
                     elif code == 3:
                         scan_results.append({"code": 3, "chain": chain, "source": cp})
                 else:

@@ -2,17 +2,21 @@
 from utils.api import *
 
 
-class CVI_2003():
+class CVI_7001():
+    """
+    Python 代码执行
+    匹配 eval/exec/compile/__import__ 等
+    """
     def __init__(self):
-        self.svid = 2003
+        self.svid = 7001
         self.language = "python"
         self.author = "LoRexxar"
-        self.vulnerability = "反序列化"
-        self.description = "使用了可能存在反序列化漏洞的危险函数"
-        self.level = 7
+        self.vulnerability = "代码执行"
+        self.description = "使用了可能执行动态代码的函数，可能导致代码注入"
+        self.level = 8
         self.status = True
         self.match_mode = "function-param-regex"
-        self.match = r"pickle\.loads|pickle\.load|yaml\.load|yaml\.unsafe_load|yaml\.full_load|marshal\.loads|marshal\.load|shelve\.open|jsonpickle\.decode|pandas\.read_pickle"
+        self.match = r"eval|exec|compile|__import__|ast\.literal_eval"
         self.match_name = None
         self.black_list = None
         self.keyword = None
