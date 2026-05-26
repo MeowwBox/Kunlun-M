@@ -24,10 +24,86 @@ is_repair_functions = []
 is_controlled_params = []
 scan_chain = []
 
+# 内置敏感函数列表（用于跨文件间接 sink 检测）
+BUILTIN_SENSITIVE_SINKS = [
+    'os.system', 'os.popen', 'os.spawnl', 'os.spawnlp', 'os.spawnv', 'os.spawnve',
+    'subprocess.call', 'subprocess.run', 'subprocess.Popen', 'subprocess.check_output',
+    'subprocess.check_call',
+    'eval', 'exec', 'compile',
+    'pickle.loads', 'pickle.load', 'yaml.load', 'yaml.unsafe_load',
+    'requests.get', 'requests.post', 'requests.put', 'requests.delete',
+    'urllib.request.urlopen', 'urllib.request.urlretrieve',
+    'open', 'file',
+    'socket.connect', 'socket.send',
+]
+
 
 # ---------------------------------------------------------------------------
 # 辅助函数
 # ---------------------------------------------------------------------------
+
+def _parse_imports(tree, file_path):
+    """解析 AST 中的 import 语句，返回 {imported_name: module_file_path} 映射
+    
+    支持:
+      from helpers import run_command  →  {'run_command': '/path/helpers.py'}
+      import helpers                   →  {'helpers': '/path/helpers.py'}
+      from pkg.helpers import func     →  {'func': '/path/pkg/helpers.py'}
+    """
+    import_map = {}
+    base_dir = os.path.dirname(file_path)
+    
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            module_name = node.module or ''
+            # 尝试将模块名转换为文件路径
+            module_path = _resolve_module_path(module_name, base_dir)
+            if module_path:
+                for alias in node.names:
+                    name = alias.asname or alias.name
+                    import_map[name] = module_path
+                    
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                name = alias.asname or alias.name
+                module_path = _resolve_module_path(name, base_dir)
+                if module_path:
+                    import_map[name] = module_path
+    
+    return import_map
+
+
+def _resolve_module_path(module_name, base_dir):
+    """尝试将 Python 模块名解析为文件路径"""
+    parts = module_name.split('.')
+    # 尝试 as file: base_dir/part1/part2/.../partN.py
+    candidate = os.path.join(base_dir, *parts[:-1], parts[-1] + '.py') if parts else None
+    if candidate and os.path.isfile(candidate):
+        return os.path.normpath(candidate)
+    # 尝试 as package: base_dir/part1/.../partN/__init__.py
+    candidate = os.path.join(base_dir, *parts, '__init__.py')
+    if os.path.isfile(candidate):
+        return os.path.normpath(candidate)
+    return None
+
+
+def _resolve_variable_type(tree, var_name, target_line, import_map):
+    """尝试推断变量的类型名（用于跨文件类方法追踪）
+    
+    ex = Executor(base) → 返回 'Executor'
+    """
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                tname = _get_name(t)
+                if tname == var_name and isinstance(node.value, ast.Call):
+                    # ex = Executor(...)
+                    if isinstance(node.value.func, ast.Name):
+                        return node.value.func.id
+                    elif isinstance(node.value.func, ast.Attribute):
+                        return node.value.func.attr
+    return None
+
 
 def _get_call_name(node):
     """从 ast.Call 节点提取完整函数调用名，如 os.system, subprocess.call, eval"""
@@ -724,6 +800,9 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
 
         target_line = int(vul_lineno)
 
+        # 解析 import 语句，用于跨文件追踪
+        import_map = _parse_imports(tree, file_path)
+
         # 读取源码行用于日志
         source_lines = []
         try:
@@ -875,17 +954,156 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
                 break
 
             if not scan_results:
-                # 没有参数或者所有参数都不可控
-                chain = ["{}:{}".format(target_line, source_lines[target_line - 1].strip() if target_line <= len(source_lines) else call_name)]
-                scan_results.append({"code": -1, "chain": chain, "source": None})
+                # 没有在当前文件找到敏感调用，尝试跨文件追踪
+                # 检查目标行调用的函数是否是从其他文件 import 的
+                cross_file_result = _try_cross_file_trace(
+                    tree, target_line, sensitive_func, file_path,
+                    repair_functions, controlled_params, import_map, source_lines)
+                if cross_file_result:
+                    scan_results = cross_file_result
+                else:
+                    # 最终 fallback
+                    chain = ["{}:{}".format(target_line, source_lines[target_line - 1].strip() if target_line <= len(source_lines) else call_name)]
+                    scan_results.append({"code": -1, "chain": chain, "source": None})
 
             # 只处理第一个匹配的调用
             break
+
+        # 如果主循环没有匹配到任何敏感函数调用，尝试跨文件追踪
+        if not scan_results and import_map:
+            cross_file_result = _try_cross_file_trace(
+                tree, target_line, sensitive_func, file_path,
+                repair_functions, controlled_params, import_map, source_lines)
+            if cross_file_result:
+                scan_results = cross_file_result
 
     except Exception:
         logger.warning("[AST][Python] scan_parser error: {}".format(traceback.format_exc()))
 
     return scan_results
+
+
+def _try_cross_file_trace(tree, target_line, sensitive_func, file_path,
+                           repair_functions, controlled_params, import_map, source_lines):
+    """跨文件追踪：检查目标行调用的 import 函数内部是否包含敏感调用"""
+    
+    # 找到目标行的所有调用
+    target_calls = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and hasattr(node, 'lineno') and node.lineno == target_line:
+            call_name = _get_call_name(node)
+            if call_name:
+                target_calls.append((call_name, node))
+    
+    if not target_calls:
+        return None
+    
+    for call_name, call_node in target_calls:
+        # 提取被调用的函数名（去掉对象前缀）
+        func_name = call_name.split('.')[-1] if '.' in call_name else call_name
+        
+        # 尝试多种匹配策略：
+        # 1. 函数名直接在 import_map 中（如 run_command）
+        # 2. 对象的类名在 import_map 中（如 Executor → ex.run()）
+        # 3. 完整调用名在 import_map 中
+        imported_path = None
+        imported_func_name = func_name
+        is_class_method = False
+        
+        if func_name in import_map:
+            imported_path = import_map[func_name]
+        elif '.' in call_name:
+            # ex.run() → obj_name='ex', 尝试从 import_map 找 ex 对应的类
+            # 也尝试直接匹配完整名
+            if call_name in import_map:
+                imported_path = import_map[call_name]
+            else:
+                # 尝试从当前 AST 中找到 ex 的类型
+                obj_name = call_name.split('.')[0]
+                obj_type = _resolve_variable_type(tree, obj_name, target_line, import_map)
+                if obj_type and obj_type in import_map:
+                    imported_path = import_map[obj_type]
+                    is_class_method = True
+        
+        if not imported_path:
+            continue
+        
+        # 加载被 import 文件的 AST
+        imported_tree = None
+        try:
+            if _ast_object_singleton:
+                imported_tree = _ast_object_singleton.get_nodes(imported_path)
+            if not imported_tree:
+                with open(imported_path, 'r', encoding='utf-8', errors='replace') as f:
+                    imported_tree = ast.parse(f.read(), filename=imported_path)
+        except Exception:
+            continue
+        
+        if not imported_tree:
+            continue
+        
+        # 在被 import 文件中找到函数定义
+        func_def = _find_function_def(imported_tree, imported_func_name)
+        if not func_def and is_class_method:
+            # 类方法：在类中查找方法
+            for cls_node in ast.walk(imported_tree):
+                if isinstance(cls_node, ast.ClassDef):
+                    for item in cls_node.body:
+                        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name == func_name:
+                            func_def = item
+                            break
+                    if func_def:
+                        break
+        if not func_def:
+            continue
+        
+        # 检查函数内部是否调用了敏感函数
+        for inner_node in ast.walk(func_def):
+            if not isinstance(inner_node, ast.Call):
+                continue
+            inner_name = _get_call_name(inner_node)
+            if not inner_name:
+                continue
+            
+            # 检查是否匹配内置敏感函数 + 规则配置的函数
+            is_sink = False
+            for sf in BUILTIN_SENSITIVE_SINKS + list(sensitive_func):
+                if inner_name == sf or inner_name.endswith('.' + sf):
+                    is_sink = True
+                    break
+            if not is_sink:
+                continue
+            
+            # 找到了间接 sink！
+            # 检查当前调用点的实参是否可控
+            for arg in (call_node.args or []):
+                        arg_str = _expr_to_str(arg)
+                        
+                        # 直接检查可控性
+                        if is_controllable(arg_str, controlled_params):
+                            chain = ["{}:{}".format(
+                                target_line,
+                                source_lines[target_line - 1].strip() if target_line <= len(source_lines) else call_name)]
+                            return [{"code": 1, "chain": chain, "source": arg_str}]
+                        
+                        # 反向追踪
+                        arg_names = _collect_names(arg)
+                        for an in arg_names:
+                            code, cp = parameters_back(an, [], target_line, file_path,
+                                                        repair_functions, controlled_params)
+                            if code == 1:
+                                chain = ["{}:{}".format(
+                                    target_line,
+                                    source_lines[target_line - 1].strip() if target_line <= len(source_lines) else call_name)]
+                                return [{"code": 1, "chain": chain, "source": cp}]
+        
+        # 没有找到间接 sink，检查是否需要返回不可控
+        chain = ["{}:{}".format(
+            target_line,
+            source_lines[target_line - 1].strip() if target_line <= len(source_lines) else call_name)]
+        return [{"code": -1, "chain": chain, "source": None}]
+    
+    return None
 
 
 def analysis_params(param, expr_lineno, vul_function, line, file_path,
