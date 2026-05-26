@@ -1,5 +1,26 @@
 ## 更新日志
 - 2026-05-26
+  - KunLun-M 2.9.5
+  - **新增 Python 语言扫描支持**
+    - 新增 `core/core_engine/python/` 模块：基于内置 `ast` 模块的反向污点追踪引擎
+    - `scan_parser()`: 分析敏感函数参数可控性，支持赋值链、with/for/if/try 控制流、函数内跨方法追踪
+    - `analysis_params()`: 供 CAST 跨文件分析调用，返回可控性 code + 追踪链
+    - `parameters_back()`: 核心反向污点追踪，支持 6 种可控来源识别（赋值/函数调用/二元运算/f-string/变量传播/函数参数）
+  - **新增 8 条 Python 漏洞规则**（CVI 2000 系列）
+    - CVI_2000: 命令注入（os.system/subprocess/exec）
+    - CVI_2001: 代码执行（eval/exec/compile/__import__）
+    - CVI_2002: SQL 注入（execute/cursor.execute）
+    - CVI_2003: 不安全反序列化（pickle/yaml/marshal/shelve）
+    - CVI_2004: SSRF（requests/urllib/http.client）
+    - CVI_2005: 文件操作（open/shutil/os.path）
+    - CVI_2006: XSS/SSTI（render_template_string/Markup/jinja2）
+    - CVI_2007: 信息泄露（DEBUG=True/stack_trace）
+  - **基础设施改动**
+    - `const.py`: ext_dict 新增 `python: [".py", ".pyw"]`
+    - `pretreatment.py`: 新增 Python `ast.parse()` 预解析分支，加入 `could_ast_pase_lans`
+    - `matcher.py`: 新增 `_scan_python()` 方法 + match dispatch
+    - `cast.py`: CAST.languages 新增 `'py': "python"`，`is_controllable_param` 新增 Python 分支
+- 2026-05-26
   - KunLun-M 2.9.4
   - **依赖升级：esprima → lesprima**
     - 从 `esprima==4.0.1` 切换为 `lesprima>=2.0.0`
