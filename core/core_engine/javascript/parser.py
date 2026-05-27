@@ -1553,6 +1553,11 @@ def deep_parameters_back(param, back_node, function_params, count, file_path, li
     is_co, cp, expr_lineno = parameters_back(param, back_node, function_params, lineno, vul_function=vul_function,
                                              file_path=file_path, isback=isback)
 
+    # 缓存确定性结果（只缓存确定性结果，跳过中间状态）
+    if lineno and file_path and isinstance(is_co, int) and is_co in (-1, 1, 2):
+        param_str = get_member_data(param) if hasattr(param, 'type') else str(param)
+        _trace_cache.put(file_path, param_str, int(lineno), (is_co, cp, expr_lineno))
+
     if count > 20:
         logger.warning("[Deep AST] depth too big, auto exit...")
         return is_co, cp, expr_lineno

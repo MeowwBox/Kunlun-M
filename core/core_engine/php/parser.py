@@ -997,6 +997,38 @@ def new_class_back(param, nodes, vul_function=None, file_path=None, isback=None)
 
 def parameters_back(param, nodes, function_params=None, lineno=0,
                     function_flag=0, vul_function=None, file_path=None,
+                    isback=None, parent_node=None):
+    """
+    parameters_back 入口（带运行时缓存）。
+    缓存查询命中则直接返回；否则调用 _parameters_back_impl，并在确定性结果时写入缓存。
+    """
+    # 计算 cache key
+    if hasattr(param, "name"):
+        _pname = get_node_name(param)
+    else:
+        _pname = param
+
+    # 查缓存
+    if lineno and file_path:
+        cached = _trace_cache.get(file_path, str(_pname), int(lineno))
+        if cached is not None:
+            return cached
+
+    # 调用实际实现
+    result = _parameters_back_impl(param, nodes, function_params, lineno,
+                                    function_flag, vul_function, file_path,
+                                    isback, parent_node)
+    is_co = result[0]
+
+    # 写入缓存：仅缓存确定性结果（-1=不可控, 1=可控, 2=已修复）
+    if lineno and file_path and is_co in (-1, 1, 2):
+        _trace_cache.put(file_path, str(_pname), int(lineno), result)
+
+    return result
+
+
+def _parameters_back_impl(param, nodes, function_params=None, lineno=0,
+                    function_flag=0, vul_function=None, file_path=None,
                     isback=None, parent_node=None):  # 用来得到回溯过程中的被赋值的变量是否与敏感函数变量相等,param是当前需要跟踪的污点
     """
     递归回溯敏感函数的赋值流程，param为跟踪的污点，当找到param来源时-->分析复制表达式-->获取新污点；否则递归下一个节点
@@ -1021,12 +1053,6 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
         param_name = param
 
     is_co, cp = is_controllable(param)
-
-    # 查缓存
-    if lineno and file_path:
-        cached = _trace_cache.get(file_path, str(param_name), int(lineno))
-        if cached is not None:
-            return cached
 
     if not nodes and type(nodes) is bool:
         logger.warning("[AST] AST analysis error, return back.")

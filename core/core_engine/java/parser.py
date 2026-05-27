@@ -594,6 +594,12 @@ def _check_caller_controllability(current_method, ast_obj, repair_functions, glo
     if depth >= max_depth:
         return controllable_params
     
+    # 查缓存
+    method_key = current_method.name
+    cached = _trace_cache.get("__java_caller__", method_key, depth)
+    if cached is not None:
+        return cached
+    
     if ast_obj is None or not hasattr(ast_obj, 'pre_result'):
         return controllable_params
     
@@ -685,9 +691,15 @@ def _check_caller_controllability(current_method, ast_obj, repair_functions, glo
                                     logger.debug("[AST][Java] Reverse cross-file (depth={}): param '{}' of {}() is controllable (called from {}:{})".format(
                                         depth, param.name, current_method_name, filepath,
                                         caller_method.position.line if caller_method.position else '?'))
+                                # 写入缓存后提前返回
+                                _trace_cache.put("__java_caller__", current_method.name, depth, controllable_params)
                                 return controllable_params  # 已找到可控来源，提前返回
         except Exception:
             continue
+    
+    # 写入缓存
+    if controllable_params:
+        _trace_cache.put("__java_caller__", current_method.name, depth, controllable_params)
     
     return controllable_params
 

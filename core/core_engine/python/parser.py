@@ -409,14 +409,22 @@ def parameters_back(param_name, nodes, vul_lineno, file_path,
 
     if func_node:
         # 在函数内追踪
-        return _trace_in_function(param_name, func_node, int(vul_lineno),
+        result = _trace_in_function(param_name, func_node, int(vul_lineno),
                                    file_path, repair_functions, controlled_params,
                                    visited_funcs, depth, tree)
     else:
         # 模块级别追踪
-        return _trace_in_stmts(param_name, relevant_stmts, int(vul_lineno),
+        result = _trace_in_stmts(param_name, relevant_stmts, int(vul_lineno),
                                 file_path, repair_functions, controlled_params,
                                 visited_funcs, depth, tree)
+
+    # 写入缓存（只缓存确定性结果，跳过中间状态）
+    if vul_lineno and file_path and result is not None:
+        code = result[0] if not isinstance(result[0], str) else -1
+        if code in (-1, 1, 2):
+            _trace_cache.put(file_path, param_name, int(vul_lineno), result)
+
+    return result
 
 
 def _find_function_at_line(tree, target_line):
