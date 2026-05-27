@@ -16,7 +16,7 @@ class CVI_7011():
         self.level = 7
         self.status = True
         self.match_mode = "function-param-regex"
-        self.match = r"xml\.etree\.ElementTree\.parse|xml\.etree\.ElementTree\.fromstring|ET\.parse|ET\.fromstring|lxml\.etree\.parse|lxml\.etree\.fromstring|xmltodict\.parse|minidom\.parse|xml\.sax\.parse|xml\.dom\.minidom\.parse"
+        self.match = r"xml\.etree\.ElementTree\.parse|xml\.etree\.ElementTree\.fromstring|ET\.parse|ET\.fromstring|lxml\.etree\.parse|lxml\.etree\.fromstring|etree\.parse|etree\.fromstring|xmltodict\.parse|minidom\.parse|xml\.sax\.parse|xml\.dom\.minidom\.parse"
         self.match_name = None
         self.black_list = None
         self.keyword = None

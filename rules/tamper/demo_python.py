@@ -38,4 +38,11 @@ PYTHON_IS_CONTROLLED_DEFAULT = [
     "GET",
     "POST",
     "self.request.get_argument",
+    "request.GET",
+    "request.POST",
+    "request.FILES",
+    "request.body",
+    "request.META",
+    "request.COOKIES",
+    "request.method",
 ]

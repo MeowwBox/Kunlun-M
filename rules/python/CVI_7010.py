@@ -16,7 +16,7 @@ class CVI_7010():
         self.level = 6
         self.status = True
         self.match_mode = "function-param-regex"
-        self.match = r"ldap\.search\(|connection\.search\(|conn\.search\(|ldap\.search_s\(|ldap\.search_ext\(|l\.search\("
+        self.match = r"ldap\.search\(|connection\.search\(|conn\.search\(|ldap\.search_s\(|ldap\.search_ext\(|l\.search\(|l\.search_s\(|l\.search_ext\("
         self.match_name = None
         self.black_list = None
         self.keyword = None
