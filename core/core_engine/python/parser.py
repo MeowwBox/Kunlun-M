@@ -214,6 +214,21 @@ def _contains_name(node, name):
     return False
 
 
+def _collect_names_from_str(expr_str):
+    """从字符串表达式（_expr_to_str 的输出）中提取变量名
+    
+    简单实现：按非标识符字符分割，过滤掉关键字和常量。
+    """
+    import keyword
+    parts = re.split(r'[^a-zA-Z_][a-zA-Z0-9_]*', expr_str)
+    # 更精确：提取所有标识符
+    identifiers = set(re.findall(r'[a-zA-Z_][a-zA-Z0-9_.]*', expr_str))
+    # 过滤关键字和常见常量
+    skip = {'None', 'True', 'False', 'str', 'int', 'float', 'list', 'dict', 'tuple',
+            'set', 'bytes', 'bool', 'type', 'super', 'print', 'len', 'range'}
+    return identifiers - skip - set(keyword.kwlist)
+
+
 def _collect_names(node, names=None, _depth=0):
     """递归收集表达式中所有变量名"""
     if names is None:
@@ -594,6 +609,25 @@ def _trace_in_stmts(param_name, stmts, vul_lineno, file_path,
                               repair_functions, controlled_params,
                               visited_funcs, depth, tree, func_node)
         if result is not None:
+            # 处理函数返回的依赖变量：赋值右部是函数调用，返回值依赖调用者变量
+            # 需要继续向上查找这些变量的更早赋值
+            if isinstance(result, tuple) and len(result) == 2 and result[0] == 'deps':
+                dep_vars = result[1]
+                logger.debug("[AST][Python] Assignment at line {} returns deps: {}, continuing upward trace".format(
+                    stmt.lineno, dep_vars))
+                # 对每个依赖变量，从当前赋值行之前继续追踪
+                for dep_var in dep_vars:
+                    for earlier_stmt in reversed(prior_stmts):
+                        if hasattr(earlier_stmt, 'lineno') and earlier_stmt.lineno < stmt.lineno:
+                            r = _trace_stmt(dep_var, earlier_stmt, stmt.lineno - 1, file_path,
+                                             repair_functions, controlled_params,
+                                             visited_funcs, depth, tree, func_node)
+                            if r is not None:
+                                if isinstance(r, tuple) and len(r) == 2 and r[0] == 'deps':
+                                    continue  # 依赖链太深，跳过
+                                return r
+                # 所有依赖变量都没找到可控来源，返回未确认
+                return 3, None
             return result
 
     # 如果在函数内且没找到赋值，检查是否是函数参数
@@ -891,7 +925,18 @@ def _find_function_def(tree, func_name):
 def _trace_function_return(func_def, call_node, lineno, file_path,
                             repair_functions, controlled_params,
                             visited_funcs, depth, tree):
-    """追踪函数的返回值是否可控"""
+    """追踪函数的返回值是否可控
+    
+    核心原则：函数体是封闭作用域，只通过形参→实参映射判断可控性。
+    不在函数体内再调 parameters_back（避免和调用者的赋值行冲突导致循环）。
+    返回值:
+        (1, source) — 返回值可控，依赖的实参来源
+        (2, func_name) — 返回值经过修复函数处理
+        (3, None) — 未确认
+        (-1, None) — 不可控
+        也可以返回 ('deps', [var1, var2, ...]) 表示返回值依赖这些调用者变量，
+        由上层 _trace_stmt / _trace_in_stmts 继续向上追踪。
+    """
     func_name = func_def.name
 
     # 建立参数映射：调用实参 → 函数形参
@@ -900,24 +945,20 @@ def _trace_function_return(func_def, call_node, lineno, file_path,
     call_args = call_node.args or []
 
     # 收集哪些形参对应的实参是可控的
+    # 注意：这里只用 is_controllable 直接检查，不调 parameters_back
+    # 因为 parameters_back 从 lineno 开始追踪会和当前赋值行冲突
     controllable_param_names = set()
+    caller_var_names = set()  # 实参中引用的变量名，需要上层继续追踪
     for i, param in enumerate(func_args):
         if i < len(call_args):
             arg_str = _expr_to_str(call_args[i])
             arg_map[param.arg] = arg_str
-            # 检查实参是否可控（直接或通过变量追踪）
             if is_controllable(arg_str, controlled_params):
                 controllable_param_names.add(param.arg)
             else:
-                # 反向追踪实参中的变量
-                arg_names = _collect_names(call_args[i])
-                for an in arg_names:
-                    code, _ = parameters_back(an, [], lineno, file_path,
-                                              repair_functions, controlled_params,
-                                              visited_funcs, depth + 1)
-                    if code == 1:
-                        controllable_param_names.add(param.arg)
-                        break
+                # 收集实参中的变量名，但不立即追踪
+                for an in _collect_names(call_args[i]):
+                    caller_var_names.add(an)
 
     # 在函数体内做赋值链传播：如果赋值右边包含可控形参，左边也标记可控
     controllable_local = set(controllable_param_names)
@@ -941,35 +982,31 @@ def _trace_function_return(func_def, call_node, lineno, file_path,
                     func_name, return_str))
                 return 1, return_str
 
-            # 检查返回值中引用的变量是否可控
-            # 先反向追踪：如果返回的变量是可控的
+            # 检查返回值中引用的变量是否在可控局部变量集合中
             return_names = _collect_names(node.value)
-            for rn in return_names:
-                code, cp = parameters_back(rn, [], node.lineno if hasattr(node, 'lineno') else lineno,
-                                            file_path, repair_functions, controlled_params,
-                                            visited_funcs, depth + 1)
-                if code == 1:
-                    logger.debug("[AST][Python] Function {} returns controllable var {} via parameters_back".format(
-                        func_name, rn))
-                    return 1, cp
 
             # 检查返回值是否包含可控局部变量（赋值链传播结果）
             matched = return_names & controllable_local
             if matched:
-                # 找到匹配的可控变量，获取其来源
+                # 可控局部变量最终来自形参 → 形参来自调用处的实参
+                # 收集这些实参中的变量名，返回给上层继续追踪
+                deps = set()
                 for var_name in matched:
                     if var_name in arg_map:
-                        src = arg_map[var_name]
-                        logger.debug("[AST][Python] Function {} returns controllable param {} (source: {})".format(
-                            func_name, var_name, src))
-                        return 1, src
+                        # 形参直接出现在返回值中 → 取对应实参的变量名
+                        arg_str = arg_map[var_name]
+                        if is_controllable(arg_str, controlled_params):
+                            return 1, arg_str
+                        deps.update(_collect_names_from_str(arg_str))
                     else:
-                        # 局部变量间接传播到 return
-                        logger.debug("[AST][Python] Function {} returns controllable local var {}".format(
-                            func_name, var_name))
-                        return 1, var_name
+                        # 局部变量间接传播 → 其来源仍可追溯到形参
+                        deps.update(_collect_names(node.value))
+                if deps:
+                    logger.debug("[AST][Python] Function {} return depends on caller vars: {}".format(
+                        func_name, deps))
+                    return 'deps', list(deps)
 
-            # fallback: 文本匹配
+            # fallback: 文本匹配形参名出现在返回值中
             return_str = _expr_to_str(node.value)
             for param_name, arg_str in arg_map.items():
                 if is_controllable(arg_str, controlled_params):
@@ -977,6 +1014,13 @@ def _trace_function_return(func_def, call_node, lineno, file_path,
                         logger.debug("[AST][Python] Function {} returns controllable param {} (text match)".format(
                             func_name, param_name))
                         return 1, arg_str
+
+    # 返回值没有明确的可控来源，但有未确认的调用者变量
+    # 把 caller_var_names 交给上层继续追踪
+    if caller_var_names:
+        logger.debug("[AST][Python] Function {} return may depend on caller vars: {}".format(
+            func_name, caller_var_names))
+        return 'deps', list(caller_var_names)
 
     return 3, None
 
