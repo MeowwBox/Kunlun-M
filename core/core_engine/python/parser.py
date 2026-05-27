@@ -3,13 +3,14 @@
 """
     Python AST Parser — Python 反向污点追踪引擎
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    仿照 Java parser 实现，使用 Python 内置 ast 模块进行污点分析。
 
     :author:    LoRexxar <LoRexxar@gmail.com>
     :homepage:  https://github.com/LoRexxar/Kunlun-M
     :license:   MIT, see LICENSE for more details.
     :copyright: Copyright (c) 2017 LoRexxar. All rights reserved
 """
+import sys
+sys.setrecursionlimit(3000)
 import ast
 import os
 import re
@@ -41,6 +42,8 @@ BUILTIN_SENSITIVE_SINKS = [
 # ---------------------------------------------------------------------------
 # 辅助函数
 # ---------------------------------------------------------------------------
+# 模块级追踪去重集合，防止 parameters_back 循环递归
+_trace_visited = set()
 
 def _parse_imports(tree, file_path):
     """解析 AST 中的 import 语句，返回 {imported_name: module_file_path} 映射
@@ -211,34 +214,34 @@ def _contains_name(node, name):
     return False
 
 
-def _collect_names(node, names=None):
+def _collect_names(node, names=None, _depth=0):
     """递归收集表达式中所有变量名"""
     if names is None:
         names = set()
 
-    if node is None:
+    if node is None or _depth > 20:
         return names
 
     if isinstance(node, ast.Name):
         names.add(node.id)
 
     elif isinstance(node, ast.BinOp):
-        _collect_names(node.left, names)
-        _collect_names(node.right, names)
+        _collect_names(node.left, names, _depth+1)
+        _collect_names(node.right, names, _depth+1)
 
     elif isinstance(node, ast.BoolOp):
         for v in node.values:
-            _collect_names(v, names)
+            _collect_names(v, names, _depth+1)
 
     elif isinstance(node, ast.UnaryOp):
-        _collect_names(node.operand, names)
+        _collect_names(node.operand, names, _depth+1)
 
     elif isinstance(node, ast.Call):
-        _collect_names(node.func, names)
+        _collect_names(node.func, names, _depth+1)
         for arg in (node.args or []):
-            _collect_names(arg, names)
+            _collect_names(arg, names, _depth+1)
         for kw in (node.keywords or []):
-            _collect_names(kw.value, names)
+            _collect_names(kw.value, names, _depth+1)
 
     elif isinstance(node, ast.Attribute):
         # 保留完整属性名（如 self.base, obj.attr），而不是只取 value
@@ -246,32 +249,32 @@ def _collect_names(node, names=None):
         if full_name:
             names.add(full_name)
         # 同时递归收集基础变量名（如 myFile.name → 也收集 myFile）
-        _collect_names(node.value, names)
+        _collect_names(node.value, names, _depth+1)
 
     elif isinstance(node, ast.Subscript):
-        _collect_names(node.value, names)
-        _collect_names(node.slice, names)
+        _collect_names(node.value, names, _depth+1)
+        _collect_names(node.slice, names, _depth+1)
 
     elif isinstance(node, (ast.List, ast.Tuple, ast.Set)):
         for elt in node.elts:
-            _collect_names(elt, names)
+            _collect_names(elt, names, _depth+1)
 
     elif isinstance(node, ast.JoinedStr):
         for v in node.values:
             if isinstance(v, ast.FormattedValue):
-                _collect_names(v.value, names)
+                _collect_names(v.value, names, _depth+1)
 
     elif isinstance(node, ast.IfExp):
-        _collect_names(node.test, names)
-        _collect_names(node.body, names)
-        _collect_names(node.orelse, names)
+        _collect_names(node.test, names, _depth+1)
+        _collect_names(node.body, names, _depth+1)
+        _collect_names(node.orelse, names, _depth+1)
 
     elif isinstance(node, ast.Dict):
         for k in (node.keys or []):
             if k:
-                _collect_names(k, names)
+                _collect_names(k, names, _depth+1)
         for v in (node.values or []):
-            _collect_names(v, names)
+            _collect_names(v, names, _depth+1)
 
     return names
 
@@ -363,7 +366,7 @@ def parameters_back(param_name, nodes, vul_lineno, file_path,
     if visited_funcs is None:
         visited_funcs = set()
 
-    if depth > 10:
+    if depth > 5:
         return -1, None
 
     tree = _ast_object_singleton.get_nodes(file_path)
@@ -1121,7 +1124,10 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
     :param svid: 规则 ID
     :return: scan_results 列表，每个元素是 {"code": N, "chain": [...], "source": ...}
     """
-    global scan_results, is_repair_functions, is_controlled_params, scan_chain
+    global scan_results, is_repair_functions, is_controlled_params, scan_chain, _trace_visited
+
+    # 清空追踪去重集合
+    _trace_visited = set()
 
     try:
         scan_chain = ["start"]
