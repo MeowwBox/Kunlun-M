@@ -152,6 +152,43 @@ class BuiltinKnowledge:
         "re.search":    {"passthrough": [1], "safe": False},
         "re.findall":   {"passthrough": [1], "safe": False},
         "re.split":     {"passthrough": [1], "safe": False},
+
+        # ===== Django =====
+        "django.utils.safestring.mark_safe":  {"passthrough": [0], "safe": False},  # 标记安全但不实际过滤
+        "django.utils.safestring.SafeString": {"passthrough": [0], "safe": False},
+        "django.template.loader.render_to_string": {"passthrough": [0], "safe": False},
+
+        # ===== Flask =====
+        "flask.escape":            {"passthrough": [0], "safe": True},  # 同 markupsafe.escape
+        "flask.render_template":   {"passthrough": [0], "safe": False},
+        "flask.render_template_string": {"passthrough": [0], "safe": False},
+        "flask.redirect":          {"passthrough": [0], "safe": False},
+        "flask.url_for":           {"passthrough": [], "safe": True},
+        "flask.jsonify":           {"passthrough": [0], "safe": False},
+        "flask.send_file":         {"passthrough": [0], "safe": False},
+
+        # ===== FastAPI/Starlette =====
+        "fastapi.Query":    {"passthrough": [0], "safe": False},
+        "fastapi.Path":     {"passthrough": [0], "safe": False},
+        "fastapi.Body":     {"passthrough": [0], "safe": False},
+        "fastapi.Form":     {"passthrough": [0], "safe": False},
+        "fastapi.File":     {"passthrough": [0], "safe": False},
+        "fastapi.Depends":  {"passthrough": [0], "safe": False},
+        "starlette.responses.HTMLResponse": {"passthrough": [0], "safe": False},
+        "starlette.responses.JSONResponse": {"passthrough": [0], "safe": False},
+
+        # ===== Tornado =====
+        "tornado.escape.xhtml_escape":  {"passthrough": [0], "safe": True},
+        "tornado.escape.url_escape":    {"passthrough": [0], "safe": False},
+        "tornado.escape.json_encode":   {"passthrough": [0], "safe": False},
+        "tornado.escape.squeeze":       {"passthrough": [0], "safe": False},
+
+        # ===== Jinja2 =====
+        "jinja2.escape":     {"passthrough": [0], "safe": True},
+        "jinja2.Markup":     {"passthrough": [0], "safe": False},  # 标记安全但不过滤
+
+        # ===== Celery =====
+        "celery.utils.serialization.unpickle": {"passthrough": [0], "safe": False},
     }
 
     PHP = {
@@ -280,6 +317,59 @@ class BuiltinKnowledge:
         "exit":         {"passthrough": [], "safe": True},
         "header":       {"passthrough": [], "safe": True},
         "http_response_code": {"passthrough": [], "safe": True},
+
+        # ===== Laravel =====
+        "e":                    {"passthrough": [0], "safe": True},
+        "csrf_field":           {"passthrough": [], "safe": True},
+        "csrf_token":           {"passthrough": [], "safe": True},
+        "redirect":             {"passthrough": [0], "safe": False},
+        "route":                {"passthrough": [], "safe": True},
+        "asset":                {"passthrough": [], "safe": True},
+        "url":                  {"passthrough": [0], "safe": False},
+        "action":               {"passthrough": [], "safe": True},
+        "response":             {"passthrough": [0], "safe": False},
+        "old":                  {"passthrough": [0], "safe": False},
+        "session":              {"passthrough": [0], "safe": False},
+        "cookie":               {"passthrough": [0], "safe": False},
+        "config":               {"passthrough": [0], "safe": False},
+        "env":                  {"passthrough": [0], "safe": False},
+        "app":                  {"passthrough": [0], "safe": False},
+        "request":              {"passthrough": [0], "safe": False},
+        "Illuminate\\Support\\Str::limit":     {"passthrough": [0], "safe": False},
+        "Illuminate\\Support\\Str::words":     {"passthrough": [0], "safe": False},
+        "Illuminate\\Support\\Str::slug":      {"passthrough": [0], "safe": False},
+        "Illuminate\\Support\\Str::studly":    {"passthrough": [0], "safe": False},
+        "Illuminate\\Support\\Str::camel":     {"passthrough": [0], "safe": False},
+        "Illuminate\\Support\\Str::kebab":     {"passthrough": [0], "safe": False},
+        "Illuminate\\Support\\Str::snake":     {"passthrough": [0], "safe": False},
+        "Illuminate\\Support\\Str::title":     {"passthrough": [0], "safe": False},
+
+        # ===== ThinkPHP =====
+        "input":                {"passthrough": [0], "safe": False},
+        "I":                    {"passthrough": [0], "safe": False},
+
+        # ===== WordPress =====
+        "esc_html":             {"passthrough": [0], "safe": True},
+        "esc_attr":             {"passthrough": [0], "safe": True},
+        "esc_url":              {"passthrough": [0], "safe": True},
+        "esc_js":               {"passthrough": [0], "safe": True},
+        "esc_textarea":         {"passthrough": [0], "safe": True},
+        "wp_kses":              {"passthrough": [0], "safe": True},
+        "wp_kses_post":         {"passthrough": [0], "safe": True},
+        "sanitize_text_field":  {"passthrough": [0], "safe": True},
+        "sanitize_email":       {"passthrough": [0], "safe": True},
+        "sanitize_title":       {"passthrough": [0], "safe": True},
+        "sanitize_file_name":   {"passthrough": [0], "safe": True},
+        "wp_nonce_field":       {"passthrough": [], "safe": True},
+        "wp_nonce_url":         {"passthrough": [0], "safe": False},
+        "wp_verify_nonce":      {"passthrough": [], "safe": True},
+        "wp_safe_redirect":     {"passthrough": [0], "safe": True},
+        "absint":               {"passthrough": [], "safe": True},
+        "wp_kses_allowed_html": {"passthrough": [0], "safe": True},
+
+        # ===== CodeIgniter =====
+        "xss_clean":            {"passthrough": [0], "safe": True},
+        "html_escape":          {"passthrough": [0], "safe": True},
     }
 
     JAVASCRIPT = {
@@ -392,6 +482,41 @@ class BuiltinKnowledge:
         "Math.max":     {"passthrough": [], "safe": True},
         "Math.min":     {"passthrough": [], "safe": True},
         "Math.random":  {"passthrough": [], "safe": True},
+
+        # ===== Express =====
+        "express":              {"passthrough": [], "safe": True},
+
+        # ===== jQuery =====
+        "html":                 {"passthrough": [0], "safe": False},
+        "append":               {"passthrough": [0], "safe": False},
+        "prepend":              {"passthrough": [0], "safe": False},
+        "after":                {"passthrough": [0], "safe": False},
+        "before":               {"passthrough": [0], "safe": False},
+        "replaceWith":          {"passthrough": [0], "safe": False},
+        "text":                 {"passthrough": [], "safe": True},
+        "attr":                 {"passthrough": [1], "safe": False},
+        "val":                  {"passthrough": [0], "safe": False},
+        "css":                  {"passthrough": [1], "safe": False},
+
+        # ===== Vue.js =====
+        "v-html":               {"passthrough": [0], "safe": False},
+        "$createElement":        {"passthrough": [0], "safe": False},
+
+        # ===== React =====
+        "dangerouslySetInnerHTML": {"passthrough": [0], "safe": False},
+
+        # ===== template engines =====
+        "res.render":           {"passthrough": [0], "safe": False},
+        "res.send":             {"passthrough": [0], "safe": False},
+        "res.json":             {"passthrough": [0], "safe": False},
+        "res.sendFile":         {"passthrough": [0], "safe": False},
+        "res.redirect":         {"passthrough": [0], "safe": False},
+        "res.write":            {"passthrough": [0], "safe": False},
+        "ejs.render":           {"passthrough": [0], "safe": False},
+        "ejs.renderFile":       {"passthrough": [0], "safe": False},
+        "pug.render":           {"passthrough": [0], "safe": False},
+        "handlebars.compile":   {"passthrough": [0], "safe": False},
+        "nunjucks.render":      {"passthrough": [0], "safe": False},
     }
 
     JAVA = {
@@ -466,6 +591,49 @@ class BuiltinKnowledge:
         "charAt":       {"passthrough": [0], "safe": False},
         "codePointAt":  {"passthrough": [], "safe": True},
         "hashCode":     {"passthrough": [], "safe": True},
+
+        # ===== Spring Framework =====
+        "HtmlUtils.htmlEscape":              {"passthrough": [0], "safe": True},
+        "HtmlUtils.htmlEscapeDecimal":       {"passthrough": [0], "safe": True},
+        "HtmlUtils.htmlEscapeHex":           {"passthrough": [0], "safe": True},
+        "JavascriptUtils.javaScriptEscape":  {"passthrough": [0], "safe": True},
+
+        # ===== Servlet =====
+        "getParameter":         {"passthrough": [0], "safe": False},
+        "getParameterValues":   {"passthrough": [0], "safe": False},
+        "getParameterMap":      {"passthrough": [0], "safe": False},
+        "getHeader":            {"passthrough": [0], "safe": False},
+        "getHeaders":           {"passthrough": [0], "safe": False},
+        "getHeaderNames":       {"passthrough": [0], "safe": False},
+        "getCookies":           {"passthrough": [0], "safe": False},
+        "getQueryString":       {"passthrough": [0], "safe": False},
+        "getRequestURI":        {"passthrough": [0], "safe": False},
+        "getContextPath":       {"passthrough": [0], "safe": False},
+        "getPathInfo":          {"passthrough": [0], "safe": False},
+        "getInputStream":       {"passthrough": [0], "safe": False},
+        "getReader":            {"passthrough": [0], "safe": False},
+        "getAttribute":         {"passthrough": [0], "safe": False},
+        "getSession":           {"passthrough": [0], "safe": False},
+        "getServletContext":    {"passthrough": [0], "safe": False},
+
+        # ===== Response sinks =====
+        "getWriter":            {"passthrough": [0], "safe": False},
+        "getOutputStream":      {"passthrough": [0], "safe": False},
+        "setHeader":            {"passthrough": [1], "safe": False},
+        "addHeader":            {"passthrough": [1], "safe": False},
+        "sendRedirect":         {"passthrough": [0], "safe": False},
+        "sendError":            {"passthrough": [0], "safe": False},
+        "addCookie":            {"passthrough": [0], "safe": False},
+
+        # ===== MyBatis =====
+        # ${} interpolation is unsafe, handled at rule level
+
+        # ===== Jackson/Gson =====
+        "readValue":            {"passthrough": [0], "safe": False},
+        "readTree":             {"passthrough": [0], "safe": False},
+        "writeValueAsString":   {"passthrough": [0], "safe": False},
+        "toJson":               {"passthrough": [0], "safe": False},
+        "fromJson":             {"passthrough": [0], "safe": False},
     }
 
     @classmethod
