@@ -557,16 +557,57 @@ def is_controllable(expr, flag=None):  # 获取表达式中的变量，看是否
 # return is_co, cp, expr_lineno
 
 
+def _collect_var_names(node):
+    """从 AST 节点中递归收集所有变量名（字符串形式 '$xxx'）。"""
+    names = set()
+    if isinstance(node, php.Variable):
+        names.add(node.name)
+    elif isinstance(node, php.BinaryOp):
+        names.update(_collect_var_names(node.left))
+        names.update(_collect_var_names(node.right))
+    elif isinstance(node, php.FunctionCall) or isinstance(node, _METHOD_CALL_TYPES):
+        if hasattr(node, 'params'):
+            for p in node.params:
+                if hasattr(p, 'node'):
+                    names.update(_collect_var_names(p.node))
+                elif hasattr(p, 'value'):
+                    names.update(_collect_var_names(p.value))
+    elif isinstance(node, php.ArrayOffset):
+        names.update(_collect_var_names(node.node))
+    elif isinstance(node, php.Assignment):
+        names.update(_collect_var_names(node.expr))
+    elif isinstance(node, php.Cast):
+        names.update(_collect_var_names(node.expr))
+    elif isinstance(node, php.Silence):
+        names.update(_collect_var_names(node.expr))
+    elif isinstance(node, php.TernaryOp):
+        names.update(_collect_var_names(node.expr))
+        names.update(_collect_var_names(node.iftrue))
+        names.update(_collect_var_names(node.iffalse))
+    return names
+
+
 def function_back(param, nodes, function_params, vul_function=None, file_path=None, isback=None,
                   parent_node=None):  # 回溯函数定义位置
     """
-    递归回溯函数定义位置，传入param类型不同
+    递归回溯函数定义位置，使用 deps 机制避免循环递归。
+
+    核心原则：函数体是封闭作用域，只通过形参→实参映射判断可控性。
+    不在函数体内再调 parameters_back（避免和调用者的赋值行冲突导致循环）。
+
+    返回值:
+        (1, cp, expr_lineno) — 返回值直接可控
+        (2, cp, expr_lineno) — 返回值经过修复函数处理
+        (3, cp, expr_lineno) — 未确认
+        (-1, cp, expr_lineno) — 不可控
+        ('deps', [变量名列表], expr_lineno) — 返回值依赖调用者变量，由 parameters_back 继续向上追踪
+
     :param parent_node: 
     :param isback: 
     :param file_path: 
     :param function_params: 
     :param vul_function: 
-    :param param: 
+    :param param: 函数调用节点（FunctionCall / MethodCall / StaticMethodCall）
     :param nodes: 
     :return: 
     """
@@ -586,38 +627,27 @@ def function_back(param, nodes, function_params, vul_function=None, file_path=No
 
     try:
         for node in nodes[::-1]:
+            # ---- 普通函数 ----
             if isinstance(node, php.Function):
                 if node.name == function_name:
-                    function_nodes = node.nodes
+                    called_func = node          # 函数定义节点
+                    function_body = node.nodes  # 函数体语句列表
+                    result = _analyze_return_deps(
+                        called_func, function_body, param,
+                        file_path=file_path, isback=isback)
+                    return result
 
-                    # 进入递归函数内语句
-                    for function_node in function_nodes:
-                        if isinstance(function_node, php.Return):
-                            return_node = function_node.node
-                            # return_param = return_node.node
-
-                            is_co, cp, expr_lineno = parameters_back(return_node, function_nodes, function_params,
-                                                                     vul_function=vul_function, file_path=file_path,
-                                                                     isback=isback, parent_node=parent_node)
-
-                            return is_co, cp, expr_lineno
-
+            # ---- 类方法 ----
             if isinstance(node, php.Class):
                 class_nodes = node.nodes
-
                 for class_node in class_nodes:
                     if isinstance(class_node, php.Method) and class_node.name == function_name:
-                        method_nodes = class_node.nodes
-
-                        for method_node in method_nodes:
-                            if isinstance(method_node, php.Return):
-                                return_node = method_node.node
-                                # return_param = return_node.node
-
-                                is_co, cp, expr_lineno = parameters_back(return_node, method_nodes, function_params,
-                                                                         vul_function=vul_function, file_path=file_path,
-                                                                         isback=isback, parent_node=parent_node)
-                                return is_co, cp, expr_lineno
+                        called_func = class_node          # 方法定义节点
+                        method_body = class_node.nodes     # 方法体语句列表
+                        result = _analyze_return_deps(
+                            called_func, method_body, param,
+                            file_path=file_path, isback=isback)
+                        return result
     finally:
         if scan_function_stack and scan_function_stack[-1] == function_name:
             scan_function_stack.pop()
@@ -628,6 +658,140 @@ def function_back(param, nodes, function_params, vul_function=None, file_path=No
                 pass
 
     return is_co, cp, expr_lineno
+
+
+def _analyze_return_deps(called_func, function_body, call_node,
+                         file_path=None, isback=None):
+    """
+    分析函数/方法的返回值依赖哪些形参，通过形参→实参映射得到调用者变量名列表。
+
+    不在函数体内调用 parameters_back，避免循环递归。
+
+    :param called_func:  函数/方法定义节点（php.Function 或 php.Method）
+    :param function_body: 函数体语句列表 (called_func.nodes)
+    :param call_node:    调用处的 FunctionCall / MethodCall 节点（含实参 param.params）
+    :return: 同 function_back 的返回值格式
+    """
+    # ---- 1. 建立形参→实参映射 ----
+    # called_func.params = [FormalParameter('$a', ...), ...]
+    # call_node.params   = [Parameter(Variable('$x'), ...), ...]
+    formal_params = called_func.params if hasattr(called_func, 'params') else []
+    actual_params = call_node.params if hasattr(call_node, 'params') else []
+
+    # 形参名列表：['$a', '$b', ...]
+    formal_param_names = []
+    for fp in formal_params:
+        if hasattr(fp, 'name'):
+            formal_param_names.append(fp.name)
+        elif isinstance(fp, str):
+            formal_param_names.append(fp)
+
+    # arg_map: 形参名 → 实参 AST 节点
+    arg_map = {}
+    for i, name in enumerate(formal_param_names):
+        if i < len(actual_params):
+            ap = actual_params[i]
+            # Parameter 节点的 .node 才是实际表达式
+            if hasattr(ap, 'node'):
+                arg_map[name] = ap.node
+            elif hasattr(ap, 'value'):
+                arg_map[name] = ap.value
+            else:
+                arg_map[name] = ap
+
+    # 收集实参中引用的变量名（用于 fallback deps）
+    caller_var_names = set()
+    for ap in actual_params:
+        actual_expr = ap.node if hasattr(ap, 'node') else (ap.value if hasattr(ap, 'value') else ap)
+        for vn in _collect_var_names(actual_expr):
+            caller_var_names.add(vn)
+
+    # ---- 2. 收集可控形参（实参直接可控的形参） ----
+    controllable_formal = set()
+    for name, actual_expr in arg_map.items():
+        co, _ = is_controllable(actual_expr)
+        if co == 1:
+            controllable_formal.add(name)
+
+    # ---- 3. 函数体内赋值链传播：右部引用可控变量 → 左部也标记可控 ----
+    controllable_local = set(controllable_formal)
+    for _ in range(3):  # 迭代传播，最多 3 轮
+        changed = False
+        for func_node in function_body:
+            if isinstance(func_node, php.Assignment):
+                lhs_name = get_node_name(func_node.node) if hasattr(func_node, 'node') else None
+                if lhs_name and lhs_name not in controllable_local:
+                    rhs_names = _collect_var_names(func_node.expr)
+                    if rhs_names & controllable_local:
+                        controllable_local.add(lhs_name)
+                        changed = True
+        if not changed:
+            break
+
+    # ---- 4. 查找 return 语句并分析依赖 ----
+    for func_node in function_body:
+        if isinstance(func_node, php.Return):
+            return_expr = func_node.node
+            if return_expr is None:
+                continue
+            expr_lineno = func_node.lineno if hasattr(func_node, 'lineno') else 0
+
+            # 4a. 检查返回值表达式本身是否直接可控
+            co, cp_val = is_controllable(return_expr)
+            if co == 1:
+                logger.debug("[AST][PHP] Function {} returns controllable source directly".format(
+                    called_func.name if hasattr(called_func, 'name') else call_node.name))
+                return 1, cp_val, expr_lineno
+
+            # 4b. 如果返回值是函数调用，检查是否为修复函数
+            if isinstance(return_expr, (php.FunctionCall,)) or isinstance(return_expr, _METHOD_CALL_TYPES):
+                if is_repair(return_expr.name):
+                    return 2, return_expr, expr_lineno
+
+            # 4c. 收集返回值表达式中引用的变量名
+            return_names = _collect_var_names(return_expr)
+
+            # 检查是否包含可控局部变量（形参或赋值链传播结果）
+            matched = return_names & controllable_local
+            if matched:
+                deps = set()
+                for var_name in matched:
+                    if var_name in arg_map:
+                        # 形参直接出现在返回值中 → 取对应实参的变量名
+                        actual_expr = arg_map[var_name]
+                        co2, cp2 = is_controllable(actual_expr)
+                        if co2 == 1:
+                            return 1, cp2, expr_lineno
+                        # 从实参表达式中收集变量名
+                        deps.update(_collect_var_names(actual_expr))
+                    else:
+                        # 局部变量间接传播 → 继续从返回值表达式中收集变量名
+                        deps.update(return_names)
+                if deps:
+                    logger.debug("[AST][PHP] Function {} return depends on caller vars: {}".format(
+                        call_node.name, deps))
+                    return 'deps', list(deps), expr_lineno
+
+            # 4d. fallback: 文本匹配形参名出现在返回值中
+            try:
+                return_str = str(return_expr)
+            except Exception:
+                return_str = ''
+            for param_name, actual_expr in arg_map.items():
+                co3, cp3 = is_controllable(actual_expr)
+                if co3 == 1:
+                    if param_name in return_str or param_name in return_names:
+                        logger.debug("[AST][PHP] Function {} returns controllable param {} (text match)".format(
+                            call_node.name, param_name))
+                        return 1, cp3, expr_lineno
+
+    # ---- 5. 返回值没有明确可控来源，但有未确认的调用者变量 ----
+    if caller_var_names:
+        logger.debug("[AST][PHP] Function {} return may depend on caller vars: {}".format(
+            call_node.name, caller_var_names))
+        return 'deps', list(caller_var_names), 0
+
+    return 3, call_node, 0
 
 
 def array_back(param, nodes, vul_function=None, file_path=None, isback=None):  # 回溯数组定义赋值
@@ -837,6 +1001,21 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
     if isinstance(param, _FUNCTION_CALL_TYPES) and is_co != 1:  # 当污点为寻找函数时，递归进入寻找函数
         logger.debug("[AST] AST analysis for FunctionCall or MethodCall {} in line {}".format(param.name, param.lineno))
         is_co, cp, expr_lineno = function_back(param, nodes, function_params, file_path=file_path, isback=isback)
+        # deps 机制：函数返回值依赖调用者变量，跳过当前节点继续向上追踪
+        if isinstance(is_co, str) and is_co == 'deps' and isinstance(cp, list):
+            for dep_var in cp:
+                if hasattr(dep_var, 'name'):
+                    dep_name = get_node_name(dep_var)
+                else:
+                    dep_name = str(dep_var)
+                # 从 nodes[:-1] 继续追踪依赖变量
+                is_co2, cp2, expr_lineno2 = parameters_back(build_ast_param(dep_name), nodes[:-1], function_params, lineno,
+                                                              function_flag=function_flag, vul_function=vul_function,
+                                                              file_path=file_path, isback=isback, parent_node=0)
+                if is_co2 == 1:
+                    return is_co2, cp2, expr_lineno2
+            # 所有依赖变量都没找到可控来源
+            return 3, param, expr_lineno
         return is_co, cp, expr_lineno
 
     if isinstance(param, php.ArrayOffset):  # 当污点为数组时，递归进入寻找数组声明或赋值
