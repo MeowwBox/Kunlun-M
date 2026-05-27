@@ -17,6 +17,7 @@ import traceback
 from core.core_engine.php.parser import scan_parser as php_scan_parser
 from core.core_engine.javascript.parser import scan_parser as js_scan_parser
 from core.core_engine.java.parser import scan_parser as java_scan_parser
+from core.core_engine.python.parser import scan_parser as python_scan_parser
 
 from .cast import CAST
 from .filters import VulnerabilityFilter
@@ -116,6 +117,13 @@ class VulnerabilityMatcher(object):
             b = __import__('rules.tamper.demo_java', fromlist=['JAVA_IS_CONTROLLED_DEFAULT'])
             self.controlled_list = getattr(b, 'JAVA_IS_CONTROLLED_DEFAULT')
 
+        elif self.lan == "python":
+            a = __import__("rules.tamper.demo_python", fromlist=["PYTHON_IS_REPAIR_DEFAULT"])
+            self.repair_dict = getattr(a, "PYTHON_IS_REPAIR_DEFAULT")
+
+            b = __import__("rules.tamper.demo_python", fromlist=["PYTHON_IS_CONTROLLED_DEFAULT"])
+            self.controlled_list = getattr(b, "PYTHON_IS_CONTROLLED_DEFAULT")
+
         # 如果指定加载某个tamper，那么无视语言
         if self.tamper_name is not None:
             try:
@@ -180,6 +188,7 @@ class VulnerabilityMatcher(object):
             'javascript': self._scan_javascript,
             'chromeext': self._scan_chromeext,
             'java': self._scan_java,
+            'python': self._scan_python,
         }
         handler = dispatch.get(self.lan, self._scan_generic)
         return handler()
@@ -473,6 +482,55 @@ class VulnerabilityMatcher(object):
         except Exception as e:
             logger.debug(traceback.format_exc())
             return False, 'Exception'
+
+    def _scan_python(self):
+        """Python 扫描（支持 only-regex、function-param-controllable、vustomize-match）"""
+        try:
+            self.init_php_repair()
+            ast = CAST(self.rule_match, self.target_directory, self.file_path, self.line_number,
+                       self.code_content, files=self.files, rule_class=self.single_rule,
+                       repair_functions=self.repair_functions, controlled_params=self.controlled_list)
+
+            if self.rule_match_mode == const.mm_regex_only_match:
+                logger.debug("[CVI-{cvi}] [ONLY-MATCH]".format(cvi=self.cvi))
+                return True, "Regex-only-match"
+
+            elif self.rule_match_mode == const.mm_function_param_controllable:
+                rule_match = self.rule_match.strip("()").split("|")
+                # 清理正则转义: Python AST parser 做精确字符串匹配，不需要反斜杠和括号
+                rule_match = [r.replace('\\.', '.').replace('\\(', '(').replace('\\)', ')').rstrip('(') for r in rule_match]
+                logger.debug("[RULE_MATCH] {r}".format(r=rule_match))
+                try:
+                    result = python_scan_parser(rule_match, self.line_number, self.file_path,
+                                                repair_functions=self.repair_functions,
+                                                controlled_params=self.controlled_list, svid=self.cvi)
+                    logger.debug("[AST] [RET] {c}".format(c=result))
+                    if len(result) > 0:
+                        parsed = self._parse_ast_result(result)
+                        if parsed is not None:
+                            return parsed
+                    else:
+                        logger.debug(
+                            "[AST] Parser failed / vulnerability parameter is not controllable {r}".format(
+                                r=result))
+                        return False, "Can\"t parser"
+                except Exception:
+                    exc_msg = traceback.format_exc()
+                    logger.warning(exc_msg)
+                    raise
+
+            elif self.rule_match_mode == const.mm_regex_param_controllable:
+                return self._handle_vustomize_match(ast)
+
+            else:
+                logger.warn(
+                    "[CVI-{cvi}] Python unsupported match mode: {m}".format(
+                        cvi=self.cvi, m=self.rule_match_mode))
+                return False, "Unsupport Match"
+
+        except Exception as e:
+            logger.debug(traceback.format_exc())
+            return False, "Exception"
 
     def _scan_generic(self):
         try:

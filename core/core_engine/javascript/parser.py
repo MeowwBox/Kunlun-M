@@ -362,10 +362,68 @@ def check_param(param, vul_lineno=0):
     return new_param
 
 
+def _collect_js_var_names(node, names=None):
+    """递归收集 JS AST 节点中的所有变量名（Identifier 类型）"""
+    if names is None:
+        names = set()
+    if node is None:
+        return names
+    if hasattr(node, 'type'):
+        if node.type == 'Identifier':
+            names.add(node.name)
+        elif node.type == 'MemberExpression':
+            _collect_js_var_names(node.object, names)
+            _collect_js_var_names(node.property, names)
+        elif node.type == 'CallExpression':
+            _collect_js_var_names(node.callee, names)
+            for arg in (node.arguments or []):
+                _collect_js_var_names(arg, names)
+        elif node.type == 'BinaryExpression':
+            _collect_js_var_names(node.left, names)
+            _collect_js_var_names(node.right, names)
+        elif node.type == 'UnaryExpression':
+            _collect_js_var_names(node.argument, names)
+        elif node.type == 'ConditionalExpression':
+            _collect_js_var_names(node.test, names)
+            _collect_js_var_names(node.consequent, names)
+            _collect_js_var_names(node.alternate, names)
+        elif node.type == 'LogicalExpression':
+            _collect_js_var_names(node.left, names)
+            _collect_js_var_names(node.right, names)
+        elif node.type == 'AssignmentExpression':
+            _collect_js_var_names(node.left, names)
+            _collect_js_var_names(node.right, names)
+        elif node.type == 'ArrayExpression':
+            for elem in (node.elements or []):
+                if elem:
+                    _collect_js_var_names(elem, names)
+        elif node.type == 'ObjectExpression':
+            for prop in (node.properties or []):
+                if hasattr(prop, 'value') and prop.value:
+                    _collect_js_var_names(prop.value, names)
+        elif node.type == 'SequenceExpression':
+            for expr in (node.expressions or []):
+                _collect_js_var_names(expr, names)
+        elif node.type == 'TemplateLiteral':
+            for expr in (node.expressions or []):
+                _collect_js_var_names(expr, names)
+        elif node.type == 'SpreadElement':
+            _collect_js_var_names(node.argument, names)
+        # 对于 FunctionExpression / FunctionDeclaration / ArrowFunctionExpression，
+        # 不深入其 body，避免收集函数内部定义的局部变量名
+    elif isinstance(node, list):
+        for item in node:
+            _collect_js_var_names(item, names)
+    return names
+
+
 def function_back(function_node, function_params, back_nodes=None, file_path=None, isback=False, vul_function=None, method_name=None,
                   iscall=False):
     """
-    用于回溯参数为函数变量的时候
+    用于回溯参数为函数变量的时候，使用 deps 机制避免函数体内的循环递归。
+    不在函数体内调用 parameters_back，而是分析 return 表达式依赖哪些形参，
+    返回 ('deps', [形参名字符串列表], lineno) 由外层映射为调用者实参。
+    
     :param function_params:
     :param back_nodes:
     :param iscall:
@@ -374,7 +432,11 @@ def function_back(function_node, function_params, back_nodes=None, file_path=Non
     :param function_node: 
     :param file_path: 
     :param isback: 
-    :return: 
+    :return: (is_co, cp, expr_lineno)
+        is_co=1: 返回值直接可控
+        is_co=4: 依赖形参，cp 为形参名列表（来自 iscall=True 时）
+        ('deps', [形参名列表], lineno): 依赖形参，由外层映射实参
+        is_co=3: 未确认
     """
     function_body = function_node.body.body
     function_name = get_member_data(function_node.id) if get_member_data(function_node.id) else "tmpfunc"
@@ -387,12 +449,11 @@ def function_back(function_node, function_params, back_nodes=None, file_path=Non
 
     logger.debug("[AST] Sounds like found a new function define {}".format(function_name))
 
-    param = vul_function
-    nodes = function_body
-
+    # 寻找函数体中的 ReturnStatement
+    return_node = None
     for node in function_body[::-1]:
-
         if hasattr(node, "type") and node.type == "ReturnStatement":
+            return_node = node
             param = node.argument
 
             # 当返回包含this时，继续分析已经没有意义了
@@ -406,38 +467,59 @@ def function_back(function_node, function_params, back_nodes=None, file_path=Non
 
             break
 
-    is_co, cp, expr_lineno = parameters_back(param, nodes, function_params, file_path=file_path, isback=isback,
-                                             vul_function=vul_function, method_name=method_name)
+    if return_node is None:
+        # 没有 return 语句
+        return is_co, cp, expr_lineno
 
-    if is_co == 3:
-        # 一个特殊情况
-        # 如果函数中有函数调用，但是函数定义不一定在函数里，那么就没办法分析了，
-        # 这里引入back_nodes来处理call函数
+    param = return_node.argument
+    expr_lineno = return_node.loc.start.line
 
-        if hasattr(cp, "type") and cp.type == "CallExpression":
-            is_co, cp, expr_lineno = parameters_back(cp, back_nodes, function_params, file_path=file_path, isback=isback,
-                                                     vul_function=vul_function, method_name=method_name)
+    # 1. 检查 return 表达式是否直接可控
+    is_co, cp = is_controllable(param)
+    if is_co == 1:
+        return is_co, cp, expr_lineno
 
-        if is_co == 3:
-            # 进params获取判断参数是否和目标参数一致
-            for p in function_params:
-                if p == cp or get_member_data(p) == get_member_data(get_original_object(cp)):
-                    if iscall:
-                        # 来自于call的function分析需要进一步分析
-                        is_co = 4
+    # 2. 收集 return 表达式中引用的所有变量名
+    var_names = _collect_js_var_names(param)
 
-                        logger.debug("[AST] back to function call ast analysis...")
-                        return is_co, cp, expr_lineno
+    # 3. 获取函数形参名字符串列表
+    formal_param_names = []
+    for p in function_params:
+        formal_param_names.append(get_member_data(p))
 
-                    logger.debug("[AST] New Function {} rules to regex".format(function_name))
+    # 4. 找出 return 表达式引用的变量中哪些匹配函数形参
+    matched_params = []
+    for vn in var_names:
+        if vn in formal_param_names:
+            matched_params.append(vn)
 
-                    file_path = os.path.normpath(file_path)
-                    code = "param {} in NewFunction {}".format(cp, function_name)
-                    scan_chain.append(('NewFunction', code, file_path, function_lineno))
+    if matched_params:
+        logger.debug("[AST] Function {} return depends on params: {}".format(function_name, matched_params))
 
-                    is_co = 4
-                    cp = tuple([function_node.id, cp, vul_function])
-                    return is_co, cp, 0
+        if iscall:
+            # 来自 call 的 function 分析，返回 code=4 格式（向后兼容）
+            # 使用第一个匹配的形参作为 cp（保持与原逻辑兼容）
+            is_co = 4
+            # cp 保留原始 AST 节点引用，以便外层通过 get_member_data 获取形参名
+            # 这里返回形参名字符串
+            cp = matched_params[0]
+            return is_co, cp, expr_lineno
+
+        # 非 iscall 场景：生成新函数规则
+        logger.debug("[AST] New Function {} rules to regex".format(function_name))
+        file_path = os.path.normpath(file_path)
+        code = "param {} in NewFunction {}".format(cp, function_name)
+        scan_chain.append(('NewFunction', code, file_path, function_lineno))
+
+        is_co = 4
+        cp = tuple([function_node.id, cp, vul_function])
+        return is_co, cp, 0
+
+    # 5. 没有匹配形参，返回 deps 由外层继续向上追踪
+    #    把所有引用的变量名作为 deps 返回
+    if var_names:
+        logger.debug("[AST] Function {} return depends on vars: {}, returning deps".format(function_name, list(var_names)))
+        return 'deps', list(var_names), expr_lineno
 
     return is_co, cp, expr_lineno
 
@@ -498,6 +580,11 @@ def member_back(param, nodes, function_params, file_path=None, isback=False, vul
                     is_co, cp, expr_lineno = function_back(property_value, function_params, back_nodes=nodes, file_path=file_path,
                                                            isback=isback, vul_function=vul_function,
                                                            method_name=method_name)
+
+                    # deps 处理：返回值依赖某些变量，跳过当前节点
+                    if isinstance(is_co, str) and is_co == 'deps':
+                        logger.debug("[AST] member_back function_back returns deps: {}, skip current node".format(cp))
+                        return 3, param, expr_lineno
 
                     if is_co == 3:
                         property_value = cp
@@ -783,17 +870,49 @@ def function_call_back(param, nodes, function_params, file_path=None, isback=Fal
                 is_co, cp, expr_lineno = function_back(node, function_params, back_nodes=nodes, file_path=file_path,
                                                        isback=True, vul_function=vul_function, iscall=True)
 
+                # deps 处理：函数返回值依赖某些变量，但不是形参
+                # 需要将形参映射为调用者实参继续追踪
+                if isinstance(is_co, str) and is_co == 'deps':
+                    # cp 是变量名列表，尝试在外层 nodes 中继续向上追踪这些变量
+                    logger.debug("[AST] function_back returns deps: {}, mapping to caller args".format(cp))
+
+                    # 对于每个依赖变量，检查是否匹配形参，映射为调用者实参
+                    callee_params = param.arguments
+                    formal_param_names = [get_member_data(fp) for fp in function_params]
+
+                    for dep_var in cp:
+                        if dep_var in formal_param_names:
+                            idx = formal_param_names.index(dep_var)
+                            if idx < len(callee_params):
+                                is_co2, cp2, expr_lineno2 = parameters_back(callee_params[idx], nodes, function_params, lineno,
+                                                                             function_flag=0, vul_function=vul_function,
+                                                                             file_path=file_path,
+                                                                             isback=True, method_name=method_name)
+                                if is_co2 == 1:
+                                    return is_co2, cp2, expr_lineno2
+
+                    return 3, param, expr_lineno
+
                 if is_co == 4:
                     # 代表返回变量来自于参数
-                    return_method = get_property_object(cp)
+                    # 在新 deps 机制下，cp 是形参名字符串
+                    formal_param_name = cp if isinstance(cp, str) else get_member_data(cp)
+                    return_method = None
+                    if hasattr(cp, "type") and cp.type == "MemberExpression":
+                        return_method = get_property_object(cp)
                     callee_params = param.arguments
+                    formal_param_names = [get_member_data(fp) for fp in function_params]
 
-                    for callee_param in callee_params:
-                        param = callee_param
-                        is_co, cp, expr_lineno = parameters_back(param, nodes, function_params, lineno,
-                                                                 function_flag=0, vul_function=vul_function,
-                                                                 file_path=file_path,
-                                                                 isback=True, method_name=method_name)
+                    # 将形参映射为调用者实参并追踪
+                    for idx, fp_name in enumerate(formal_param_names):
+                        if fp_name == formal_param_name and idx < len(callee_params):
+                            param = callee_params[idx]
+                            is_co, cp, expr_lineno = parameters_back(param, nodes, function_params, lineno,
+                                                                     function_flag=0, vul_function=vul_function,
+                                                                     file_path=file_path,
+                                                                     isback=True, method_name=method_name)
+                            if is_co == 1:
+                                return is_co, cp, expr_lineno
 
                     if return_method:
                         cp = generate_memberexp(cp, return_method, expr_lineno)
@@ -1114,7 +1233,13 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
                             is_co, cp, expr_lineno = function_back(property_value, function_params, nodes, file_path, isback,
                                                                    vul_function=vul_function, method_name=method_name)
 
-                            if is_co == 4:
+                            # deps 处理：返回值依赖某些变量，跳过当前节点
+                            if isinstance(is_co, str) and is_co == 'deps':
+                                logger.debug("[AST] parameters_back function_back returns deps: {}, skip".format(cp))
+                                # 跳过当前 ObjectExpression，继续向上追踪
+                                is_co = 3
+                                cp = param
+                            elif is_co == 4:
                                 logger.debug("[AST] object.method transfer found {}".format(vul_function))
 
                                 object_name = get_member_data(expression.left)
@@ -1233,6 +1358,12 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
             if param_name == function_name:
                 is_co, cp, expr_lineno = function_back(node, function_params, back_nodes=nodes, file_path=file_path,
                                                        isback=isback, method_name=method_name)
+
+                # deps 处理：返回值依赖某些变量，跳过当前函数定义节点
+                if isinstance(is_co, str) and is_co == 'deps':
+                    logger.debug("[AST] parameters_back function_back returns deps: {}, skip function node".format(cp))
+                    is_co = 3
+                    cp = param
 
                 # 由于从函数内部出来的很有可能是类的私有变量，所以如果私有变量为this的时候
                 return is_co, cp, expr_lineno

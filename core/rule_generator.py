@@ -16,6 +16,7 @@ import traceback
 
 from core.core_engine.php.engine import init_match_rule as php_init_match_rule
 from core.core_engine.javascript.engine import init_match_rule as js_init_match_rule
+from core.core_engine.python.engine import init_match_rule as py_init_match_rule
 
 from rules.autorule import autorule
 from Kunlun_M.const import VulnerabilityResult
@@ -35,6 +36,9 @@ def init_match_rule(data, lan='php'):
 
     if lan.lower() == "javascript":
         return js_init_match_rule(data)
+
+    if lan.lower() == "python":
+        return py_init_match_rule(data)
 
 
 def NewCore(old_single_rule, target_directory, new_rules, files, count=0, languages=None, tamper_name=None,
@@ -63,7 +67,11 @@ def NewCore(old_single_rule, target_directory, new_rules, files, count=0, langua
     match_mode = "New rule to Vustomize-Match"
     logger.debug('[ENGINE] [ORIGIN] match-mode {m}'.format(m=match_mode))
 
-    match, match2, vul_function, index, origin_func_name = init_match_rule(new_rules, lan=old_single_rule.language)
+    result = init_match_rule(new_rules, lan=old_single_rule.language)
+    if result is None:
+        logger.debug('[New Rule] init_match_rule returned None for language: {}'.format(old_single_rule.language))
+        return False
+    match, match2, vul_function, index, origin_func_name = result
     logger.debug('[ENGINE] [New Rule] new match_rule: {}'.format(match))
 
     # 想办法传递新函数类型

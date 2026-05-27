@@ -105,6 +105,9 @@ rules/*
 !rules/javascript/CVI_3003.py
 !rules/solidity/CVI_2001.py
 !rules/base/*
+!rules/python/*
+!rules/python/__init__.py
+!rules/tamper/demo_python.py
 
 # upload
 uploads/*.zip

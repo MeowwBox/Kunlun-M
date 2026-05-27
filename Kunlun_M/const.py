@@ -67,6 +67,7 @@ ext_dict = {
     "javascript": ['.js'],
     "chromeext": ['.crx'],
     "html": ['.html'],
+    "python": ['.py'],
     "java": ['.java', '.jar', '.xml'],
     "base": ['*']
 }
@@ -74,6 +75,7 @@ ext_dict = {
 ext_comment_dict = {
     "php": ['//', '/*'],
     "javascript": ['//', '/*'],
+    "python": ['#'],
 }
 
 default_black_list = ['.crx_files', 'vendor']

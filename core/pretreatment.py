@@ -32,7 +32,7 @@ import asyncio
 import subprocess
 from collections.abc import Hashable
 
-could_ast_pase_lans = ["php", "chromeext", "javascript", "html", "java"]
+could_ast_pase_lans = ["php", "chromeext", "javascript", "html", "java", "python"]
 
 
 class Pretreatment:
@@ -587,6 +587,34 @@ class Pretreatment:
                         continue
 
                     except:
+                        logger.warning("[AST] something error, {}".format(traceback.format_exc()))
+                        continue
+
+            elif fileext[0] in ext_dict["python"] and "python" in self.lan:
+                # 针对 Python 的预处理
+                for filepath in fileext[1]["list"]:
+                    filepath = self.get_path(filepath)
+                    self.pre_result[filepath] = {}
+                    self.pre_result[filepath]["language"] = "python"
+                    self.pre_result[filepath]["ast_nodes"] = []
+
+                    try:
+                        fi = codecs.open(filepath, "r", encoding="utf-8", errors="ignore")
+                        code_content = fi.read()
+                        fi.close()
+
+                        if not self.is_unprecom:
+                            import ast as python_ast
+                            tree = python_ast.parse(code_content, filename=filepath)
+                            self.pre_result[filepath]["ast_nodes"] = tree
+                        else:
+                            self.pre_result[filepath]["ast_nodes"] = []
+
+                    except SyntaxError as e:
+                        logger.warning("[AST] [ERROR] parser {} SyntaxError: {}".format(filepath, str(e)))
+                        continue
+
+                    except Exception:
                         logger.warning("[AST] something error, {}".format(traceback.format_exc()))
                         continue
 
