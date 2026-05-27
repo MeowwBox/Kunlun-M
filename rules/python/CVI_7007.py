@@ -16,7 +16,7 @@ class CVI_7007():
         self.level = 3
         self.status = True
         self.match_mode = "only-regex"
-        self.match = r"DEBUG\s*=\s*True|app\.run\(.*debug\s*=\s*True|traceback\.print_exc|sys\.exc_info|SECRET_KEY\s*=\s*[\"'][^\"']+[\"']|ALLOWED_HOSTS\s*=\s*\[\s*[\"']\*[\"']"
+        self.match = [r"DEBUG\s*=\s*True|app\.run\(.*debug\s*=\s*True|traceback\.print_exc|sys\.exc_info|SECRET_KEY\s*=\s*[\"'][^\"']+[\"']|ALLOWED_HOSTS\s*=\s*\[\s*[\"']\*[\"']"]
         self.match_name = None
         self.black_list = None
         self.keyword = None
