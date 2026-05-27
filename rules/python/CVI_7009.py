@@ -21,7 +21,7 @@ class CVI_7009():
         self.black_list = None
         self.keyword = None
         self.unmatch = None
-        self.vul_function = None
+        self.vul_function = ["redirect", "HttpResponseRedirect", "RedirectResponse", "Redirect"]
 
     def main(self, regex_string):
         """

@@ -21,7 +21,7 @@ class CVI_7006():
         self.black_list = None
         self.keyword = None
         self.unmatch = None
-        self.vul_function = None
+        self.vul_function = ["render_template_string", "Template", "Environment", "TemplateResponse", "render_to_response", "mark_safe", "Markup"]
 
     def main(self, regex_string):
         """

@@ -21,7 +21,7 @@ class CVI_7008():
         self.black_list = None
         self.keyword = None
         self.unmatch = None
-        self.vul_function = None
+        self.vul_function = ["HttpResponse", "make_response", "write", "Markup", "mark_safe", "jsonify", "Response"]
 
     def main(self, regex_string):
         """

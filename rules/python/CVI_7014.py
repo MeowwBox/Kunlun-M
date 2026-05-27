@@ -21,7 +21,7 @@ class CVI_7014():
         self.black_list = None
         self.keyword = None
         self.unmatch = None
-        self.vul_function = None
+        self.vul_function = ["format_map", "format", "Template", "substitute", "safe_substitute"]
 
     def main(self, regex_string):
         pass

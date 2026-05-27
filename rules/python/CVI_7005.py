@@ -21,7 +21,7 @@ class CVI_7005():
         self.black_list = None
         self.keyword = None
         self.unmatch = None
-        self.vul_function = None
+        self.vul_function = ["open", "join", "copy", "copyfile", "move", "remove", "unlink", "rename", "send_file", "FileResponse", "rmtree", "make_archive", "unpack_archive", "mktemp"]
 
     def main(self, regex_string):
         """
