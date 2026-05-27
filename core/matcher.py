@@ -558,9 +558,15 @@ class VulnerabilityMatcher(object):
                 return True, 'Regex-return-regex'
 
             elif self.rule_match_mode == const.mm_function_param_controllable:
-                rule_match = self.rule_match.strip('()').split('|')
-                # 清理正则转义
-                rule_match = [r.replace('\\.', '.').replace('\\(', '(').replace('\\)', ')').rstrip('(') for r in rule_match]
+                # 优先使用 vul_function（干净的函数名列表），避免 rstrip('(') 破坏正则模式
+                if (hasattr(self, 'vul_function') and
+                    isinstance(self.vul_function, list) and
+                    len(self.vul_function) > 0):
+                    rule_match = self.vul_function
+                else:
+                    rule_match = self.rule_match.strip('()').split('|')
+                    # 清理正则转义
+                    rule_match = [r.replace('\\\\.', '.').replace('\\\\(', '(').replace('\\\\)', ')').rstrip('(') for r in rule_match]
                 logger.debug('[RULE_MATCH] {r}'.format(r=rule_match))
                 try:
                     result = go_scan_parser(rule_match, self.line_number, self.file_path,
@@ -583,8 +589,14 @@ class VulnerabilityMatcher(object):
 
             elif self.rule_match_mode in (const.mm_go_function_param_controllable,):
                 # Go 专用 AST 模式：使用 Go AST 解析器 + 污点追踪
-                rule_match = self.rule_match.strip('()').split('|')
-                rule_match = [r.replace('\\\\.', '.').replace('\\\\(', '(').replace('\\\\)', ')').rstrip('(') for r in rule_match]
+                # 优先使用 vul_function（干净的函数名列表）
+                if (hasattr(self, 'vul_function') and
+                    isinstance(self.vul_function, list) and
+                    len(self.vul_function) > 0):
+                    rule_match = self.vul_function
+                else:
+                    rule_match = self.rule_match.strip('()').split('|')
+                    rule_match = [r.replace('\\\\\\\\.', '.').replace('\\\\\\\\(', '(').replace('\\\\\\\\)', ')').rstrip('(') for r in rule_match]
                 logger.debug('[RULE_MATCH][Go-AST] {r}'.format(r=rule_match))
                 try:
                     result = go_scan_parser(rule_match, self.line_number, self.file_path,

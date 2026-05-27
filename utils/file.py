@@ -355,20 +355,14 @@ class FileParseAll:
                 # print line, line_number
                 if re.search(reg, content, re.I):
 
-                    # 尝试通过以目标作为标志分割，来判断行数
-                    # 目标以前的回车数计算
+                    # 使用 match 对象的 start() 位置计算行号，避免 split(data) 在多个相同匹配时返回错误行号
                     p = re.compile(reg)
                     matchs = p.finditer(content)
 
                     for m in matchs:
 
                         data = m.group(0).strip()
-
-                        split_data = content.split(data)[0]
-                        # enddata = content.split(data)[1]
-
-                        LRnumber = " ".join(split_data).count('\n')
-
+                        LRnumber = content[:m.start()].count('\n')
                         match_numer = line_number - 10 + LRnumber
 
                         result.append((filepath, str(match_numer), data))
@@ -380,19 +374,12 @@ class FileParseAll:
             # 如果退出循环的时候没有清零，则还要检查一次
             if i > 0:
                 if re.search(reg, content, re.I):
-                    # 尝试通过以目标作为标志分割，来判断行数
-                    # 目标以前的回车数计算
                     p = re.compile(reg)
                     matchs = p.finditer(content)
 
                     for m in matchs:
                         data = m.group(0).strip()
-
-                        split_data = content.split(data)[0]
-                        # enddata = content.split(data)[1]
-
-                        LRnumber = " ".join(split_data).count('\n')
-
+                        LRnumber = content[:m.start()].count('\n')
                         match_numer = line_number - i + LRnumber
 
                         result.append((filepath, str(match_numer), data))
@@ -436,13 +423,16 @@ class FileParseAll:
     def multi_grep_content(self, reg, content):
         content_tmp = content
         result = []
+        global_offset = 0
         while 1:
             r_con_obj = re.search(reg, content_tmp, re.I)
             if r_con_obj:
                 start_pos = r_con_obj.regs[0][0]
-                line_number = len(content[:start_pos].split('\n'))
+                # 使用全局偏移量计算正确的行号
+                line_number = len(content[:global_offset + start_pos].split('\n'))
                 result.append([str(line_number), r_con_obj.group(0)])
 
+                global_offset += r_con_obj.regs[0][1]
                 content_tmp = content_tmp[r_con_obj.regs[0][1]:]
             else:
                 break
