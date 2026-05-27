@@ -1,5 +1,33 @@
 ## 更新日志
 - 2026-05-27
+  - KunLun-M 2.10.2
+  - **新增 Go 语言扫描支持**
+    - 新增 `core/core_engine/go/` 模块：基于正则+行扫描的反向污点追踪引擎
+    - `scan_parser()`: 遍历所有参数追踪污点，支持 exec.Command("sh", "-c", cmd) 等多参数场景
+    - `analysis_params()`: 供 CAST 跨文件分析调用
+    - 内置知识库 646 条（Go 标准库 + Gin/Echo/Fiber/Beego/Chi 等框架）
+    - 新增 8 条 Go 漏洞规则（CVI 8000 系列）
+      - CVI_8001: 命令注入（exec.Command/exec.CommandContext）
+      - CVI_8002: SQL 注入（db.Query/db.Exec/gorm.DB.Raw）
+      - CVI_8003: XSS（template.HTML 类型转换/fmt.Fprintf）
+      - CVI_8004: 文件操作（os.Open/os.Create/os.ReadFile）
+      - CVI_8005: SSRF（http.Get/http.Post/http.NewRequest）
+      - CVI_8006: 路径穿越（filepath.Join + 用户输入）
+      - CVI_8007: 不安全反序列化（json.Unmarshal/yaml.Unmarshal）
+      - CVI_8008: 信息泄露（log.Printf/fmt.Printf）
+    - 新增 `rules/tamper/demo_go.py`: Go 修复函数和可控输入源配置
+  - **基础设施改动**
+    - `const.py`: ext_dict 新增 `go: [".go"]`，ext_comment_dict 新增 `go: ["//"]`
+    - `matcher.py`: 新增 `_scan_go()` 方法 + dispatch 映射
+    - `cast.py`: 新增 Go 语言支持（languages/regex/analysis_params）
+    - `pretreatment.py`: 新增 Go 文件预处理
+    - `trace_cache.py`: 支持 go 语言
+  - **Bug 修复**
+    - `utils/file.py`: 修复 `file_info` 路径前导 `/` 问题
+    - `utils/file.py`: 修复 `get_path` 路径拼接问题（`os.path.join` 绝对路径）
+    - `utils/file.py`: `check_comment` 支持 Go 注释
+  - **CI 验证**：所有预期漏洞均已检出
+- 2026-05-27
   - KunLun-M 2.10.1
   - **内置知识库拆分到各语言目录**
     - 将单一 `builtin_knowledge.py` 拆分为四个语言独立文件
