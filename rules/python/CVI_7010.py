@@ -21,7 +21,7 @@ class CVI_7010():
         self.black_list = None
         self.keyword = None
         self.unmatch = None
-        self.vul_function = None
+        self.vul_function = ["search", "search_s", "search_ext"]
 
     def main(self, regex_string):
         pass

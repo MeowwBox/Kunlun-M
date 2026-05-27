@@ -16,12 +16,12 @@ class CVI_7001():
         self.level = 8
         self.status = True
         self.match_mode = "function-param-regex"
-        self.match = r"eval|exec|compile|__import__|ast\.literal_eval"
+        self.match = r"eval|exec|compile|__import__|ast\.literal_eval|importlib\.import_module"
         self.match_name = None
         self.black_list = None
         self.keyword = None
         self.unmatch = None
-        self.vul_function = None
+        self.vul_function = ["eval", "exec", "compile", "__import__", "import_module"]
 
     def main(self, regex_string):
         pass

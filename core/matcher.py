@@ -497,8 +497,8 @@ class VulnerabilityMatcher(object):
 
             elif self.rule_match_mode == const.mm_function_param_controllable:
                 rule_match = self.rule_match.strip("()").split("|")
-                # 清理正则转义: Python AST parser 做精确字符串匹配，不需要反斜杠
-                rule_match = [r.replace('\\.', '.').replace('\\(', '(').replace('\\)', ')') for r in rule_match]
+                # 清理正则转义: Python AST parser 做精确字符串匹配，不需要反斜杠和括号
+                rule_match = [r.replace('\\.', '.').replace('\\(', '(').replace('\\)', ')').rstrip('(') for r in rule_match]
                 logger.debug("[RULE_MATCH] {r}".format(r=rule_match))
                 try:
                     result = python_scan_parser(rule_match, self.line_number, self.file_path,

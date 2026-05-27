@@ -245,8 +245,8 @@ def _collect_names(node, names=None):
         full_name = _get_name(node)
         if full_name:
             names.add(full_name)
-        else:
-            _collect_names(node.value, names)
+        # 同时递归收集基础变量名（如 myFile.name → 也收集 myFile）
+        _collect_names(node.value, names)
 
     elif isinstance(node, ast.Subscript):
         _collect_names(node.value, names)
