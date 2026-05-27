@@ -1,8 +1,10 @@
 [中文](README.zh.md) | English
 
-- <big>**Since Cobra-W 2.0, Cobra-W has been officially renamed to Kunlun-M（昆仑镜）.**</big>
-- **Python 3.10+ is recommended (Python 3.13+ preferred); Python 2.7 has reached end-of-life.**
-- Thanks to the AI era, I can address the project's basic maintenance issues at extremely low cost. Although the project's concepts may not be cutting-edge by today's standards, the stable core still serves as a solid tool reference. I will continue to iterate rapidly using Codex at minimal cost, boldly experiment with new features, and **attempt to build a potentially very useful tool using AI-era methods**.
+> <big>**Since Cobra-W 2.0, Cobra-W has been officially renamed to Kunlun-M（昆仑镜）.**</big>
+
+> **Python 3.10+ is recommended (Python 3.13+ preferred); Python 2.7 has reached end-of-life.**
+
+> Thanks to the AI era, I can address the project's basic maintenance issues at extremely low cost. Although the project's concepts may not be cutting-edge by today's standards, the stable core still serves as a solid tool reference. I will continue to iterate rapidly using Codex at minimal cost, boldly experiment with new features, and **attempt to build a potentially very useful tool using AI-era methods**.
 
 # Kunlun-Mirror
 -[![GitHub release](https://img.shields.io/github/release/LoRexxar/Kunlun-M/all.svg)](https://github.com/LoRexxar/Kunlun-M/releases)
@@ -55,7 +57,7 @@ Cobra-W is a fork evolved from Cobra 2.0, shifting the tool's focus from discove
 
 Kunlun-Mirror evolved from Cobra-W 2.0. After going through the painful process of maintaining and improving the original tool, Kunlun-Mirror (昆仑镜) shifts the tool's focus towards serving security researchers, continuously improving the user experience around practical tool-based usage.
 
-The tool currently primarily supports semantic analysis for **PHP, JavaScript, and Java**, as well as basic scanning for **Chrome extensions and Solidity**.
+The tool currently primarily supports semantic analysis for **PHP, JavaScript, Python, and Java**, as well as basic scanning for **Chrome extensions and Solidity**.
 
 **Java scanning engine** (v2.9.0) supports AST-based taint analysis, framework-level vulnerability detection (Shiro/Struts2/Log4j/Fastjson etc.), and 58 built-in rules covering 20+ vulnerability types.
 
