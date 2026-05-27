@@ -5,11 +5,16 @@ import traceback
 import javalang
 from utils.log import logger
 from core.pretreatment import ast_object as _ast_object_singleton
+from core.core_engine.trace_cache import TraceCache
+from core.core_engine.builtin_knowledge import BuiltinKnowledge
 
 scan_results = []
 is_repair_functions = []
 is_controlled_params = []
 scan_chain = []
+
+# 追踪缓存 + 内置知识库
+_trace_cache = TraceCache("java")
 
 
 def _expr_to_text(expr, source_lines):
@@ -424,6 +429,17 @@ def _is_passthrough_method(method_node, param_name, repair_functions, class_meth
     """
     if depth >= max_depth or not method_node or not method_node.body:
         return False
+
+    # 查内置知识库：已知方法直接返回透传结果
+    method_name = getattr(method_node, 'name', None)
+    if method_name:
+        knowledge = BuiltinKnowledge.lookup("java", method_name)
+        if knowledge:
+            if knowledge["safe"] and not knowledge["passthrough"]:
+                return False  # 安全过滤函数，不透传
+            if knowledge["passthrough"]:
+                return True  # 透传参数
+            return False  # 不透传
 
     for stmt in method_node.body:
         if isinstance(stmt, javalang.tree.ReturnStatement) and stmt.expression:
@@ -1035,6 +1051,9 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
     :return: scan_results 列表，每个元素是 {"code": N, "chain": [...], ...}
     """
     global scan_results, is_repair_functions, is_controlled_params, scan_chain
+
+    # 清空缓存
+    _trace_cache.clear()
 
     try:
         scan_chain = ["start"]
