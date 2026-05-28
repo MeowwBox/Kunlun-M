@@ -155,3 +155,4 @@ tools/cfr.jar
 cfr.jar_decompiled/
 .claude/
 CLAUDE.md
+docs/design/
