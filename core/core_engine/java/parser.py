@@ -7,6 +7,7 @@ from utils.log import logger
 from core.pretreatment import ast_object as _ast_object_singleton
 from core.core_engine.trace_cache import TraceCache
 from core.core_engine.java.builtin_knowledge import lookup as lookup_builtin
+from core.core_engine.java.summary_generator import lookup_summary
 
 scan_results = []
 is_repair_functions = []
@@ -15,6 +16,9 @@ scan_chain = []
 
 # 追踪缓存 + 内置知识库
 _trace_cache = TraceCache("java")
+_summaries_initialized = False
+_file_summaries = {}
+_scan_function_stack = []  # 函数追踪栈，防递归
 
 
 def _expr_to_text(expr, source_lines):
@@ -103,6 +107,580 @@ def _collect_member_references(expr, refs=None):
             _collect_member_references(item, refs)
 
     return refs
+
+
+def _get_assign_target(stmt_expr):
+    """从赋值表达式中提取目标变量名"""
+    if hasattr(stmt_expr, 'expression') and isinstance(stmt_expr.expression, javalang.tree.Assignment):
+        assign = stmt_expr.expression
+        left = assign.expressionl  # 注意：javalang 用 expressionl 不是 left
+        if isinstance(left, javalang.tree.MemberReference):
+            return left.member
+        elif hasattr(left, 'name'):
+            return left.name
+    return None
+
+def _get_assign_rhs(stmt_expr):
+    """从赋值表达式中提取右侧节点"""
+    if hasattr(stmt_expr, 'expression') and isinstance(stmt_expr.expression, javalang.tree.Assignment):
+        return stmt_expr.expression.value
+    return None
+
+def _get_var_name(node):
+    """从表达式节点提取变量名"""
+    if isinstance(node, javalang.tree.MemberReference):
+        return node.member
+    if hasattr(node, 'name'):
+        return node.name
+    if hasattr(node, 'member'):
+        return node.member
+    return None
+
+def _expr_to_str_java(node):
+    """将 javalang AST 节点转为字符串表示"""
+    if node is None:
+        return ''
+    if isinstance(node, javalang.tree.Literal):
+        return str(node.value) if hasattr(node, 'value') else ''
+    if isinstance(node, javalang.tree.MemberReference):
+        prefix = ''
+        if hasattr(node, 'selectors') and node.selectors:
+            prefix = '.'.join(node.selectors) + '.'
+        elif hasattr(node, 'qualifier') and node.qualifier:
+            prefix = node.qualifier + '.'
+        return prefix + (node.member or '')
+    if isinstance(node, javalang.tree.MethodInvocation):
+        qualifier = node.qualifier or ''
+        if qualifier:
+            qualifier += '.'
+        args = ', '.join(_expr_to_str_java(a) for a in (node.arguments or []))
+        return f"{qualifier}{node.member}({args})"
+    if isinstance(node, javalang.tree.BinaryOperation):
+        left = _expr_to_str_java(node.operandl)
+        right = _expr_to_str_java(node.operandr)
+        return f"{left} {node.operator} {right}"
+    if isinstance(node, javalang.tree.Cast):
+        return _expr_to_str_java(node.expression)
+    if isinstance(node, javalang.tree.Assignment):
+        return _expr_to_str_java(node.value)
+    if hasattr(node, '__str__'):
+        return str(node)
+    return ''
+
+def _collect_names_from_node(node):
+    """从 AST 节点收集所有变量名"""
+    names = set()
+    if node is None:
+        return names
+    if isinstance(node, javalang.tree.MemberReference):
+        names.add(node.member)
+    elif isinstance(node, javalang.tree.MethodInvocation):
+        if node.qualifier:
+            names.add(node.qualifier)
+        for arg in (node.arguments or []):
+            names.update(_collect_names_from_node(arg))
+    elif isinstance(node, javalang.tree.BinaryOperation):
+        names.update(_collect_names_from_node(node.operandl))
+        names.update(_collect_names_from_node(node.operandr))
+    elif isinstance(node, javalang.tree.Assignment):
+        names.update(_collect_names_from_node(node.value))
+    elif isinstance(node, javalang.tree.Cast):
+        names.update(_collect_names_from_node(node.expression))
+    return names
+
+def _node_at_line(node, target_line):
+    """检查节点是否在目标行"""
+    if hasattr(node, 'position') and node.position:
+        return node.position[0] == target_line
+    return False
+
+def _find_sensitive_calls_in_stmt(stmt, sensitive_func, target_line):
+    """在语句中找调用 sensitive_func 的 MethodInvocation 节点"""
+    results = []
+    _walk_for_calls(stmt, sensitive_func, target_line, results)
+    return results
+
+def _walk_for_calls(node, sensitive_func, target_line, results):
+    """递归遍历 AST 找敏感函数调用"""
+    if isinstance(node, javalang.tree.MethodInvocation):
+        func_name = node.member
+        qualifier = node.qualifier or ''
+        full_name = f"{qualifier}.{func_name}" if qualifier else func_name
+
+        # 匹配检查
+        for sf in sensitive_func:
+            if full_name == sf or func_name == sf or full_name.endswith('.' + sf):
+                if _node_at_line(node, target_line):
+                    # 收集每个参数
+                    for i, arg in enumerate(node.arguments or []):
+                        arg_str = _expr_to_str_java(arg)
+                        results.append({
+                            'arg_name': _get_var_name(arg) or arg_str,
+                            'arg_node': arg,
+                            'func_name': full_name,
+                            'lineno': target_line,
+                        })
+                break
+
+    # 递归子节点
+    for attr in ('arguments', 'operandl', 'operandr', 'expression', 'value',
+                 'expressionl', 'condition', 'body', 'block', 'catches',
+                 'then_statement', 'else_statement'):
+        child = getattr(node, attr, None)
+        if child is None:
+            continue
+        if isinstance(child, list):
+            for item in child:
+                if hasattr(item, '__dict__'):
+                    _walk_for_calls(item, sensitive_func, target_line, results)
+        elif hasattr(child, '__dict__'):
+            _walk_for_calls(child, sensitive_func, target_line, results)
+
+
+def parameters_back(param_name, stmts, vul_lineno, file_path,
+                     repair_functions=None, controlled_params=None, depth=0, max_depth=10):
+    """
+    反向追踪变量 param_name 的数据流来源。
+    遍历 stmts 从 vul_lineno 往回找对 param_name 的赋值，判断赋值表达式是否可控。
+
+    返回: (code, cp, expr_lineno)
+        code=1: 可控
+        code=2: 经过修复函数
+        code=3: 未确认
+        code=-1: 不可控
+        code='deps': 依赖调用者变量
+    """
+    if depth > max_depth:
+        return (3, None, 0)
+
+    if repair_functions is None:
+        repair_functions = is_repair_functions
+    if controlled_params is None:
+        controlled_params = is_controlled_params
+
+    # 查缓存
+    cached = _trace_cache.get(file_path, param_name, vul_lineno)
+    if cached is not None:
+        return cached
+
+    logger.debug(f"[AST][Java] parameters_back: tracing '{param_name}' from line {vul_lineno}, depth={depth}")
+
+    # 直接可控检查
+    for cp in controlled_params:
+        if param_name == cp or param_name in cp:
+            _trace_cache.put(file_path, param_name, vul_lineno, (1, param_name, vul_lineno))
+            return (1, param_name, vul_lineno)
+
+    # 从 vul_lineno 往回遍历语句
+    target_line = int(vul_lineno)
+
+    for stmt in reversed(stmts):
+        stmt_line = _get_stmt_line(stmt)
+        if stmt_line is None or stmt_line > target_line:
+            continue
+
+        # 局部变量声明: Type varName = expr
+        if isinstance(stmt, javalang.tree.LocalVariableDeclaration):
+            for decl in stmt.declarators:
+                if decl.name == param_name and decl.initializer:
+                    result = _trace_expr(decl.initializer, stmts, stmt_line, file_path,
+                                         repair_functions, controlled_params, depth + 1, max_depth)
+                    _trace_cache.put(file_path, param_name, vul_lineno, result)
+                    return result
+
+        # 赋值语句: varName = expr
+        if isinstance(stmt, javalang.tree.StatementExpression):
+            if isinstance(stmt.expression, javalang.tree.Assignment):
+                assign = stmt.expression
+                target_name = _get_var_name(assign.expressionl)
+                if target_name == param_name:
+                    result = _trace_expr(assign.value, stmts, stmt_line, file_path,
+                                         repair_functions, controlled_params, depth + 1, max_depth)
+                    _trace_cache.put(file_path, param_name, vul_lineno, result)
+                    return result
+
+        # 控制流：递归进入
+        if isinstance(stmt, (javalang.tree.IfStatement, javalang.tree.ForStatement,
+                             javalang.tree.WhileStatement, javalang.tree.DoStatement)):
+            block_stmts = _get_block_stmts(stmt)
+            if block_stmts:
+                result = parameters_back(param_name, block_stmts, stmt_line, file_path,
+                                          repair_functions, controlled_params, depth + 1, max_depth)
+                if result[0] in (1, 2):
+                    _trace_cache.put(file_path, param_name, vul_lineno, result)
+                    return result
+
+        # try-catch
+        if isinstance(stmt, javalang.tree.TryStatement):
+            for block in (stmt.block or []):
+                result = parameters_back(param_name, _flatten_statements(block) if isinstance(block, list) else [block],
+                                          stmt_line, file_path, repair_functions, controlled_params, depth + 1, max_depth)
+                if result[0] in (1, 2):
+                    _trace_cache.put(file_path, param_name, vul_lineno, result)
+                    return result
+
+    _trace_cache.put(file_path, param_name, vul_lineno, (-1, None, 0))
+    return (-1, None, 0)
+
+
+def _trace_expr(expr, stmts, lineno, file_path, repair_functions, controlled_params, depth=0, max_depth=10):
+    """
+    追踪表达式的数据流来源。
+
+    返回: (code, cp, expr_lineno)
+    """
+    if expr is None or depth > max_depth:
+        return (3, None, 0)
+
+    # 字面量 → 不可控
+    if isinstance(expr, javalang.tree.Literal):
+        return (-1, None, 0)
+
+    # 变量引用 → 递归追踪
+    if isinstance(expr, javalang.tree.MemberReference):
+        var_name = expr.member
+        # 检查是否是可控源
+        if _is_controllable_source(var_name, controlled_params):
+            return (1, var_name, lineno)
+        # 继续反向追踪
+        return parameters_back(var_name, stmts, lineno, file_path,
+                                repair_functions, controlled_params, depth + 1, max_depth)
+
+    # 方法调用 → function_back
+    if isinstance(expr, javalang.tree.MethodInvocation):
+        return function_back_java(expr, stmts, lineno, file_path,
+                                   repair_functions, controlled_params, depth, max_depth)
+
+    # 二元运算 → 追踪任一侧可控即可
+    if isinstance(expr, javalang.tree.BinaryOperation):
+        left_result = _trace_expr(expr.operandl, stmts, lineno, file_path,
+                                   repair_functions, controlled_params, depth + 1, max_depth)
+        if left_result[0] == 1:
+            return left_result
+        right_result = _trace_expr(expr.operandr, stmts, lineno, file_path,
+                                    repair_functions, controlled_params, depth + 1, max_depth)
+        if right_result[0] == 1:
+            return right_result
+        # 两边都不直接可控，检查 deps
+        deps = []
+        if left_result[0] == 'deps':
+            deps.extend(left_result[1] if isinstance(left_result[1], list) else [left_result[1]])
+        if right_result[0] == 'deps':
+            deps.extend(right_result[1] if isinstance(right_result[1], list) else [right_result[1]])
+        if deps:
+            return ('deps', list(set(deps)), lineno)
+        return (-1, None, 0)
+
+    # 类型转换 → 追踪内部
+    if isinstance(expr, javalang.tree.Cast):
+        return _trace_expr(expr.expression, stmts, lineno, file_path,
+                           repair_functions, controlled_params, depth + 1, max_depth)
+
+    # 赋值 → 追踪右侧
+    if isinstance(expr, javalang.tree.Assignment):
+        return _trace_expr(expr.value, stmts, lineno, file_path,
+                           repair_functions, controlled_params, depth + 1, max_depth)
+
+    # new 表达式 → 追踪参数
+    if isinstance(expr, javalang.tree.ClassCreator):
+        for arg in (expr.arguments or []):
+            result = _trace_expr(arg, stmts, lineno, file_path,
+                                  repair_functions, controlled_params, depth + 1, max_depth)
+            if result[0] == 1:
+                return result
+        return (-1, None, 0)
+
+    # 三元表达式 → 追踪两个分支
+    if isinstance(expr, javalang.tree.TernaryExpression):
+        true_result = _trace_expr(expr.if_true, stmts, lineno, file_path,
+                                   repair_functions, controlled_params, depth + 1, max_depth)
+        if true_result[0] == 1:
+            return true_result
+        false_result = _trace_expr(expr.if_false, stmts, lineno, file_path,
+                                    repair_functions, controlled_params, depth + 1, max_depth)
+        if false_result[0] == 1:
+            return false_result
+        return (-1, None, 0)
+
+    return (3, None, 0)
+
+
+# --- Source 判定函数 ---
+
+_REQUEST_SOURCE_METHODS = frozenset({
+    "getParameter", "getHeader", "getInputStream", "getReader",
+    "getQueryString", "getCookies", "getParameterValues", "getParameterMap",
+    "getProtocol", "getScheme", "getServerName", "getRemoteAddr",
+    "getPart", "getParts", "getInputStream",
+})
+
+
+def _is_request_source(func_name):
+    """检查函数名是否是 HTTP 请求 source（如 getParameter、getHeader 等）"""
+    short = func_name.split(".")[-1] if "." in func_name else func_name
+    return short in _REQUEST_SOURCE_METHODS
+
+
+def _is_controllable_source(name, controlled_params):
+    """检查变量名是否在可控参数列表中"""
+    if not controlled_params:
+        return False
+    for cp in controlled_params:
+        if name == cp or (isinstance(cp, str) and name in cp):
+            return True
+    return False
+
+
+def function_back_java(call_node, stmts, vul_lineno, file_path,
+                        repair_functions=None, controlled_params=None, depth=0, max_depth=10):
+    """
+    追踪方法调用的返回值是否可控。
+    call_node 是 MethodInvocation 节点。
+
+    返回: (code, cp, expr_lineno)
+    """
+    global _scan_function_stack
+
+    if repair_functions is None:
+        repair_functions = is_repair_functions
+    if controlled_params is None:
+        controlled_params = is_controlled_params
+
+    func_name = call_node.member
+    qualifier = call_node.qualifier or ''
+    full_name = f"{qualifier}.{func_name}" if qualifier else func_name
+
+    # 检查递归
+    if full_name in _scan_function_stack:
+        return (-1, None, 0)
+
+    # 1. 检查是否是可控源（如 request.getParameter）
+    if _is_request_source(full_name) or _is_request_source(func_name):
+        # 返回值直接来自请求参数
+        arg_str = _expr_to_str_java(call_node.arguments[0]) if call_node.arguments else ''
+        return (1, f"{full_name}({arg_str})", vul_lineno)
+
+    # 2. 查内置知识库
+    for name_variant in [full_name, func_name]:
+        knowledge = lookup_builtin(name_variant)
+        if knowledge:
+            if knowledge.get("safe") and not knowledge.get("passthrough"):
+                return (-1, None, 0)
+            if knowledge.get("passthrough"):
+                for pt_idx in knowledge["passthrough"]:
+                    if pt_idx < len(call_node.arguments or []):
+                        arg = call_node.arguments[pt_idx]
+                        result = _trace_expr(arg, stmts, vul_lineno, file_path,
+                                             repair_functions, controlled_params, depth + 1, max_depth)
+                        if result[0] == 1:
+                            return result
+                return (-1, None, 0)
+
+    # 3. 检查修复函数
+    if _has_repair_function(call_node, repair_functions):
+        return (2, full_name, vul_lineno)
+
+    # 4. 查函数摘要
+    callee_summary = lookup_summary(func_name)
+    if callee_summary and callee_summary.return_flow:
+        result = _judge_from_summary_java(callee_summary, call_node, controlled_params)
+        if result is not None:
+            return result
+
+    # 5. 找函数定义做 AST 分析
+    _scan_function_stack.append(full_name)
+    try:
+        # 从全局方法索引中查找
+        global_methods = _build_global_method_map(_ast_object_singleton, file_path)
+        method_def = None
+
+        for (mf, mn, mp_count), mdata in global_methods.items():
+            if mn == func_name:
+                method_def = mdata.get('method_node')
+                break
+
+        if method_def and hasattr(method_def, 'body') and method_def.body:
+            # 分析函数体的 return 语句
+            for rstmt in _flatten_statements(method_def.body):
+                if isinstance(rstmt, javalang.tree.ReturnStatement) and rstmt.expression:
+                    # 建立参数映射
+                    func_params = []
+                    if hasattr(method_def, 'parameters') and method_def.parameters:
+                        func_params = [p.name for p in method_def.parameters]
+
+                    # 递归追踪 return 表达式
+                    ret_result = _trace_return_in_func(
+                        rstmt.expression, method_def.body,
+                        func_params, call_node.arguments or [],
+                        vul_lineno, file_path, repair_functions, controlled_params,
+                        depth + 1, max_depth
+                    )
+                    if ret_result[0] == 1:
+                        return ret_result
+    finally:
+        if full_name in _scan_function_stack:
+            _scan_function_stack.remove(full_name)
+
+    # 6. 追踪参数中是否有可控的
+    for arg in (call_node.arguments or []):
+        result = _trace_expr(arg, stmts, vul_lineno, file_path,
+                              repair_functions, controlled_params, depth + 1, max_depth)
+        if result[0] == 1:
+            return result
+
+    return (-1, None, 0)
+
+
+def _trace_return_in_func(expr, func_body_stmts, func_params, call_args,
+                           vul_lineno, file_path, repair_functions, controlled_params,
+                           depth=0, max_depth=10):
+    """在函数体内追踪 return 表达式的数据流，带参数映射"""
+    if expr is None or depth > max_depth:
+        return (3, None, 0)
+
+    # 变量引用 → 检查是否是形参
+    if isinstance(expr, javalang.tree.MemberReference):
+        var_name = expr.member
+        if var_name in func_params:
+            param_idx = func_params.index(var_name)
+            if param_idx < len(call_args):
+                # 映射到实参，追踪实参
+                return _trace_expr(call_args[param_idx], [], vul_lineno, file_path,
+                                    repair_functions, controlled_params, depth + 1, max_depth)
+        # 函数体内的局部变量 → 在函数体内追踪
+        return parameters_back(var_name, _flatten_statements(func_body_stmts), vul_lineno, file_path,
+                                repair_functions, controlled_params, depth + 1, max_depth)
+
+    # 方法调用
+    if isinstance(expr, javalang.tree.MethodInvocation):
+        # 同 function_back_java 但用函数体作为上下文
+        func_name = expr.member
+        if _is_request_source(func_name):
+            return (1, func_name, vul_lineno)
+
+    # 二元运算
+    if isinstance(expr, javalang.tree.BinaryOperation):
+        left = _trace_return_in_func(expr.operandl, func_body_stmts, func_params, call_args,
+                                      vul_lineno, file_path, repair_functions, controlled_params, depth + 1, max_depth)
+        if left[0] == 1:
+            return left
+        right = _trace_return_in_func(expr.operandr, func_body_stmts, func_params, call_args,
+                                       vul_lineno, file_path, repair_functions, controlled_params, depth + 1, max_depth)
+        if right[0] == 1:
+            return right
+        return (-1, None, 0)
+
+    return (3, None, 0)
+
+
+def _judge_from_summary_java(summary, call_node, controlled_params):
+    """根据函数摘要判定返回值可控性（Java版）"""
+    if controlled_params is None:
+        return None
+
+    call_args = call_node.arguments or []
+
+    for rf in summary.return_flow:
+        if rf.origin_type == "param":
+            for param_idx in rf.dep_params:
+                if param_idx < len(call_args):
+                    arg = call_args[param_idx]
+                    arg_name = _get_var_name(arg) or _expr_to_str_java(arg)
+                    if _is_controllable_source(arg_name, controlled_params):
+                        return (1, arg_name, 0)
+                    # 收集变量名返回 deps
+                    names = _collect_names_from_node(arg)
+                    if names:
+                        return ('deps', list(names), 0)
+
+        elif rf.origin_type == "global":
+            if _is_controllable_source(rf.origin, controlled_params):
+                return (1, rf.origin, 0)
+
+        elif rf.origin_type == "call":
+            if _is_request_source(rf.origin):
+                return (1, rf.origin, 0)
+
+        elif rf.origin_type == "literal":
+            continue
+
+    return None
+
+
+def _get_stmt_line(stmt):
+    """获取语句行号"""
+    if hasattr(stmt, 'position') and stmt.position:
+        return stmt.position[0]
+    return None
+
+
+def _get_block_stmts(stmt):
+    """从控制流语句中提取块语句列表"""
+    if isinstance(stmt, javalang.tree.BlockStatement):
+        return stmt.statements
+    if hasattr(stmt, 'body') and isinstance(stmt.body, list):
+        return stmt.body
+    if hasattr(stmt, 'statement'):
+        return [stmt.statement] if stmt.statement else []
+    return []
+
+
+def _init_function_summaries(file_path):
+    """初始化 Java 文件的函数摘要"""
+    global _summaries_initialized, _file_summaries
+
+    if _summaries_initialized:
+        return
+
+    try:
+        from core.core_engine.function_summary import SummaryCacheManager
+        from core.core_engine.java.summary_generator import generate_file_summaries, generate_summaries_for_target
+
+        target_dir = file_path
+        pt = _ast_object_singleton
+        if pt and hasattr(pt, 'target_directory'):
+            target_dir = pt.target_directory
+        elif pt and hasattr(pt, 'pre_result'):
+            import os
+            paths = list(pt.pre_result.keys())
+            if len(paths) > 1:
+                target_dir = os.path.commonpath(paths)
+            elif paths:
+                target_dir = os.path.dirname(paths[0])
+
+        cache_mgr = SummaryCacheManager()
+
+        files_dict = {}
+        if pt and hasattr(pt, 'pre_result'):
+            for fp, data in pt.pre_result.items():
+                if data.get('language') == 'java':
+                    try:
+                        with open(fp, 'r', encoding='utf-8', errors='ignore') as f:
+                            files_dict[fp] = f.read()
+                    except:
+                        pass
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                files_dict[file_path] = f.read()
+        except:
+            pass
+
+        if files_dict:
+            cached = cache_mgr.load_or_generate(target_dir, files_dict)
+            need_generate = {fp: content for fp, content in files_dict.items()
+                             if not cached.get(fp) or not cached[fp].functions}
+            if need_generate:
+                new_summaries = generate_summaries_for_target(target_dir, need_generate)
+                for fp, fs in new_summaries.items():
+                    cached[fp] = fs
+                    cache_mgr.save_file_summary(target_dir, fp, fs)
+            _file_summaries = cached
+            logger.debug(f"[AST][Java] 摘要初始化完成: {len(_file_summaries)} 个文件")
+
+        _summaries_initialized = True
+    except Exception as e:
+        logger.debug(f"[AST][Java] 摘要初始化失败: {e}")
+        _summaries_initialized = True
 
 
 def _find_method_at_line(tree, target_line):
@@ -1052,20 +1630,49 @@ def _find_class_creators_in_body(method_node, target_line, sensitive_func):
     return results
 
 
+def _build_result(code, scan_chain, cp, source_lines, lineno, file_path,
+                   controlled_params, repair_functions, is_config_vuln=False):
+    """构建 scan_results 中的单条结果 dict"""
+    source_desc = cp if cp else ''
+    # 从 source_lines 取 source 行号
+    source_lineno = 0
+    if source_lines and isinstance(source_desc, str):
+        for i, line in enumerate(source_lines):
+            if source_desc in line:
+                source_lineno = i + 1
+                break
+    return {
+        "code": code,
+        "source": [source_desc],
+        "source_lineno": source_lineno,
+        "sink": '',
+        "sink_param:": source_desc,
+        "sink_lineno": lineno,
+        "chain": scan_chain + [source_desc],
+    }
+
+
 def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], controlled_params=[], is_config_vuln=False):
     """
-    Java AST scan parser - 分析敏感函数参数是否可控
+    Java AST scan parser - 反向追踪模式
+    从 grep 匹配到的 sink 参数反向追踪数据流，直到碰到 source。
+    与 Go/Python/PHP/JS 引擎保持一致的反向追踪模式。
+    
     :param sensitive_func: 要检测的敏感函数列表，如 ["executeQuery", "exec"]
     :param vul_lineno: 漏洞函数所在行号（字符串或整数）
     :param file_path: 文件路径
     :param repair_functions: 修复函数列表，如 ["PreparedStatement"]
     :param controlled_params: 可控参数列表
+    :param is_config_vuln: 是否是配置类漏洞
     :return: scan_results 列表，每个元素是 {"code": N, "chain": [...], ...}
     """
     global scan_results, is_repair_functions, is_controlled_params, scan_chain
+    global _summaries_initialized, _scan_function_stack
 
-    # 清空缓存
+    # 清空缓存和状态
     _trace_cache.clear()
+    _summaries_initialized = False
+    _scan_function_stack = []
 
     try:
         scan_chain = ["start"]
@@ -1085,13 +1692,19 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
 
         target_line = int(vul_lineno)
 
+        # 初始化函数摘要
+        _init_function_summaries(file_path)
+
         # 1. 找到包含目标行号的方法
         method = _find_method_at_line(_nodes, target_line)
         if not method:
             logger.debug("[AST][Java] No method found at line {}".format(target_line))
             return scan_results
 
-        # 2. 收集可控变量（传入源码行用于文本 fallback）
+        if not method.body:
+            return scan_results
+
+        # 读取源码（用于文本 fallback）
         source_lines = []
         try:
             with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
@@ -1099,62 +1712,15 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
         except Exception:
             pass
 
-        request_vars = _find_request_var_names(method)
-        controllable = _collect_controllable_vars(method, request_vars, source_lines=source_lines)
+        # 获取方法体语句
+        method_stmts = list(method.body)
 
-        # 加入外部指定的可控参数
-        if controlled_params:
-            controllable.update(controlled_params)
-
-        # 跨方法污点传播（含跨文件）
-        global_methods = _build_global_method_map(_ast_object_singleton, file_path)
-        _propagate_controllable_across_calls(method, _nodes, controllable, repair_functions,
-                                              global_methods=global_methods)
-
-        # 反向调用链分析：当没有 request source 时，检查调用者是否传入可控数据
-        if not controllable:
-            reverse_params = _check_caller_controllability(
-                method, _ast_object_singleton, repair_functions, global_methods=global_methods)
-            if reverse_params:
-                controllable.update(reverse_params)
-                logger.debug("[AST][Java] Reverse cross-file: added controllable params: {}".format(reverse_params))
-
-        logger.debug("[AST][Java] Controllable vars: {}".format(controllable))
-
-        # 2b. 局部变量赋值传播：如果赋值表达式右边包含可控变量，左边也标记为可控
-        #     如 String query = "SELECT * FROM users WHERE name = '" + user.getName() + "'"
-        #     → user 可控 → query 可控
-        if controllable and source_lines:
-            changed = True
-            iterations = 0
-            while changed and iterations < 5:
-                changed = False
-                iterations += 1
-                for stmt in (method.body or []):
-                    if not isinstance(stmt, javalang.tree.LocalVariableDeclaration):
-                        continue
-                    for decl in stmt.declarators:
-                        if not hasattr(decl, 'initializer') or decl.initializer is None:
-                            continue
-                        if decl.name in controllable:
-                            continue
-                        # 检查 initializer 文本中是否包含任何可控变量名
-                        init_text = _expr_to_text(decl.initializer, source_lines)
-                        for cv in list(controllable):
-                            if re.search(r'\b' + re.escape(cv) + r'\b', init_text):
-                                controllable.add(decl.name)
-                                logger.debug("[AST][Java] Local var propagation: {} is controllable (init contains '{}')".format(
-                                    decl.name, cv))
-                                changed = True
-                                break
-
-        # 3. 在方法体中找到目标行号的敏感函数调用
-        if not method.body:
-            return scan_results
-
-        # 3a. 搜索 MethodInvocation（含 selectors 展开的链式调用）
+        # 2. 在方法体中找 sink 调用并反向追踪
+        # 2a. 搜索 MethodInvocation
+        found = False
         for path, node in _nodes.filter(javalang.tree.MethodInvocation):
-            # 展开链式调用：a.b().c() → 检查 b() 和 c()
+            if found:
+                break
             for mi in _flatten_chained_calls(node):
                 if not isinstance(mi, javalang.tree.MethodInvocation):
                     continue
@@ -1166,61 +1732,112 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
                     continue
 
                 logger.debug("[AST][Java] Found sensitive call: {}() at line {}".format(mi.member, lineno))
-                result = _analyze_call(mi.member, mi.arguments, lineno,
-                                       controllable, repair_functions, scan_chain,
-                                       qualifier=mi.qualifier, is_config_vuln=is_config_vuln)
-                if result:
-                    scan_results.append(result)
 
-                if len(scan_results) > 0:
+                # 对每个参数进行反向追踪
+                for arg in (mi.arguments or []):
+                    arg_name = _get_var_name(arg) or _expr_to_str_java(arg)
+                    if not arg_name:
+                        continue
+
+                    code, cp, expr_lineno = parameters_back(
+                        arg_name, method_stmts, lineno, file_path,
+                        repair_functions, controlled_params
+                    )
+                    logger.debug("[AST][Java] parameters_back('{}') => code={}, cp={}".format(
+                        arg_name, code, cp))
+
+                    if code == 1:
+                        scan_results.append(_build_result(code, scan_chain, cp, source_lines,
+                                         lineno, file_path, controlled_params,
+                                         repair_functions, is_config_vuln))
+                        found = True
+                        break
+                    elif code == 2:
+                        scan_results.append(_build_result(code, scan_chain, cp, source_lines,
+                                         lineno, file_path, controlled_params,
+                                         repair_functions, is_config_vuln))
+                        found = True
+                        break
+                    elif code == 'deps' and cp:
+                        # 依赖调用者变量
+                        for dep_name in (cp if isinstance(cp, list) else [cp]):
+                            scan_results.append(_build_result(1, scan_chain, dep_name, source_lines,
+                                             lineno, file_path, controlled_params,
+                                             repair_functions, is_config_vuln))
+                            found = True
+                            break
+                if found:
                     break
-            if len(scan_results) > 0:
-                break
 
-        # 3b. 搜索 ClassCreator（构造函数调用）
-        if not scan_results:
+        # 2b. 搜索 ClassCreator（构造函数调用）
+        if not found:
             creators = _find_class_creators_in_body(method, target_line, sensitive_func)
             for type_name, arguments, lineno in creators:
                 logger.debug("[AST][Java] Found sensitive constructor: new {}() at line {}".format(
                     type_name, lineno))
-                result = _analyze_call(type_name, arguments, lineno,
-                                       controllable, repair_functions, scan_chain,
-                                       is_config_vuln=is_config_vuln)
-                if result:
-                    scan_results.append(result)
+                for arg in (arguments or []):
+                    if isinstance(arg, str):
+                        arg_name = arg
+                    else:
+                        arg_name = _get_var_name(arg) or str(arg)
+                    if not arg_name:
+                        continue
 
-                if len(scan_results) > 0:
+                    code, cp, expr_lineno = parameters_back(
+                        arg_name, method_stmts, lineno, file_path,
+                        repair_functions, controlled_params
+                    )
+
+                    if code == 1:
+                        scan_results.append(_build_result(code, scan_chain, cp, source_lines,
+                                         lineno, file_path, controlled_params,
+                                         repair_functions, is_config_vuln))
+                        found = True
+                        break
+                    elif code == 2:
+                        scan_results.append(_build_result(code, scan_chain, cp, source_lines,
+                                         lineno, file_path, controlled_params,
+                                         repair_functions, is_config_vuln))
+                        found = True
+                        break
+                if found:
                     break
 
-        # 注意：上面 3a 已修复 selectors 遍历，此 fallback 作为兜底仍保留
-        # 3c. 源码文本 fallback：javalang 链式调用 bug 导致 AST 丢失 sink 时，
-        #     直接在源码文本中搜索 sink 函数名
-        if not scan_results and source_lines:
-            # 从 target_line 开始搜索附近行
+        # 2c. 源码文本 fallback：javalang 链式调用 bug 导致 AST 丢失 sink 时
+        if not found and source_lines:
             for line_offset in range(0, 15):
                 check_line = target_line + line_offset
                 if check_line > len(source_lines):
                     break
                 source_line = source_lines[check_line - 1]
                 for func_name in sensitive_func:
-                    # 精确匹配：func_name 后面紧跟 (
                     pattern = r'(?<!\w)' + re.escape(func_name) + r'\s*\('
                     if re.search(pattern, source_line):
-                        # 从源码文本提取参数（简单正则：取括号内第一个参数）
                         arg_match = re.search(
                             re.escape(func_name) + r'\s*\(\s*([^,)]+)', source_line)
                         arg_name = arg_match.group(1).strip() if arg_match else ''
                         logger.debug(
-                            "[AST][Java] Source-text fallback: found {}.{}() at line {} [arg={}]".format(
-                                func_name, '' if not arg_name else '', check_line, arg_name))
-                        result = _analyze_call(func_name, [arg_name], check_line,
-                                               controllable, repair_functions, scan_chain,
-                                               is_config_vuln=is_config_vuln)
-                        if result:
-                            scan_results.append(result)
-                        if len(scan_results) > 0:
+                            "[AST][Java] Source-text fallback: {}() at line {} [arg={}]".format(
+                                func_name, check_line, arg_name))
+
+                        code, cp, expr_lineno = parameters_back(
+                            arg_name, method_stmts, check_line, file_path,
+                            repair_functions, controlled_params
+                        )
+
+                        if code == 1:
+                            scan_results.append(_build_result(code, scan_chain, cp, source_lines,
+                                             check_line, file_path, controlled_params,
+                                             repair_functions, is_config_vuln))
+                            found = True
                             break
-                if len(scan_results) > 0:
+                        elif code == 2:
+                            scan_results.append(_build_result(code, scan_chain, cp, source_lines,
+                                             check_line, file_path, controlled_params,
+                                             repair_functions, is_config_vuln))
+                            found = True
+                            break
+                if found:
                     break
 
     except javalang.parser.JavaSyntaxError:
