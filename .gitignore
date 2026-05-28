@@ -156,3 +156,6 @@ cfr.jar_decompiled/
 .claude/
 CLAUDE.md
 docs/design/
+
+# Function summary cache
+.kunlun_cache/
