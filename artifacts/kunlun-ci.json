@@ -1,10 +1,10 @@
 {
   "meta": {
     "target": "/home/ubuntu/.hermes/hermes-agent/Kunlun-M/ci_target",
-    "task_id": 740,
-    "project_id": 65,
-    "started_at": "2026-05-28T06:23:38.483147+00:00",
-    "finished_at": "2026-05-28T06:23:39.023686+00:00",
+    "task_id": 741,
+    "project_id": 66,
+    "started_at": "2026-05-28T06:35:29.815889+00:00",
+    "finished_at": "2026-05-28T06:35:30.324089+00:00",
     "fail_on": "none",
     "include_unconfirm": false,
     "with_vendor": false,
@@ -39,7 +39,7 @@
   "missing": [],
   "unexpected": [
     {
-      "id": 2579,
+      "id": 2583,
       "cvi_id": "7000",
       "rule_name": "命令注入",
       "severity": "high",
@@ -50,7 +50,7 @@
       "source_code": "os.system(cmd)"
     },
     {
-      "id": 2580,
+      "id": 2584,
       "cvi_id": "7000",
       "rule_name": "命令注入",
       "severity": "high",
@@ -63,7 +63,7 @@
   ],
   "vulnerabilities": [
     {
-      "id": 2578,
+      "id": 2582,
       "cvi_id": "1005",
       "rule_name": "SQLI",
       "severity": "high",
@@ -74,7 +74,7 @@
       "source_code": "mysql_query(\"SELECT * FROM users WHERE id=\" . $id)"
     },
     {
-      "id": 2579,
+      "id": 2583,
       "cvi_id": "7000",
       "rule_name": "命令注入",
       "severity": "high",
@@ -85,7 +85,7 @@
       "source_code": "os.system(cmd)"
     },
     {
-      "id": 2580,
+      "id": 2584,
       "cvi_id": "7000",
       "rule_name": "命令注入",
       "severity": "high",
@@ -96,7 +96,7 @@
       "source_code": "subprocess.call(cmd, shell=True)"
     },
     {
-      "id": 2581,
+      "id": 2585,
       "cvi_id": "8001",
       "rule_name": "命令注入",
       "severity": "high",

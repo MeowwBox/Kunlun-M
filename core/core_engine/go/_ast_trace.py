@@ -347,29 +347,31 @@ def trace_go_expr(var_name, expr_node, file_path, lineno, to_line,
     
     参考 Python 引擎的 _trace_expr 模式，按节点类型分派。
     
-    返回: 1 (可控), 2 (已修复), 3 (未确认), -1 (不可控)
+    返回: (code, source_lineno) 元组
+        code: 1 (可控), 2 (已修复), 3 (未确认), -1 (不可控)
+        source_lineno: source 赋值行号（0 表示无行号）
     """
     if depth > max_depth:
-        return -1
-    
+        return (-1, 0)
+
     expr_text = _get_node_text(expr_node)
-    
+
     # 1. 快速检查：可控源
     if _is_controlled_source_node(expr_node, controlled_params):
         logger.debug("[AST][Go] Controllable source: {} at L{}".format(expr_text[:60], lineno))
-        return 1
-    
+        return (1, lineno)
+
     # 2. 快速检查：修复函数
     if _is_repair_node(expr_node, repair_functions):
         logger.debug("[AST][Go] Repair function: {} at L{}".format(expr_text[:60], lineno))
-        return 2
-    
+        return (2, lineno)
+
     node_type = expr_node.type
-    
+
     # 3. 字面量 → 安全
     if _is_literal_node_safe(expr_node):
-        return -1
-    
+        return (-1, 0)
+
     # 4. 函数调用
     if node_type == 'call_expression':
         return _trace_call_expr(
@@ -377,7 +379,7 @@ def trace_go_expr(var_name, expr_node, file_path, lineno, to_line,
             repair_functions, controlled_params, depth, max_depth,
             function_back_go_fn, trace_variable_fn
         )
-    
+
     # 5. 字符串拼接 (binary_expression with +)
     if node_type == 'binary_expression':
         return _trace_binary_expr(
@@ -385,35 +387,35 @@ def trace_go_expr(var_name, expr_node, file_path, lineno, to_line,
             repair_functions, controlled_params, depth, max_depth,
             function_back_go_fn, trace_variable_fn
         )
-    
+
     # 6. 简单变量
     if node_type == 'identifier':
         name = _get_node_text(expr_node)
         if name == var_name:
-            return -1  # 自赋值
+            return (-1, 0)  # 自赋值
         if _is_controlled_source_node(expr_node, controlled_params):
-            return 1
+            return (1, lineno)
         # 继续追踪变量
         return trace_variable_fn(
             file_path, name, lineno, to_line,
             repair_functions, controlled_params, depth + 1, max_depth
         )
-    
+
     # 7. selector_expression (如 r.URL.Query)
     if node_type == 'selector_expression':
         if _is_controlled_source_node(expr_node, controlled_params):
-            return 1
+            return (1, lineno)
         # 检查基础变量
         if expr_node.children and expr_node.children[0].type == 'identifier':
             base = _get_node_text(expr_node.children[0])
             if _is_controlled_source_node(expr_node.children[0], controlled_params):
-                return 1
+                return (1, lineno)
             # 追踪基础变量
             return trace_variable_fn(
                 file_path, base, lineno, to_line,
                 repair_functions, controlled_params, depth + 1, max_depth
             )
-    
+
     # 8. index_expression (如 x[0])
     if node_type == 'index_expression':
         # 追踪基础对象
@@ -424,7 +426,7 @@ def trace_go_expr(var_name, expr_node, file_path, lineno, to_line,
                 repair_functions, controlled_params, depth, max_depth,
                 function_back_go_fn, trace_variable_fn
             )
-    
+
     # 9. type_conversion_expression (如 string(body))
     if node_type == 'type_conversion_expression':
         for child in expr_node.children:
@@ -434,9 +436,9 @@ def trace_go_expr(var_name, expr_node, file_path, lineno, to_line,
                     repair_functions, controlled_params, depth, max_depth,
                     function_back_go_fn, trace_variable_fn
                 )
-                if result in (1, 2):
+                if result[0] in (1, 2):
                     return result
-    
+
     # 10. unary_expression (如 !x)
     if node_type == 'unary_expression':
         for child in expr_node.children:
@@ -446,9 +448,9 @@ def trace_go_expr(var_name, expr_node, file_path, lineno, to_line,
                     repair_functions, controlled_params, depth, max_depth,
                     function_back_go_fn, trace_variable_fn
                 )
-                if result in (1, 2):
+                if result[0] in (1, 2):
                     return result
-    
+
     # 11. parenthesized_expression → 解包
     if node_type == 'parenthesized_expression':
         for child in expr_node.children:
@@ -458,41 +460,41 @@ def trace_go_expr(var_name, expr_node, file_path, lineno, to_line,
                     repair_functions, controlled_params, depth, max_depth,
                     function_back_go_fn, trace_variable_fn
                 )
-    
+
     # 12. fallback: 收集标识符逐一追踪
     identifiers = _collect_identifiers(expr_node)
     for ident in identifiers:
         if ident == var_name:
             continue
         if _is_controlled_source_node(expr_node, controlled_params):
-            return 1
+            return (1, lineno)
         result = trace_variable_fn(
             file_path, ident, lineno, to_line,
             repair_functions, controlled_params, depth + 1, max_depth
         )
-        if result in (1, 2):
+        if result[0] in (1, 2):
             return result
-    
-    return -1
+
+    return (-1, 0)
 
 
 def _trace_call_expr(var_name, call_node, file_path, lineno, to_line,
                      repair_functions, controlled_params, depth, max_depth,
                      function_back_go_fn, trace_variable_fn):
-    """追踪函数调用表达式"""
+    """追踪函数调用表达式，返回 (code, source_lineno)"""
     func_name = _get_call_func_name(call_node)
     args = _get_call_args(call_node)
-    
+
     if not func_name:
-        return -1
-    
+        return (-1, 0)
+
     # 检查内置知识库
     knowledge = lookup_builtin(func_name)
     if knowledge:
         if knowledge.get("safe") and not knowledge.get("passthrough"):
             logger.debug("[AST][Go] Safe function: {}".format(func_name))
-            return -1
-        
+            return (-1, 0)
+
         if knowledge.get("passthrough"):
             # 关键：追踪 ALL 非字面量参数
             logger.debug("[AST][Go] Passthrough function: {}, tracing all args".format(func_name))
@@ -504,17 +506,17 @@ def _trace_call_expr(var_name, call_node, file_path, lineno, to_line,
                     repair_functions, controlled_params, depth + 1, max_depth,
                     function_back_go_fn, trace_variable_fn
                 )
-                if result in (1, 2):
+                if result[0] in (1, 2):
                     return result
-            return -1  # 所有参数都安全
-    
+            return (-1, 0)  # 所有参数都安全
+
     # 未知函数 → 跨函数追踪 (deps 机制)
     args_str = ', '.join(_get_node_text(a) for a in args)
     fb_result = function_back_go_fn(
         func_name, args_str, lineno, file_path,
         repair_functions, controlled_params
     )
-    
+
     if isinstance(fb_result, tuple) and len(fb_result) == 2:
         code, caller_deps = fb_result
         if code == 'deps' and caller_deps:
@@ -525,36 +527,36 @@ def _trace_call_expr(var_name, call_node, file_path, lineno, to_line,
                     file_path, dep_var, lineno, to_line,
                     repair_functions, controlled_params, depth + 1, max_depth
                 )
-                if result in (1, 2):
+                if result[0] in (1, 2):
                     return result
-            return 3  # 所有依赖都未确认
+            return (3, lineno)  # 所有依赖都未确认
         elif code in (1, 2):
-            return code
+            return (code, lineno)
         elif code == 3:
-            return 3
-    
-    return -1
+            return (3, lineno)
+
+    return (-1, 0)
 
 
 def _trace_binary_expr(var_name, bin_node, file_path, lineno, to_line,
                        repair_functions, controlled_params, depth, max_depth,
                        function_back_go_fn, trace_variable_fn):
-    """追踪二元表达式（字符串拼接）"""
+    """追踪二元表达式（字符串拼接），返回 (code, source_lineno)"""
     for child in bin_node.children:
         if child.type in ('+', '-', '||', '&&', '==', '!=', '<', '>', '<=', '>='):
             continue
         if _is_literal_node_safe(child):
             continue
-        
+
         result = trace_go_expr(
             var_name, child, file_path, lineno, to_line,
             repair_functions, controlled_params, depth, max_depth,
             function_back_go_fn, trace_variable_fn
         )
-        if result in (1, 2):
+        if result[0] in (1, 2):
             return result
-    
-    return -1
+
+    return (-1, 0)
 
 
 def _get_formal_param_names(params_node):
@@ -585,13 +587,13 @@ def trace_go_stmt(var_name, stmt_node, file_path, vul_lineno, to_line,
                   function_back_go_fn, trace_variable_fn):
     """
     追踪 Go 语句中的变量赋值（纯 AST 版本）
-    
+
     参考 Python 引擎的 _trace_stmt 模式，按语句类型分派。
-    
-    返回: 1 (可控), 2 (已修复), 3 (未确认), -1 (不可控), None (未找到)
+
+    返回: (code, source_lineno) 元组或 None (未找到)
     """
     if depth > max_depth:
-        return -1
+        return (-1, 0)
     
     # 赋值语句
     if stmt_node.type in ASSIGNMENT_TYPES:

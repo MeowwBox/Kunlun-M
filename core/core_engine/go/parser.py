@@ -44,7 +44,6 @@ _trace_cache = TraceCache("go")
 
 # 跨函数追踪递归防护栈
 _scan_function_stack = []
-_last_source_lineno = None  # 最近一次 trace 找到的 source 赋值行号
 
 # Go 特有的可控输入源
 GO_CONTROLLED_SOURCES = [
@@ -1453,6 +1452,8 @@ def _trace_variable_in_lines(file_path, var_name, from_line, to_line,
 
     入口查缓存，出口写缓存（仅缓存 depth=0 的顶层调用）。
     实际逻辑在 _trace_variable_in_lines_impl 中。
+
+    返回: (code, source_lineno) 元组
     """
     if repair_functions is None:
         repair_functions = is_repair_functions
@@ -1463,43 +1464,44 @@ def _trace_variable_in_lines(file_path, var_name, from_line, to_line,
     if depth == 0 and file_path and to_line:
         cached = _trace_cache.get(file_path, var_name, int(to_line))
         if cached is not None:
-            return cached[0]
+            # cached 格式: (code, [], to_line) → 返回 (code, source_lineno)
+            return (cached[0], cached[2] if len(cached) > 2 else to_line)
 
-    result = _trace_variable_in_lines_impl(
+    code, source_lineno = _trace_variable_in_lines_impl(
         file_path, var_name, from_line, to_line,
         repair_functions, controlled_params, depth, max_depth
     )
 
     # 顶层调用写缓存（仅确定性结果）
-    if depth == 0 and file_path and to_line and result in (1, 2, -1):
-        _trace_cache.put(file_path, var_name, int(to_line), (result, [], to_line))
+    if depth == 0 and file_path and to_line and code in (1, 2, -1):
+        _trace_cache.put(file_path, var_name, int(to_line), (code, [], source_lineno))
 
-    return result
+    return (code, source_lineno)
 
 
 def _analyze_rhs_node(rhs_node, var_name, file_path, lineno, to_line,
                       repair_functions, controlled_params, depth, max_depth):
     """
     根据 RHS AST 节点类型分派分析。
-    返回: 1/2/-1 如果确定，None 如果需要继续扫描。
+    返回: (code, source_lineno) 如果确定，None 如果需要继续扫描。
     """
     rhs_text = rhs_node.text.decode('utf-8', errors='ignore')
 
     # 快速检查：可控源
     if _is_controllable_source(rhs_text, controlled_params):
         logger.debug("[AST][Go] Variable {} RHS is controllable source: {}".format(var_name, rhs_text[:80]))
-        return 1
+        return (1, lineno)
 
     # 快速检查：修复函数
     if _is_repair_function(rhs_text, repair_functions):
         logger.debug("[AST][Go] Variable {} RHS is repaired: {}".format(var_name, rhs_text[:80]))
-        return 2
+        return (2, lineno)
 
     node_type = rhs_node.type
 
     # 字面量 → 安全
     if _is_literal_node(rhs_node):
-        return -1
+        return (-1, 0)
 
     # 函数调用
     if node_type == 'call_expression':
@@ -1521,7 +1523,7 @@ def _analyze_rhs_node(rhs_node, var_name, file_path, lineno, to_line,
         if name == var_name:
             return None  # 自赋值，跳过
         if _is_controllable_source(name, controlled_params):
-            return 1
+            return (1, lineno)
         return _trace_variable_in_lines(
             file_path, name, lineno, to_line,
             repair_functions, controlled_params, depth + 1, max_depth
@@ -1531,12 +1533,12 @@ def _analyze_rhs_node(rhs_node, var_name, file_path, lineno, to_line,
     # 这通常包含在 call_expression 中，但如果是裸的 selector，检查可控源
     if node_type == 'selector_expression':
         if _is_controllable_source(rhs_text, controlled_params):
-            return 1
+            return (1, lineno)
         # 检查基础变量
         if rhs_node.children and rhs_node.children[0].type == 'identifier':
             base = rhs_node.children[0].text.decode('utf-8', errors='ignore')
             if _is_controllable_source(base, controlled_params):
-                return 1
+                return (1, lineno)
 
     # parenthesized_expression → 解包
     if node_type == 'parenthesized_expression':
@@ -1564,12 +1566,12 @@ def _analyze_rhs_node(rhs_node, var_name, file_path, lineno, to_line,
         if vn == var_name:
             continue
         if _is_controllable_source(vn, controlled_params):
-            return 1
+            return (1, lineno)
         r = _trace_variable_in_lines(
             file_path, vn, lineno, to_line,
             repair_functions, controlled_params, depth + 1, max_depth
         )
-        if r in (1, 2):
+        if r[0] in (1, 2):
             return r
 
     return None  # 未确定，继续扫描
@@ -1577,7 +1579,7 @@ def _analyze_rhs_node(rhs_node, var_name, file_path, lineno, to_line,
 
 def _handle_call_expression_rhs(call_node, var_name, file_path, lineno, to_line,
                                  repair_functions, controlled_params, depth, max_depth):
-    """处理函数调用赋值的 RHS 分析"""
+    """处理函数调用赋值的 RHS 分析，返回 (code, source_lineno) 或 None"""
     func_text = _get_call_func_text(call_node)
     args = _get_call_args_from_ast(call_node)
 
@@ -1586,7 +1588,7 @@ def _handle_call_expression_rhs(call_node, var_name, file_path, lineno, to_line,
     if knowledge:
         if knowledge.get("safe") and not knowledge.get("passthrough"):
             logger.debug("[AST][Go] RHS call {} is safe per knowledge base".format(func_text))
-            return -1
+            return (-1, 0)
         if knowledge.get("passthrough"):
             # 关键修复：追踪 ALL 非字面量参数，不只是 passthrough 索引
             for arg_node in args:
@@ -1597,12 +1599,12 @@ def _handle_call_expression_rhs(call_node, var_name, file_path, lineno, to_line,
                     if vn == var_name:
                         continue
                     if _is_controllable_source(vn, controlled_params):
-                        return 1
+                        return (1, lineno)
                     r = _trace_variable_in_lines(
                         file_path, vn, lineno, to_line,
                         repair_functions, controlled_params, depth + 1, max_depth
                     )
-                    if r in (1, 2):
+                    if r[0] in (1, 2):
                         return r
             return None  # passthrough 但参数都安全
 
@@ -1622,19 +1624,19 @@ def _handle_call_expression_rhs(call_node, var_name, file_path, lineno, to_line,
                     file_path, dep_var, lineno, to_line,
                     repair_functions, controlled_params, depth + 1, max_depth
                 )
-                if r in (1, 2):
+                if r[0] in (1, 2):
                     return r
-            return 3  # 所有依赖都未确认
+            return (3, lineno)  # 所有依赖都未确认
         elif code in (1, 2):
-            return code
+            return (code, lineno)
         elif code == 3:
-            return 3
+            return (3, lineno)
     return None
 
 
 def _handle_binary_expression_rhs(bin_node, var_name, file_path, lineno, to_line,
                                    repair_functions, controlled_params, depth, max_depth):
-    """处理字符串拼接 (binary_expression with +) 的 RHS 分析"""
+    """处理字符串拼接 (binary_expression with +) 的 RHS 分析，返回 (code, source_lineno) 或 None"""
     for child in bin_node.children:
         if child.type in ('+', '-', '||', '&&'):
             continue
@@ -1645,12 +1647,12 @@ def _handle_binary_expression_rhs(bin_node, var_name, file_path, lineno, to_line
             if vn == var_name:
                 continue
             if _is_controllable_source(vn, controlled_params):
-                return 1
+                return (1, lineno)
             r = _trace_variable_in_lines(
                 file_path, vn, lineno, to_line,
                 repair_functions, controlled_params, depth + 1, max_depth
             )
-            if r in (1, 2):
+            if r[0] in (1, 2):
                 return r
     return None
 
@@ -1665,10 +1667,9 @@ def _trace_variable_in_lines_impl(file_path, var_name, from_line, to_line,
     完全移除正则，参考 Python 引擎的 _trace_stmt / _trace_expr 模式。
 
     返回值:
-        1  — 可控（污点到达用户输入源）
-        2  — 已修复（经过修复函数处理）
-        3  — 未确认
-        -1 — 不可控
+        (code, source_lineno) 元组
+        code: 1 (可控), 2 (已修复), 3 (未确认), -1 (不可控)
+        source_lineno: source 赋值行号
     """
     from core.core_engine.go._ast_trace import (
         trace_go_stmt, trace_go_expr, _find_assignment_in_block,
@@ -1683,17 +1684,17 @@ def _trace_variable_in_lines_impl(file_path, var_name, from_line, to_line,
         controlled_params = is_controlled_params
 
     if depth > max_depth:
-        return -1
+        return (-1, 0)
 
     # 用 tree-sitter 解析文件
     tree = _parse_go_ast(file_path)
     if not tree:
-        return -1  # 无 AST，无法分析
+        return (-1, 0)  # 无 AST，无法分析
 
     # 获取函数体（block 节点）
     func_info = _find_enclosing_function(tree, to_line)
     if not func_info:
-        return -1
+        return (-1, 0)
 
     func_name, params_node, func_start, func_end = func_info
 
@@ -1713,7 +1714,7 @@ def _trace_variable_in_lines_impl(file_path, var_name, from_line, to_line,
     _find_func(tree.root_node)
 
     if not func_node:
-        return -1
+        return (-1, 0)
 
     # 获取函数体 block
     body_block = None
@@ -1723,15 +1724,13 @@ def _trace_variable_in_lines_impl(file_path, var_name, from_line, to_line,
             break
 
     if not body_block:
-        return -1
+        return (-1, 0)
 
     # 在函数体中查找赋值
     result_tuple = _find_assignment_in_block(body_block, var_name)
     if result_tuple:
         rhs_node, lineno = result_tuple
-        global _last_source_lineno
-        _last_source_lineno = lineno
-        # 用 trace_go_expr 分析 RHS
+        # 用 trace_go_expr 分析 RHS（trace_go_expr 返回 (code, source_lineno)）
         result = trace_go_expr(
             var_name, rhs_node, file_path, lineno, to_line,
             repair_functions, controlled_params, depth, max_depth,
@@ -1798,7 +1797,7 @@ def _trace_variable_in_lines_impl(file_path, var_name, from_line, to_line,
                     if call_result is not None:
                         return call_result
 
-    return -1
+    return (-1, 0)
 
 
 def _trace_param_at_call_sites_ast(func_name, param_name, file_path, tree,
@@ -1888,7 +1887,7 @@ def _trace_param_at_call_sites_ast(func_name, param_name, file_path, tree,
                     repair_functions, controlled_params, depth + 1, max_depth,
                     function_back_go, _trace_variable_in_lines
                 )
-            if result in (1, 2):
+            if isinstance(result, tuple) and result[0] in (1, 2):
                 return result
             continue
 
@@ -1933,7 +1932,7 @@ def _trace_param_at_call_sites_ast(func_name, param_name, file_path, tree,
                 repair_functions, controlled_params, depth + 1, max_depth,
                 function_back_go, _trace_variable_in_lines
             )
-        if result in (1, 2):
+        if isinstance(result, tuple) and result[0] in (1, 2):
             return result
 
     return None
@@ -2027,7 +2026,7 @@ def _trace_param_at_call_sites(func_name, param_name, file_path, lines,
             repair_functions, controlled_params,
             depth + 1, max_depth
         )
-        if trace_result in (1, 2):
+        if isinstance(trace_result, tuple) and trace_result[0] in (1, 2):
             return trace_result
 
     return None
@@ -2127,37 +2126,35 @@ def scan_parser(rule_match, vul_lineno, file_path,
             var_names = _collect_identifiers_from_ast(arg_node)
 
             for var_name in var_names:
-                global _last_source_lineno
-                _last_source_lineno = vul_lineno  # 默认值
                 # 直接可控源
                 if _is_controllable_source(var_name, controlled_params):
                     logger.debug("[AST][Go] Variable {} controllable".format(var_name))
                     results.append({'code': 1, 'chain': [
-                        ('source', var_name, file_path, _last_source_lineno),
+                        ('source', var_name, file_path, vul_lineno),
                         ('sink', matched_func, file_path, vul_lineno)
                     ]})
                     return results
 
                 # 反向追踪
-                trace_result = _trace_variable_in_lines(
+                trace_code, src_lineno = _trace_variable_in_lines(
                     file_path, var_name, vul_lineno, vul_lineno,
                     repair_functions, controlled_params
                 )
-                if trace_result == 1:
+                if trace_code == 1:
                     results.append({'code': 1, 'chain': [
-                        ('source', var_name, file_path, _last_source_lineno),
+                        ('source', var_name, file_path, src_lineno if src_lineno else vul_lineno),
                         ('sink', matched_func, file_path, vul_lineno)
                     ]})
                     return results
-                elif trace_result == 2:
+                elif trace_code == 2:
                     results.append({'code': 2, 'chain': [
-                        ('repair', var_name, file_path, _last_source_lineno),
+                        ('repair', var_name, file_path, src_lineno if src_lineno else vul_lineno),
                         ('sink', matched_func, file_path, vul_lineno)
                     ]})
                     return results
-                elif trace_result == 3:
+                elif trace_code == 3:
                     results.append({'code': 3, 'chain': [
-                        ('unconfirmed', var_name, file_path, _last_source_lineno),
+                        ('unconfirmed', var_name, file_path, src_lineno if src_lineno else vul_lineno),
                         ('sink', matched_func, file_path, vul_lineno)
                     ]})
                     return results
@@ -2208,19 +2205,16 @@ def analysis_params(param_name, parent_func_names, vul_function, lineno, file_pa
         return -1, [], 0, []
 
     # 追踪变量
-    global _last_source_lineno
-    _last_source_lineno = lineno  # 默认值
-
-    trace_result = _trace_variable_in_lines(
+    trace_code, src_lineno = _trace_variable_in_lines(
         file_path, param_name, lineno, lineno,
         repair_functions, controlled_params
     )
 
-    if trace_result == 1:
-        return 1, controlled_params, lineno, [('source', param_name, file_path, _last_source_lineno)]
-    elif trace_result == 2:
-        return 2, controlled_params, lineno, [('repair', param_name, file_path, _last_source_lineno)]
-    elif trace_result == 3:
-        return 3, controlled_params, lineno, [('unconfirmed', param_name, file_path, _last_source_lineno)]
+    if trace_code == 1:
+        return 1, controlled_params, lineno, [('source', param_name, file_path, src_lineno if src_lineno else lineno)]
+    elif trace_code == 2:
+        return 2, controlled_params, lineno, [('repair', param_name, file_path, src_lineno if src_lineno else lineno)]
+    elif trace_code == 3:
+        return 3, controlled_params, lineno, [('unconfirmed', param_name, file_path, src_lineno if src_lineno else lineno)]
     else:
         return -1, [], 0, []
