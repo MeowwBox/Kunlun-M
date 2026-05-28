@@ -36,6 +36,41 @@ from Kunlun_M.const import VUL_LEVEL, VENDOR_VUL_LEVEL
 from web.index.models import ScanTask, ScanResultTask, Rules, NewEvilFunc, Project, ProjectVendors, VendorVulns
 from web.index.models import get_resultflow_class, get_and_check_scantask_project_id, check_and_new_project_id, get_and_check_scanresult
 
+import importlib
+
+
+_rule_meta_cache = None
+
+
+def _get_rule_meta():
+    """从规则文件直接加载元数据缓存，用于 DB 无记录时的兜底"""
+    global _rule_meta_cache
+    if _rule_meta_cache is None:
+        _rule_meta_cache = {}
+        rules_root = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'rules')
+        if os.path.isdir(rules_root):
+            for lan in os.listdir(rules_root):
+                lan_path = os.path.join(rules_root, lan)
+                if not os.path.isdir(lan_path) or lan in ('tamper', 'test'):
+                    continue
+                for fn in os.listdir(lan_path):
+                    if not (fn.startswith('CVI_') and fn.endswith('.py')):
+                        continue
+                    try:
+                        mod = importlib.import_module('rules.{}.{}'.format(lan, fn[:-3]))
+                        cls = getattr(mod, fn[:-3])
+                        inst = cls()
+                        svid = str(getattr(inst, 'svid', '')).strip()
+                        if svid:
+                            _rule_meta_cache[svid] = {
+                                'rule_name': getattr(inst, 'vulnerability', '') or fn[:-3],
+                                'level': int(getattr(inst, 'level', 1)),
+                                'author': getattr(inst, 'author', 'Unknown'),
+                            }
+                    except Exception:
+                        continue
+    return _rule_meta_cache
+
 
 def get_sid(target, is_a_sid=False):
     target = target
@@ -130,11 +165,17 @@ def display_result(scan_id, is_ask=False):
                     author = rule.author
                     level = VUL_LEVEL[rule.level]
                 else:
-                    # 规则表缺失或未初始化时，不应阻断扫描结果展示
-                    rule_name = "Unknown Rule"
-                    author = "Unknown"
-                    level = VUL_LEVEL[1]
-                    logger.warning("[SCAN] Rule CVI_{} not found in database, fallback display.".format(sr.cvi_id))
+                    # 规则表缺失或未初始化时，从规则文件直接读取
+                    rm = _get_rule_meta().get(str(sr.cvi_id))
+                    if rm:
+                        rule_name = rm.get('rule_name', 'Unknown')
+                        author = rm.get('author', 'Unknown')
+                        level = VUL_LEVEL[rm.get('level', 1)]
+                    else:
+                        rule_name = "Unknown Rule"
+                        author = "Unknown"
+                        level = VUL_LEVEL[1]
+                        logger.warning("[SCAN] Rule CVI_{} not found in database or rule files.".format(sr.cvi_id))
 
             row = [sr.id, sr.cvi_id, rule_name, sr.language, level, sr.vulfile_path,
                    author, sr.source_code, sr.result_type]
