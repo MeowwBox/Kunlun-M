@@ -169,6 +169,8 @@ def _go_line_to_text(file_path, lineno):
 # ---- tree-sitter AST 辅助函数 ----
 
 _ast_cache = {}  # file_path → tree
+_import_cache = {}  # file_path → {别名: [文件路径列表]}
+_package_name_cache = {}  # file_path → package_name
 
 
 def _parse_go_ast(file_path):
@@ -185,6 +187,116 @@ def _parse_go_ast(file_path):
         return tree
     except Exception:
         return None
+
+
+def _get_package_name(file_path):
+    """从 AST 中获取 Go 文件的 package 名（带缓存）"""
+    if file_path in _package_name_cache:
+        return _package_name_cache[file_path]
+    tree = _parse_go_ast(file_path)
+    if not tree:
+        _package_name_cache[file_path] = None
+        return None
+    for child in tree.root_node.children:
+        if child.type == 'package_clause':
+            for cc in child.children:
+                if cc.type == 'package_identifier':
+                    name = cc.text.decode('utf-8', errors='ignore')
+                    _package_name_cache[file_path] = name
+                    return name
+    _package_name_cache[file_path] = None
+    return None
+
+
+def _parse_go_imports(file_path):
+    """解析 Go import 语句，返回 {别名: [文件路径列表]} 映射（带缓存）
+
+    Go import 路径不是本地文件路径，需要通过包名匹配：
+    1. 解析当前文件的 import 语句，提取 import 路径和别名
+    2. 从 pre_result 获取所有 Go 文件的包名
+    3. import 路径最后一段 == 包名 → 匹配为本地文件
+    """
+    if file_path in _import_cache:
+        return _import_cache[file_path]
+
+    tree = _parse_go_ast(file_path)
+    if not tree:
+        _import_cache[file_path] = {}
+        return {}
+
+    # 第一步：从 AST 解析 import 声明，收集 (别名, import路径)
+    raw_imports = []  # [(alias, import_path)]
+
+    def _collect_imports(node):
+        if node.type == 'import_declaration':
+            for child in node.children:
+                if child.type == 'import_spec':
+                    _parse_single_import_spec(child)
+                elif child.type == 'import_spec_list':
+                    for spec_child in child.children:
+                        if spec_child.type == 'import_spec':
+                            _parse_single_import_spec(spec_child)
+
+    def _parse_single_import_spec(spec_node):
+        alias = None
+        import_path = None
+        is_blank = False
+
+        for child in spec_node.children:
+            if child.type == 'package_identifier':
+                alias = child.text.decode('utf-8', errors='ignore')
+            elif child.type == 'blank_identifier':
+                is_blank = True
+            elif child.type == 'interpreted_string_literal':
+                # 提取引号内的文本
+                text = child.text.decode('utf-8', errors='ignore')
+                if text.startswith('"') and text.endswith('"'):
+                    import_path = text[1:-1]
+                elif text.startswith('`') and text.endswith('`'):
+                    import_path = text[1:-1]
+
+        # 跳过 blank import
+        if is_blank:
+            return
+        if not import_path:
+            return
+
+        # 确定别名：显式别名 > 默认取路径最后一段
+        if alias is None:
+            alias = import_path.rsplit('/', 1)[-1] if '/' in import_path else import_path
+
+        raw_imports.append((alias, import_path))
+
+    _collect_imports(tree.root_node)
+
+    # 第二步：从 pre_result 构建 包名 → [文件路径] 映射
+    pt = _ast_object_singleton
+    if not pt or not hasattr(pt, 'pre_result'):
+        _import_cache[file_path] = {}
+        return {}
+
+    pkg_to_files = {}  # 包名 → [文件路径列表]
+    for other_fp, other_data in pt.pre_result.items():
+        if other_data.get('language') != 'go':
+            continue
+        pkg_name = _get_package_name(other_fp)
+        if pkg_name:
+            pkg_to_files.setdefault(pkg_name, []).append(other_fp)
+
+    # 第三步：用 import 路径最后一段匹配包名
+    import_map = {}  # {别名: [文件路径列表]}
+    for alias, import_path in raw_imports:
+        path_last_segment = import_path.rsplit('/', 1)[-1] if '/' in import_path else import_path
+        matched_files = pkg_to_files.get(path_last_segment, [])
+        if matched_files:
+            existing = import_map.get(alias, [])
+            for fp in matched_files:
+                if fp not in existing:
+                    existing.append(fp)
+            import_map[alias] = existing
+
+    _import_cache[file_path] = import_map
+    return import_map
 
 
 def _find_call_at_line(tree, lineno, func_name):
@@ -899,30 +1011,66 @@ def function_back_go(func_name, call_args, vul_lineno, file_path,
                 return (-1, [])
             result = _find_function_def_in_lines(lines, func_name, vul_lineno)
 
-        # 4. 跨文件搜索（查索引，未命中则实时搜索）
+        # 4. 跨文件搜索（优先用 import_map 精确定位）
         if result is None:
             pt = _ast_object_singleton
             if pt and hasattr(pt, 'pre_result'):
-                for other_fp, other_data in pt.pre_result.items():
+                # 先用 import_map 精确查找
+                import_map = _parse_go_imports(file_path)
+                # func_name 可能是 "pkg.Func" 格式
+                lookup_name = func_name.split('.')[-1] if '.' in func_name else func_name
+
+                # 从 import_map 找候选文件
+                candidate_files = []
+                if '.' in func_name:
+                    # pkg.Func → 查 import_map[pkg]
+                    pkg_alias = func_name.split('.')[0]
+                    candidate_files = import_map.get(pkg_alias, [])
+                else:
+                    # Func → 搜索所有 import 的文件
+                    for alias, files in import_map.items():
+                        candidate_files.extend(files)
+
+                for other_fp in candidate_files:
                     if other_fp == file_path:
                         continue
-                    if other_data.get('language') != 'go':
-                        continue
-                    # 先查跨文件索引
-                    result = _func_def_index.get((other_fp, func_name))
+                    result = _func_def_index.get((other_fp, lookup_name))
                     if result is not None:
-                        logger.debug("[AST][Go] Found function {} in cross-file index: {}".format(
+                        logger.debug("[AST][Go] Found function {} via import_map: {}".format(
                             func_name, other_fp))
                         break
                     # 回退到实时搜索
-                    other_lines = other_data.get('source_lines', [])
+                    other_lines = pt.pre_result.get(other_fp, {}).get('source_lines', [])
                     if not other_lines:
                         continue
-                    result = _find_function_def_in_lines(other_lines, func_name)
+                    result = _find_function_def_in_lines(other_lines, lookup_name)
                     if result is not None:
-                        logger.debug("[AST][Go] Found function {} in cross-file: {}".format(
+                        logger.debug("[AST][Go] Found function {} via import_map (realtime): {}".format(
                             func_name, other_fp))
                         break
+
+                # fallback: 如果 import_map 没找到，保留原有暴力搜索
+                if result is None:
+                    for other_fp, other_data in pt.pre_result.items():
+                        if other_fp == file_path:
+                            continue
+                        if other_data.get('language') != 'go':
+                            continue
+                        # 先查跨文件索引
+                        result = _func_def_index.get((other_fp, lookup_name))
+                        if result is not None:
+                            logger.debug("[AST][Go] Found function {} in cross-file index: {}".format(
+                                func_name, other_fp))
+                            break
+                        # 回退到实时搜索
+                        other_lines = other_data.get('source_lines', [])
+                        if not other_lines:
+                            continue
+                        result = _find_function_def_in_lines(other_lines, lookup_name)
+                        if result is not None:
+                            logger.debug("[AST][Go] Found function {} in cross-file: {}".format(
+                                func_name, other_fp))
+                            break
         if result is None:
             return (-1, [])
 
@@ -1467,11 +1615,38 @@ def _trace_variable_in_lines_impl(file_path, var_name, from_line, to_line,
             if call_result is not None:
                 return call_result
 
-            # 跨文件搜索调用点
+            # 跨文件搜索调用点（优先用 import_map 精确定位）
             pt = _ast_object_singleton
             if pt and hasattr(pt, 'pre_result'):
-                for other_fp, other_data in pt.pre_result.items():
+                import_map = _parse_go_imports(file_path)
+                # 优先搜索 import 的文件
+                candidate_files = []
+                for alias, files in import_map.items():
+                    candidate_files.extend(files)
+                # 去重
+                seen = set()
+                unique_candidates = []
+                for fp in candidate_files:
+                    if fp not in seen:
+                        seen.add(fp)
+                        unique_candidates.append(fp)
+
+                for other_fp in unique_candidates:
                     if other_fp == file_path:
+                        continue
+                    other_tree = _parse_go_ast(other_fp)
+                    if not other_tree:
+                        continue
+                    call_result = _trace_param_at_call_sites_ast(
+                        func_name, var_name, other_fp, other_tree,
+                        repair_functions, controlled_params, depth, max_depth
+                    )
+                    if call_result is not None:
+                        return call_result
+
+                # fallback: 暴力搜索未被 import_map 覆盖的文件
+                for other_fp, other_data in pt.pre_result.items():
+                    if other_fp == file_path or other_fp in seen:
                         continue
                     if other_data.get('language') != 'go':
                         continue
