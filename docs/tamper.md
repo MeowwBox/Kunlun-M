@@ -23,6 +23,9 @@ python kunlun.py scan -t <target_path> -tp <name>
 ```
 
 ### 同步到数据库（用于 Web 展示/管理）
+Tamper 会在进入 console 或执行 scan 时自动同步到数据库。
+
+如需手动触发：
 ```bash
 python kunlun.py config loadtamper
 ```

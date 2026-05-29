@@ -309,16 +309,14 @@ def main():
                 exit()
 
         if hasattr(args, "console"):
-            # check rule and tamper
-            logger.info("[INIT] RuleCheck start.")
-            RuleCheck().load()
-
-            logger.info("[INIT] RuleCheck finished.")
-
-            logger.info("[INIT] TamperCheck start.")
-            TamperCheck().load()
-
-            logger.info("[INIT] TamperCheck finished.")
+            # 静默同步规则和 tamper
+            logger.debug("[INIT] Syncing rules and tampers...")
+            try:
+                RuleCheck().load()
+                TamperCheck().load()
+            except Exception as e:
+                logger.warning("[INIT] Rule/Tamper sync skipped: {}".format(e))
+            logger.debug("[INIT] Sync finished.")
 
             logger.info("[INIT] Enter KunLun-M console mode.")
             shell = KunlunInterpreter()
@@ -328,6 +326,14 @@ def main():
         if not hasattr(args, "target") or args.target == '':
             parser.print_help()
             exit()
+
+        # 静默同步规则和 tamper（scan 模式也需要）
+        logger.debug("[INIT] Syncing rules and tampers...")
+        try:
+            RuleCheck().load()
+            TamperCheck().load()
+        except Exception as e:
+            logger.warning("[INIT] Rule/Tamper sync skipped: {}".format(e))
 
         # for api close log
         if hasattr(args, "api") and args.api:
