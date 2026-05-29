@@ -627,6 +627,8 @@ class VulnerabilityMatcher(object):
                 return False, 'Unsupport Match'
 
         except Exception as e:
+            print('[CI] DEBUG: [CVI-{cvi}] _scan_go EXCEPTION: {tb}'.format(
+                cvi=self.cvi, tb=traceback.format_exc()))
             logger.debug(traceback.format_exc())
             return False, 'Exception'
 
