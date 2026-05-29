@@ -1767,6 +1767,20 @@ def analysis_callexpression(node, vul_function, back_node, vul_lineno, file_path
 
             analysis(nodes, vul_function, back_node, int(vul_lineno), file_path, function_params=function_params,
                      in_funtion=True)
+        else:
+            # 遍历 arguments，递归进入 FunctionExpression 类型的回调参数
+            for arg in node.arguments:
+                if arg.type == "FunctionExpression":
+                    nodes = arg.body.body
+                    function_params = arg.params
+                    # 构造包含回调体内节点的 back_node，使参数回溯能找到函数体内的变量定义
+                    callback_back_node = list(back_node)
+                    for n in nodes:
+                        callback_back_node.append(n)
+
+                    analysis(nodes, vul_function, callback_back_node, int(vul_lineno), file_path, function_params=function_params,
+                             in_funtion=True)
+                    break
 
 
 def analysis_objectexpression(node, vul_function, back_node, vul_lineno, file_path, function_params, object_name):

