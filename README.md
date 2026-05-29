@@ -92,11 +92,6 @@ Initialize the database (SQLite is used by default):
 python kunlun.py init initialize
 ```
 
-Load rules into the database (required every time rule files are modified):
-```
-python kunlun.py config load
-```
-
 ### Docker Installation
 
 Install via Docker, which starts web mode by default:
@@ -121,15 +116,6 @@ Export reports (JSON/Markdown/HTML):
 python3 kunlun.py scan -t ./tests/vulnerabilities/ -f json -o /tmp/report.json
 python3 kunlun.py scan -t ./tests/vulnerabilities/ -f md -o /tmp/report.md
 python3 kunlun.py scan -t ./tests/vulnerabilities/ -f html -o /tmp/report.html
-```
-
-Use config mode to load local rules/tampers:
-```
-python3 kunlun.py config load         # Load rules into the database
-python3 kunlun.py config recover      # Restore rules from the database to files
-python3 kunlun.py config loadtamper   # Load tampers into the database
-python3 kunlun.py config retamper     # Restore tampers from the database to files
-
 ```
 
 Use show mode to view all current rules/tampers:

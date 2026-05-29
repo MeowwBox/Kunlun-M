@@ -14,15 +14,6 @@ python kunlun.py init initialize
 python kunlun.py init checksql
 ```
 
-### config
-同步规则与 tamper（文件 <-> 数据库）：
-```bash
-python kunlun.py config load
-python kunlun.py config recover
-python kunlun.py config loadtamper
-python kunlun.py config retamper
-```
-
 ### scan
 扫描目标路径或压缩包：
 ```bash
@@ -44,6 +35,7 @@ python kunlun.py scan -t tests/vulnerabilities -f md -o /tmp/report.md
 - `-d/--debug`：开启 debug 日志
 
 说明：
+- 规则和 tamper 会在首次进入 console 或执行 scan 时自动从文件同步到数据库，无需手动操作。
 - 目标为 `.zip` 时会尝试自动解压后扫描。
 - 未指定 `-o` 输出文件名时，会默认写到 `result/<target>.<format>`。
 - `-f json`：导出的 JSON 会包含更完整的信息（例如 `meta/summary`，以及规范化后的 `vulnerabilities` 字段）。

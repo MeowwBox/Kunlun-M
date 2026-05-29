@@ -18,8 +18,6 @@ pip install -r requirements.txt
 ```bash
 cp Kunlun_M/settings.py.bak Kunlun_M/settings.py
 python kunlun.py init initialize
-python kunlun.py config load
-python kunlun.py config loadtamper
 ```
 
 ## 运行与调试
@@ -51,7 +49,7 @@ python kunlun.py console
 
 ## 本地修改与验证建议
 
-- 修改规则后：执行 `python kunlun.py config load` 同步到数据库（用于 Web 展示与回滚）。
+- 修改规则后：规则文件会自动同步到数据库（用于 Web 展示与回滚），无需手动执行 config load。
 - 扫描日志：Web 侧可通过 `/backend/tasklog/<task_id>`、`/backend/debuglog/<task_id>` 查看（支持 `token` 分享访问）。
 - API 调用：需要 `apitoken`（来自 `Kunlun_M/settings.py` 的 `API_TOKEN`），参数名是 `apitoken`。
 

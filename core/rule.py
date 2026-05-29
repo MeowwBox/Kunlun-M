@@ -266,31 +266,16 @@ class RuleCheck:
 
         return True
 
-    def check_and_update_rule_database(self, ruleconfig_content, nowrule, config, always_load_rule_from_file=False, always_keep_rule_in_database=False):
+    def check_and_update_rule_database(self, ruleconfig_content, nowrule, config):
 
         svid = nowrule.svid
         ruleconfig_content = str(ruleconfig_content)
-        nowrule_content = str(getattr(nowrule, config)).replace(r'\"', '"')
 
         if ruleconfig_content.lower() != str(getattr(nowrule, config)).lower():
-            logger.warning("[INIT][Rule Check] CVI_{} config {} has changed:".format(svid, config))
-            logger.warning("[INIT][Rule Check] {} in Rule File is {}".format(config, ruleconfig_content))
-            logger.warning("[INIT][Rule Check] {} in Database is {}".format(config, nowrule_content))
-
-            if always_load_rule_from_file:
-                logger.warning("[INIT][Rule Check] automatically load new {} from Rule File".format(config))
-                setattr(nowrule, config, ruleconfig_content)
-                return True
-            elif always_keep_rule_in_database:
-                return False
-            else:
-                logger.warning("[INIT][Rule Check] whether load new {} from Rule File(Y/N):".format(config))
-                if (not hasattr(sys, "stdin")) or (not sys.stdin) or (not sys.stdin.isatty()):
-                    setattr(nowrule, config, ruleconfig_content)
-                    return True
-                if input().lower() != 'n':
-                    setattr(nowrule, config, ruleconfig_content)
-                    return True
+            # 无感同步：文件内容自动覆盖数据库
+            logger.debug("[INIT][Rule Check] Sync CVI_{} config {} from file".format(svid, config))
+            setattr(nowrule, config, ruleconfig_content)
+            return True
 
         return False
 
@@ -363,7 +348,7 @@ class RuleCheck:
                     self.load_rules(ruleclass)
 
                 else:
-                    logger.info("[INIT][Load Rules] Check Rule CVI_{} {}".format(ruleclass.svid, ruleclass.vulnerability))
+                    logger.debug("[INIT][Load Rules] Check Rule CVI_{} {}".format(ruleclass.svid, ruleclass.vulnerability))
 
                     self.check_rules(ruleclass, r)
 
@@ -443,13 +428,8 @@ class TamperCheck:
         tam_value = tamperclass.tam_value
 
         if str(tam_value) != str(new_tamper_value):
-            logger.warning("[INIT][Tamper Check] Tamper for {} function {} has changed:".format(tam_name, tam_key))
-            logger.warning("[INIT][Tamper Check] {} in Tamper File is {}".format(tam_key, tam_value))
-            logger.warning("[INIT][Tamper Check] {} in Database is {}".format(tam_key, new_tamper_value))
-
-            logger.warning("[INIT][Tamper Check] whether load new {} from Tamper File(Y/N):".format(tam_key))
-            if input().lower() != 'n':
-                tamperclass.tam_value = new_tamper_value
+            logger.debug("[INIT][Tamper Check] Tamper for {} function {} has changed, auto-syncing from file".format(tam_name, tam_key))
+            tamperclass.tam_value = new_tamper_value
 
         try:
             tamperclass.save()
@@ -485,7 +465,7 @@ class TamperCheck:
                         t1.save()
 
                     else:
-                        logger.info("[INIT][Load Tamper] Check Tamper for {} function {}.".format(tamper_name, function))
+                        logger.debug("[INIT][Load Tamper] Check Tamper for {} function {}.".format(tamper_name, function))
 
                         self.check_and_update_tamper(t, filter_func[function])
 
@@ -503,7 +483,7 @@ class TamperCheck:
                         t1.save()
 
                     else:
-                        logger.info("[INIT][Load Tamper] Check Tamper for {} Input {}.".format(tamper_name, input))
+                        logger.debug("[INIT][Load Tamper] Check Tamper for {} Input {}.".format(tamper_name, input))
 
                         self.check_and_update_tamper(t, input)
 

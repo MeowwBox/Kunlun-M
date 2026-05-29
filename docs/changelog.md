@@ -1,5 +1,22 @@
 ## 更新日志
 - 2026-05-29
+  - KunLun-M 2.11.1
+  - **规则同步无感化**
+    - RuleCheck/TamperCheck 去除 `input()` 交互，统一自动以文件内容覆盖数据库
+    - Console 模式入口的规则同步改为静默执行（debug 级别日志）
+    - Scan 模式入口新增自动规则同步（此前完全缺失）
+    - 文档简化：去掉 `config load` / `config loadtamper` 手动步骤
+  - **Console 模式多项修复**
+    - `suggested_commands()` 按 `current_mode` 返回对应命令列表
+    - 语言列表补全 python/java/go/solidity
+    - `show options` 日志级别从 debug 改为 info
+    - `exit()` 改为 `return` 避免杀进程
+    - `back` 清理 `result_task_id`/`result_obj` 状态
+    - `scan` 支持路径参数直接设置 target
+    - 进入 scan 模式自动显示 status
+    - `check_log` 改为读文件尾部 50 行
+    - 新增 `complete_load` / `complete_search` 补全
+- 2026-05-29
   - KunLun-M 2.11.0
   - **Go 引擎重构：正则→纯 AST 追踪**
     - 移除正则分析，`_trace_variable_in_lines_impl` 全面改为 tree-sitter AST 追踪

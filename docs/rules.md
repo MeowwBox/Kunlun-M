@@ -34,9 +34,9 @@ rules/<language>/CVI_<id>.py
 - `special-crx-keyword-match`：Chrome 扩展关键字匹配
 
 ## 规则加载与生效
-运行时扫描会从 `rules/` 目录动态加载规则文件。
+运行时扫描会从 `rules/` 目录动态加载规则文件。规则会在进入 console 或执行 scan 时自动同步到数据库，无需手动操作。
 
-如果需要在 Web 侧展示/管理规则，需要把规则同步到数据库：
+如需手动触发同步（例如在 Web 端管理前）：
 ```bash
 python kunlun.py config load
 ```
