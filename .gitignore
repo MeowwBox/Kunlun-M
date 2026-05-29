@@ -91,6 +91,11 @@ artifacts/
 # real_test
 tests/real_test/*
 tests/*
+!tests/nodejs/
+
+# scan artifacts
+*.pretty
+.kunlun_cache/
 
 # new rule for test
 rules/tamper/*
