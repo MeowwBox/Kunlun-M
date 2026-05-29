@@ -1,5 +1,38 @@
 ## 更新日志
 - 2026-05-29
+  - KunLun-M 2.12.0
+  - **Node.js 扫描能力扩展（Phase 1）**
+    - JS 预处理限制从硬编码（3000字符/500行）改为格式启发式（avg_line_len>500跳过混淆代码），支持 Node.js 大文件
+    - 内置知识库新增 159 条 Node.js 核心 API（child_process/fs/http/crypto/vm/Buffer/path 等），总计 389 条
+    - 新增 46 个 Node.js 服务端可控源（Express/Koa/Hapi/Fastify/process/原生 http）
+    - 新建 `rules/nodejs/` 目录，9 条 Node.js 规则（CVI 3100-3108）：命令注入/路径穿越/SSRF/代码注入/SQL注入/反序列化/开放重定向/XXE/ReDoS
+    - Rule 加载器支持语言别名映射（javascript→nodejs），自动扫描 `rules/nodejs/` 目录
+    - 新增 `rules/tamper/demo_nodejs.py`：Node.js 修复函数和可控源配置
+  - **JS AST 引擎回调函数追踪支持**
+    - `analysis_callexpression` 新增 else 分支：当 callee 是 MemberExpression（如 `app.get`）但 arguments 中有 FunctionExpression 回调参数时，递归进入回调体分析
+    - 构造 `callback_back_node` 包含回调体内节点，使 `parameters_back` 能找到函数体内的变量定义
+    - 支持 Express/Koa/Fastify 等框架的回调模式：`app.get('/path', function(req, res) { exec(req.query.cmd) })`
+  - **JS AST 引擎增强（ArrowFunction / 嵌套回调 / ClassDeclaration / async-await）**
+    - 支持 ArrowFunctionExpression 作为回调参数的参数追踪
+    - 支持嵌套回调模式：外层回调内部 CallExpression 的右值回溯（如 `fs.readFile` 内的 `fs.writeFile`）
+    - 支持 ClassDeclaration 方法体分析 + `this` 属性追踪（`this.config` 跨方法传播）
+    - 支持 async/await：esprima 开启 tolerant 模式，新增 AwaitExpression/TryStatement 处理
+    - 修复 StringLiteral 分支（ObjectExpression Property key 统一为 StringLiteral）
+    - Promise callback 摘要追踪：追踪 `resolve(value)` 的依赖注入
+    - NewFunction 误报修复：vul_lineno >= function_lineno 时跳过
+    - VariableDeclaration 无条件追加 back_node，解决函数内局部变量回溯
+  - **grep 行号计算修复**
+    - 修复 fpc_loose 等正则前缀 \s 消费换行符导致的行号偏移（-1）
+    - LRnumber 计算增加 m.group(0).count('\n') 补偿被匹配消费的换行
+  - **Go parser fallback 移除**
+    - 移除 tree-sitter ImportError 的 try/except 静默降级，改为直接 import
+    - 缺失模块时直接报错退出（与 PHP/JS/Python/Java 一致）
+  - **CI 测试完善**
+    - 新增 5 语言 CI 测试用例（PHP/JS/Java/Python/Go 各 1 个代表性检出）
+    - 新增 `ci_target/cmd_inject.java`（ProcessBuilder 命令注入）
+    - 新增 `ci_target/xss.js`（XSS document.write）
+    - CI 对比模式：expected.json 驱动的 expected_comparison
+- 2026-05-29
   - KunLun-M 2.11.1
   - **规则同步无感化**
     - RuleCheck/TamperCheck 去除 `input()` 交互，统一自动以文件内容覆盖数据库

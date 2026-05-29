@@ -91,6 +91,11 @@ artifacts/
 # real_test
 tests/real_test/*
 tests/*
+!tests/nodejs/
+
+# scan artifacts
+*.pretty
+.kunlun_cache/
 
 # new rule for test
 rules/tamper/*
@@ -98,6 +103,7 @@ rules/tamper/*
 !rules/tamper/demo_go.py
 !rules/tamper/demo_java.py
 !rules/tamper/demo_python.py
+!rules/tamper/demo_nodejs.py
 !rules/tamper/wordpress.py
 !rules/tamper/__init__.py
 
@@ -114,6 +120,9 @@ rules/*
 !rules/go/
 !rules/go/*
 !rules/go/__init__.py
+!rules/nodejs/
+!rules/nodejs/*
+!rules/nodejs/__init__.py
 
 # upload
 uploads/*.zip
