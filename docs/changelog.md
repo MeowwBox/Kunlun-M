@@ -1,5 +1,18 @@
 ## 更新日志
 - 2026-05-29
+  - KunLun-M 2.12.0
+  - **Node.js 扫描能力扩展（Phase 1）**
+    - JS 预处理限制从硬编码（3000字符/500行）改为格式启发式（avg_line_len>500跳过混淆代码），支持 Node.js 大文件
+    - 内置知识库新增 159 条 Node.js 核心 API（child_process/fs/http/crypto/vm/Buffer/path 等），总计 389 条
+    - 新增 46 个 Node.js 服务端可控源（Express/Koa/Hapi/Fastify/process/原生 http）
+    - 新建 `rules/nodejs/` 目录，9 条 Node.js 规则（CVI 3100-3108）：命令注入/路径穿越/SSRF/代码注入/SQL注入/反序列化/开放重定向/XXE/ReDoS
+    - Rule 加载器支持语言别名映射（javascript→nodejs），自动扫描 `rules/nodejs/` 目录
+    - 新增 `rules/tamper/demo_nodejs.py`：Node.js 修复函数和可控源配置
+  - **JS AST 引擎回调函数追踪支持**
+    - `analysis_callexpression` 新增 else 分支：当 callee 是 MemberExpression（如 `app.get`）但 arguments 中有 FunctionExpression 回调参数时，递归进入回调体分析
+    - 构造 `callback_back_node` 包含回调体内节点，使 `parameters_back` 能找到函数体内的变量定义
+    - 支持 Express/Koa/Fastify 等框架的回调模式：`app.get('/path', function(req, res) { exec(req.query.cmd) })`
+- 2026-05-29
   - KunLun-M 2.11.1
   - **规则同步无感化**
     - RuleCheck/TamperCheck 去除 `input()` 交互，统一自动以文件内容覆盖数据库
