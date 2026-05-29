@@ -1,4 +1,57 @@
 ## 更新日志
+- 2026-05-29
+  - KunLun-M 2.11.0
+  - **Go 引擎重构：正则→纯 AST 追踪**
+    - 移除正则分析，`_trace_variable_in_lines_impl` 全面改为 tree-sitter AST 追踪
+    - 新增纯文本 fallback 追踪机制（CI 环境无 tree-sitter 时自动降级）
+    - 预建函数定义索引（`_func_def_index`），`function_back_go` 按名查表定位函数体
+    - `function_back_go` 新增 callee 函数体 sink 追踪逻辑
+    - 跨文件 import 解析和精确函数定位（`_trace_param_at_call_sites_ast`）
+  - **函数摘要系统（5 语言通用）**
+    - 新增 `core/core_engine/function_summary.py`：数据结构 + 缓存管理器（`SummaryCacheManager`）
+    - Go 引擎：`summary_generator.py` + 消费端集成 + 递归分析自定义方法调用 + 缓存持久化
+    - Python 引擎：`summary_generator.py` + 消费端集成
+    - PHP 引擎：`summary_generator.py` + 消费端集成
+    - JavaScript 引擎：`summary_generator.py` + 消费端集成
+  - **Java 引擎反向追踪重构**
+    - 从前向追踪重构为反向追踪模式，和 Go/Python/PHP/JS 四引擎统一
+  - **行号传递统一**
+    - Python 引擎：重构为返回值三元组 `(code, source, source_lineno)` 方式
+    - Go 引擎：重构为返回值元组 `(code, source_lineno)` 方式
+    - chain source 行号使用实际赋值行号而非 sink 行号
+  - **Bug 修复**
+    - `utils/file.py`：修复 `check_comment` 单行注释穿透 bug（注释内容未跳过导致 grep 误匹配）
+  - **CI 修复**
+    - 修复 `.gitignore` 导致 Go 规则文件（CVI_8001~8007）和 `rules/tamper/demo_go.py` 未入仓库的问题
+    - 修复 `_scan_go()` 中 `init_php_repair()` 的 `ModuleNotFoundError` 导致所有 Go 规则静默失败
+- 2026-05-27
+  - KunLun-M 2.10.2
+  - **新增 Go 语言扫描支持**
+    - 新增 `core/core_engine/go/` 模块：基于正则+行扫描的反向污点追踪引擎
+    - `scan_parser()`: 遍历所有参数追踪污点，支持 exec.Command("sh", "-c", cmd) 等多参数场景
+    - `analysis_params()`: 供 CAST 跨文件分析调用
+    - 内置知识库 646 条（Go 标准库 + Gin/Echo/Fiber/Beego/Chi 等框架）
+    - 新增 8 条 Go 漏洞规则（CVI 8000 系列）
+      - CVI_8001: 命令注入（exec.Command/exec.CommandContext）
+      - CVI_8002: SQL 注入（db.Query/db.Exec/gorm.DB.Raw）
+      - CVI_8003: XSS（template.HTML 类型转换/fmt.Fprintf）
+      - CVI_8004: 文件操作（os.Open/os.Create/os.ReadFile）
+      - CVI_8005: SSRF（http.Get/http.Post/http.NewRequest）
+      - CVI_8006: 路径穿越（filepath.Join + 用户输入）
+      - CVI_8007: 不安全反序列化（json.Unmarshal/yaml.Unmarshal）
+      - CVI_8008: 信息泄露（log.Printf/fmt.Printf）
+    - 新增 `rules/tamper/demo_go.py`: Go 修复函数和可控输入源配置
+  - **基础设施改动**
+    - `const.py`: ext_dict 新增 `go: [".go"]`，ext_comment_dict 新增 `go: ["//"]`
+    - `matcher.py`: 新增 `_scan_go()` 方法 + dispatch 映射
+    - `cast.py`: 新增 Go 语言支持（languages/regex/analysis_params）
+    - `pretreatment.py`: 新增 Go 文件预处理
+    - `trace_cache.py`: 支持 go 语言
+  - **Bug 修复**
+    - `utils/file.py`: 修复 `file_info` 路径前导 `/` 问题
+    - `utils/file.py`: 修复 `get_path` 路径拼接问题（`os.path.join` 绝对路径）
+    - `utils/file.py`: `check_comment` 支持 Go 注释
+  - **CI 验证**：所有预期漏洞均已检出
 - 2026-05-27
   - KunLun-M 2.10.1
   - **内置知识库拆分到各语言目录**

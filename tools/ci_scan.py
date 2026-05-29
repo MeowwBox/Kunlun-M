@@ -102,6 +102,13 @@ def main(argv):
     args = parser.parse_args(argv)
 
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', args.settings_module)
+
+    # 将 Kunlun logger 输出到 stdout，方便 CI 查看完整扫描日志
+    import logging
+    _ci_handler = logging.StreamHandler(sys.stdout)
+    _ci_handler.setLevel(logging.DEBUG)
+    _ci_handler.setFormatter(logging.Formatter('[%(levelname)s] %(message)s'))
+
     try:
         m = importlib.import_module(args.settings_module)
         sys.modules['Kunlun_M.settings'] = m
@@ -119,6 +126,9 @@ def main(argv):
         import django
         django.setup()
         from django.core.management import call_command
+
+        # 挂 CI stdout handler 到 KunlunLog，输出完整扫描日志
+        logging.getLogger('KunlunLog').addHandler(_ci_handler)
 
         call_command('migrate', interactive=False, verbosity=0, run_syncdb=True)
 
@@ -351,6 +361,13 @@ def main(argv):
         _safe_makedirs(os.path.dirname(out))
         with open(out, 'w', encoding='utf-8') as f:
             json.dump(report, f, ensure_ascii=False, indent=2)
+
+        # 输出所有检出漏洞的详细信息（调试用）
+        print('[CI] DEBUG: 检出漏洞列表:')
+        for v in vul_list:
+            print('  - file={} cvi={} lang={} unconfirm={} type={}'.format(
+                v.get('file', '?'), v.get('cvi_id', '?'), v.get('language', '?'),
+                v.get('is_unconfirm', '?'), v.get('result_type', '?')))
 
         # 输出对比结果摘要
         if expected_data and isinstance(expected_data.get('expected'), list):

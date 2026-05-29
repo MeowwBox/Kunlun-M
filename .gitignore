@@ -95,6 +95,9 @@ tests/*
 # new rule for test
 rules/tamper/*
 !rules/tamper/demo.py
+!rules/tamper/demo_go.py
+!rules/tamper/demo_java.py
+!rules/tamper/demo_python.py
 !rules/tamper/wordpress.py
 !rules/tamper/__init__.py
 
@@ -108,6 +111,9 @@ rules/*
 !rules/python/*
 !rules/python/__init__.py
 !rules/tamper/demo_python.py
+!rules/go/
+!rules/go/*
+!rules/go/__init__.py
 
 # upload
 uploads/*.zip
@@ -155,3 +161,7 @@ tools/cfr.jar
 cfr.jar_decompiled/
 .claude/
 CLAUDE.md
+docs/design/
+
+# Function summary cache
+.kunlun_cache/

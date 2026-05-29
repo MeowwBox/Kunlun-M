@@ -20,6 +20,23 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y default-libmysqlclient-dev build-essential pkg-config
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
+      - name: Debug Go scan
+        run: |
+          echo "=== Git info ==="
+          git log --oneline -3
+          echo "=== Test Go scan_parser directly ==="
+          python -c "
+          import os, sys, django
+          os.environ['DJANGO_SETTINGS_MODULE'] = 'Kunlun_M.settings_ci'
+          sys.path.insert(0, '.')
+          django.setup()
+          from core.core_engine.go.parser import scan_parser as go_scan_parser, _HAS_TREE_SITTER, _parse_go_ast
+          print('_HAS_TREE_SITTER:', _HAS_TREE_SITTER)
+          tree = _parse_go_ast(os.path.abspath('ci_target/cmd_inject.go'))
+          print('AST tree:', 'OK' if tree else 'None')
+          result = go_scan_parser(['exec.Command'], 11, os.path.abspath('ci_target/cmd_inject.go'), svid=8001)
+          print('scan_parser result:', result)
+          "
       - name: Run KunLun CI scan
         run: python tools/ci_scan.py --target ci_target --output artifacts/kunlun-ci.json
       - name: Upload report artifact
@@ -27,4 +44,3 @@ jobs:
         with:
           name: kunlun-ci-report
           path: artifacts/kunlun-ci.json
-

@@ -25,6 +25,7 @@ from core.pretreatment import ast_object
 from core.internal_defines.php.functions import function_dict as php_function_dict
 from core.internal_defines.php.class_functions import function_dict as php_magic_function_dict
 from core.core_engine.trace_cache import TraceCache
+from core.core_engine.php.summary_generator import lookup_summary
 
 # lphply >= 2.0.0 新增的等价节点类型（字段与原类型完全一致）
 _METHOD_CALL_TYPES = (php.MethodCall, getattr(php, 'NullsafeMethodCall', php.MethodCall))
@@ -41,6 +42,8 @@ is_controlled_params = []
 scan_chain = []  # 回溯链变量
 scan_function_stack = []  # 函数回溯栈，用于避免 A->B->A 这类互相递归导致的无限回溯
 _trace_cache = TraceCache("php")
+_summaries_initialized = False
+_file_summaries = {}
 all_nodes = []
 BASE_FUNCTIONCALL_LIST = ['FunctionCall', 'MethodCall', 'StaticMethodCall', 'ObjectProperty', 'NullsafeMethodCall', 'NullsafeProperty']
 SPECIAL_FUNCTIONCALL_LIST = ['Eval', 'Echo', 'Print', 'Return', 'Break', 'Include',
@@ -589,6 +592,44 @@ def _collect_var_names(node):
     return names
 
 
+def _judge_from_summary_php(summary, call_node):
+    """根据函数摘要判定返回值可控性（PHP版）
+
+    返回: (is_co, cp, expr_lineno) 三元组或 None
+    """
+    actual_params = call_node.params if hasattr(call_node, 'params') else []
+
+    for rf in summary.return_flow:
+        if rf.origin_type == "param":
+            for param_idx in rf.dep_params:
+                if param_idx < len(actual_params):
+                    ap = actual_params[param_idx]
+                    actual_expr = ap.node if hasattr(ap, 'node') else ap
+                    co, _ = is_controllable(actual_expr)
+                    if co == 1:
+                        return (1, rf.origin, 0)
+                    arg_var_names = list(_collect_var_names(actual_expr))
+                    if arg_var_names:
+                        return ('deps', arg_var_names, 0)
+
+        elif rf.origin_type == "global":
+            origin = rf.origin
+            co, _ = is_controllable(origin)
+            if co == 1:
+                return (1, origin, 0)
+
+        elif rf.origin_type == "call":
+            origin = rf.origin
+            co, _ = is_controllable(origin)
+            if co == 1:
+                return (1, origin, 0)
+
+        elif rf.origin_type == "literal":
+            continue
+
+    return None
+
+
 def function_back(param, nodes, function_params, vul_function=None, file_path=None, isback=None,
                   parent_node=None):  # 回溯函数定义位置
     """
@@ -653,6 +694,13 @@ def function_back(param, nodes, function_params, vul_function=None, file_path=No
                     return 'deps', deps, getattr(param, 'lineno', 0)
             # 知识库有记录但没有 passthrough 且 safe=False → 不透传不可控
             return -1, param, 0
+
+        # ---- 查函数摘要 ----
+        callee_summary = lookup_summary(function_name)
+        if callee_summary and callee_summary.return_flow:
+            result = _judge_from_summary_php(callee_summary, param)
+            if result is not None:
+                return result
 
         for node in nodes[::-1]:
             # ---- 普通函数 ----
@@ -2855,6 +2903,63 @@ def analysis(nodes, vul_function, back_node, vul_lineno, file_path=None, functio
         back_node.append(node)
 
 
+def _init_function_summaries(file_path):
+    """初始化 PHP 文件的函数摘要"""
+    global _summaries_initialized, _file_summaries
+
+    if _summaries_initialized:
+        return
+
+    try:
+        from core.core_engine.function_summary import SummaryCacheManager
+        from core.core_engine.php.summary_generator import generate_file_summaries, generate_summaries_for_target
+
+        target_dir = file_path
+        pt = ast_object
+        if pt and hasattr(pt, 'target_directory'):
+            target_dir = pt.target_directory
+        elif pt and hasattr(pt, 'pre_result'):
+            paths = list(pt.pre_result.keys())
+            if len(paths) > 1:
+                target_dir = os.path.commonpath(paths)
+            elif paths:
+                target_dir = os.path.dirname(paths[0])
+
+        cache_mgr = SummaryCacheManager()
+
+        files_dict = {}
+        if pt and hasattr(pt, 'pre_result'):
+            for fp, data in pt.pre_result.items():
+                if data.get('language') == 'php':
+                    try:
+                        with open(fp, 'r', encoding='utf-8', errors='ignore') as f:
+                            files_dict[fp] = f.read()
+                    except Exception:
+                        pass
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                files_dict[file_path] = f.read()
+        except Exception:
+            pass
+
+        if files_dict:
+            cached = cache_mgr.load_or_generate(target_dir, files_dict)
+            need_generate = {fp: content for fp, content in files_dict.items()
+                             if not cached.get(fp) or not cached[fp].functions}
+            if need_generate:
+                new_summaries = generate_summaries_for_target(target_dir, need_generate)
+                for fp, fs in new_summaries.items():
+                    cached[fp] = fs
+                    cache_mgr.save_file_summary(target_dir, fp, fs)
+            _file_summaries = cached
+            logger.debug(f"[AST][PHP] 摘要初始化完成: {len(_file_summaries)} 个文件")
+
+        _summaries_initialized = True
+    except Exception as e:
+        logger.debug(f"[AST][PHP] 摘要初始化失败: {e}")
+        _summaries_initialized = True
+
+
 def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], controlled_params=[], svid=0):
     """
     开始检测函数
@@ -2867,7 +2972,10 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
     :return:
     """
     try:
-        global scan_results, is_repair_functions, is_controlled_params, scan_chain
+        global scan_results, is_repair_functions, is_controlled_params, scan_chain, _summaries_initialized
+
+        _summaries_initialized = False
+        _init_function_summaries(file_path)
 
         scan_chain = ['start']
         scan_results = []
