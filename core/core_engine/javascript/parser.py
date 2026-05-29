@@ -1177,6 +1177,28 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
                     scan_chain.append(('NewParam', code, file_path, expr_lineno))
 
                     is_co, cp = is_controllable(param)
+                elif is_co == 3 and hasattr(param_expr, "type") and param_expr.type == "CallExpression":
+                    # 右值为函数调用（如 step1.toLowerCase()），提取 callee 的原始对象继续回溯
+                    callee = param_expr.callee
+                    if hasattr(callee, "type"):
+                        if callee.type == "MemberExpression":
+                            param = get_original_object(callee)
+                        elif callee.type == "Identifier":
+                            param = callee.name
+                        else:
+                            param = get_original_object(param_expr)
+
+                        logger.debug(
+                            "[AST] VariableDeclarator right is CallExpression, trace callee {}".format(param))
+
+                        file_path = os.path.normpath(file_path)
+                        code = "trace CallExpression callee {}".format(param)
+                        scan_chain.append(('CallExprCallee', code, file_path, expr_lineno))
+
+                        is_co, cp, expr_lineno = parameters_back(param, nodes[:-1], function_params, lineno,
+                                                                 function_flag=0, vul_function=vul_function,
+                                                                 file_path=file_path,
+                                                                 isback=isback, method_name=method_name)
                 else:
 
                     param = get_original_object(param_expr)
@@ -1602,6 +1624,7 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
                                                      file_path=file_path,
                                                      isback=isback, method_name=method_name)  # 找到可控的输入时，停止递归
 
+
     return is_co, cp, expr_lineno
 
 
@@ -1684,6 +1707,7 @@ def analysis_params(expression, back_node, vul_function, vul_lineno, file_path, 
 
     logger.debug("[AST] AST to find param {}".format(get_member_data(param_list)))
     logger.debug("[AST] AST for Vul function {}".format(vul_function))
+
 
     code = "find param {}".format(get_member_data(param_list))
     scan_chain.append(('NewFind', code, file_path, vul_lineno))
