@@ -102,6 +102,13 @@ def main(argv):
     args = parser.parse_args(argv)
 
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', args.settings_module)
+
+    # 将 Kunlun logger 输出到 stdout，方便 CI 查看完整扫描日志
+    import logging
+    _ci_handler = logging.StreamHandler(sys.stdout)
+    _ci_handler.setLevel(logging.DEBUG)
+    _ci_handler.setFormatter(logging.Formatter('[%(levelname)s] %(message)s'))
+
     try:
         m = importlib.import_module(args.settings_module)
         sys.modules['Kunlun_M.settings'] = m
@@ -119,6 +126,9 @@ def main(argv):
         import django
         django.setup()
         from django.core.management import call_command
+
+        # 挂 CI stdout handler 到 KunlunLog，输出完整扫描日志
+        logging.getLogger('KunlunLog').addHandler(_ci_handler)
 
         call_command('migrate', interactive=False, verbosity=0, run_syncdb=True)
 
