@@ -7,6 +7,7 @@
 
 
 import os
+import sys
 import traceback
 
 from esprima import nodes as jsnodes
@@ -107,6 +108,13 @@ _trace_cache = TraceCache("javascript")
 
 _summaries_initialized = False
 _file_summaries = {}
+
+# Class 属性映射：this.xxx = value，用于跨方法的 this 属性追踪
+_this_prop_map = {}
+
+# Class 方法参数映射：{method_name: {param_index: prop_name}}
+# 当检测到 instance.method(arg) 调用时，把 arg 存入 _this_prop_map[prop_name]
+_class_method_param_map = {}
 
 
 def get_member_data(node, check=False, isparam=False, isclean_prototype=False, isreverse=False):
@@ -1067,6 +1075,32 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
     is_co, cp = is_controllable(param)
     param_name = get_member_data(param)
 
+    # Class this 属性追踪（字符串参数版本）：当 get_param 将 this.xxx 转为字符串后，
+    # parameters_back 需要在这里用 _this_prop_map 替换
+    global _this_prop_map
+    if (is_co == 3 and isinstance(param, str) and param.startswith("this.")
+            and _this_prop_map
+            and param[5:] in _this_prop_map):
+        prop_name = param[5:]
+        original_param = _this_prop_map[prop_name]
+        logger.debug("[AST] this.{} (str) found in class prop map, trace to {}".format(prop_name, get_member_data(original_param)))
+        return parameters_back(original_param, nodes, function_params, lineno,
+                                function_flag=function_flag, vul_function=vul_function,
+                                file_path=file_path, isback=isback, method_name=method_name)
+
+    # Class this 属性追踪（AST 节点版本）
+    if (is_co == 3 and hasattr(param, "type") and param.type == "MemberExpression"
+            and hasattr(param.object, "type") and param.object.type == "ThisExpression"
+            and hasattr(param.property, "name") and param.property.name in _this_prop_map):
+        prop_name = param.property.name
+        original_param = _this_prop_map[prop_name]
+        logger.debug("[AST] this.{} (node) found in class prop map, trace to {}".format(prop_name, get_member_data(original_param)))
+        file_path_norm = os.path.normpath(file_path) if file_path else ""
+        scan_chain.append(('ThisProp', 'this.{} -> {}'.format(prop_name, get_member_data(original_param)), file_path_norm, param.loc.start.line if hasattr(param, "loc") else 0))
+        return parameters_back(original_param, nodes, function_params, lineno,
+                                function_flag=function_flag, vul_function=vul_function,
+                                file_path=file_path, isback=isback, method_name=method_name)
+
     if is_co == 3 and hasattr(param, "type") and param.type == "MemberExpression":
 
         # 为了能适应正反向两种搜索方式，加入新的限制条件使搜索可能为顺序
@@ -1785,6 +1819,18 @@ def analysis_callexpression(node, vul_function, back_node, vul_lineno, file_path
                      in_funtion=True)
 
         else:
+            # 检测 class 方法调用：obj.setCommand(req.query.cmd) → 把实参存入 _this_prop_map
+            global _class_method_param_map, _this_prop_map
+            if call_callee.type == "MemberExpression" and hasattr(call_callee, "property"):
+                callee_method = get_member_data(call_callee.property)
+                if callee_method in _class_method_param_map:
+                    for arg_idx, prop_name in _class_method_param_map[callee_method].items():
+                        if arg_idx < len(call_arguments):
+                            actual_arg = call_arguments[arg_idx]
+                            logger.debug("[AST] class method call {}({}), this.{} = {}".format(
+                                callee_method, get_member_data(actual_arg), prop_name, get_member_data(actual_arg)))
+                            _this_prop_map[prop_name] = actual_arg
+
             analysis_params(node, back_node, vul_function, vul_lineno, file_path, function_params)
 
     elif node.loc.start.line < vul_lineno <= node.loc.end.line:
@@ -1906,6 +1952,40 @@ def set_scan_results(is_co, cp, expr_lineno, sink, param, vul_lineno):
         scan_results += results
 
 
+def _resolve_class_method_calls(nodes, method_param_map):
+    """
+    递归搜索 AST 找 class 方法调用（如 executor.setCommand(req.query.cmd)），
+    把实参存入 _this_prop_map[prop_name]。
+    """
+    global _this_prop_map
+    for node in nodes:
+        target = node
+        # ExpressionStatement → 取 expression
+        if node.type == "ExpressionStatement" and hasattr(node, "expression"):
+            target = node.expression
+        # 递归进入子节点
+        if hasattr(target, "type") and target.type == "CallExpression":
+            callee = target.callee
+            if hasattr(callee, "type") and callee.type == "MemberExpression" and hasattr(callee, "property"):
+                callee_method = get_member_data(callee.property)
+                if callee_method in method_param_map:
+                    for arg_idx, prop_name in method_param_map[callee_method].items():
+                        if arg_idx < len(target.arguments):
+                            actual_arg = target.arguments[arg_idx]
+                            logger.debug("[AST] class method call {}({}), this.{} = {}".format(
+                                callee_method, get_member_data(actual_arg), prop_name, get_member_data(actual_arg)))
+                            _this_prop_map[prop_name] = actual_arg
+        # 递归子节点：BlockStatement.body, CallExpression.arguments, FunctionExpression/ArrowFunctionExpression.body
+        for attr in ("body", "arguments", "consequent", "alternate", "cases"):
+            if hasattr(target, attr):
+                child = getattr(target, attr)
+                if child is not None:
+                    if isinstance(child, list):
+                        _resolve_class_method_calls(child, method_param_map)
+                    elif hasattr(child, "type") and child.type == "BlockStatement":
+                        _resolve_class_method_calls(child.body, method_param_map)
+
+
 def analysis(all_nodes, vul_function, back_node, vul_lineno, file_path, function_params, in_funtion=False):
     global scan_results
 
@@ -1957,6 +2037,53 @@ def analysis(all_nodes, vul_function, back_node, vul_lineno, file_path, function
                         child_params = get_param_list(child_node.init.params)
                         analysis(child_nodes, vul_function, back_node, vul_lineno, file_path,
                                  function_params=child_params, in_funtion=True)
+
+        if node.type == "ClassDeclaration":
+            # 处理 ES6 Class 的方法体
+            class_body = node.body
+            if hasattr(class_body, "body"):
+                # 第一步：扫描所有方法中的 this.xxx = yyy 赋值，构建属性映射
+                global _this_prop_map, _class_method_param_map
+                _this_prop_map = {}
+                _class_method_param_map = {}
+                for class_member in class_body.body:
+                    if class_member.type == "ClassMethod" and class_member.body and class_member.body.type == "BlockStatement":
+                        method_name = get_member_data(class_member.key) if hasattr(class_member, "key") else None
+                        for stmt in class_member.body.body:
+                            if stmt.type == "ExpressionStatement" and hasattr(stmt, "expression"):
+                                expr = stmt.expression
+                                if expr.type == "AssignmentExpression" and expr.operator == "=":
+                                    left = expr.left
+                                    right = expr.right
+                                    if (hasattr(left, "object") and hasattr(left.object, "type")
+                                        and left.object.type == "ThisExpression"
+                                        and hasattr(left, "property") and hasattr(left.property, "name")):
+                                        prop_name = left.property.name
+                                        # 如果右值是方法参数，建立方法参数映射（用于在调用点解析实参）
+                                        if method_name and right.type == "Identifier":
+                                            for idx, p in enumerate(class_member.params):
+                                                if get_member_data(p) == get_member_data(right):
+                                                    _class_method_param_map[method_name] = {idx: prop_name}
+                                        # 同时存入 this_prop_map（用于非方法参数的简单赋值）
+                                        _this_prop_map[prop_name] = right
+
+                # 第 1.5 步：在全文件 AST 中搜索 class 方法调用，解析实参
+                if _class_method_param_map:
+                    _resolve_class_method_calls(all_nodes, _class_method_param_map)
+
+                # 第二步：进入包含 vul_lineno 的方法体进行分析
+                for class_member in class_body.body:
+                    if class_member.type == "ClassMethod" and class_member.body and class_member.body.type == "BlockStatement":
+                        if class_member.loc.start.line <= vul_lineno <= class_member.loc.end.line:
+                            child_nodes = class_member.body.body
+                            child_params = get_param_list(class_member.params)
+                            # 构造 back_node：复制外层 + 追加方法体节点 + 追加 this 赋值对应的虚拟节点
+                            callback_back_node = list(back_node)
+                            for n in child_nodes:
+                                callback_back_node.append(n)
+
+                            analysis(child_nodes, vul_function, callback_back_node, vul_lineno, file_path,
+                                     function_params=child_params, in_funtion=True)
 
         if node.type == "WhileStatement":
             analysis_while(node, vul_function, back_node, vul_lineno, file_path, function_params)
