@@ -135,6 +135,11 @@ def get_member_data(node, check=False, isparam=False, isclean_prototype=False, i
             if isreverse:
                 value = node.value[::-1]
 
+        elif type == "StringLiteral":  # esprima Property key (e.g. { 'cmd': x })
+            value = node.value
+            if check:
+                value = "1"
+
         elif type == "MemberExpression":
             data_object = get_member_data(node.object, isclean_prototype=isclean_prototype)
             data_property = get_member_data(node.property, isclean_prototype=isclean_prototype)
@@ -1577,6 +1582,15 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
             if is_co == 3:  # 出现新的敏感函数，重新生成新的漏洞结构，进入新的遍历结构
                 for function_param in function_params:
                     if function_param == cp:
+                        # 如果原始 vul_lineno 在当前函数体内，说明引擎是从函数内部直接分析的，
+                        # 此时形参不可确认（is_co=3），不应生成 NewFunction（is_co=4），
+                        # 否则会导致函数内 exec(形参) 被误报为 Config-vulnerability-confirmed
+                        if int(lineno) >= function_lineno:
+                            logger.debug(
+                                "[AST] param {} in function_params, but vul_lineno {} >= func_lineno {}, skip NewFunction".format(
+                                    param_name, lineno, function_lineno))
+                            return is_co, cp, expr_lineno
+
                         logger.debug(
                             "[AST] param {} line {} in function_params, start new rule for function {}".format(
                                 param_name, function_lineno, function_name))
@@ -1905,6 +1919,13 @@ def analysis_expression(node, vul_function, back_node, vul_lineno, file_path, fu
     if expr_type == "CallExpression":
         analysis_callexpression(expression, vul_function, back_node, vul_lineno, file_path, function_params)
 
+    elif expr_type == "AwaitExpression":
+        # await expr：提取 argument（通常是 CallExpression）进行分析
+        await_arg = expression.argument
+        if hasattr(await_arg, "type"):
+            if await_arg.type == "CallExpression":
+                analysis_callexpression(await_arg, vul_function, back_node, vul_lineno, file_path, function_params)
+
     elif expr_type == "AssignmentExpression":
         expression_node = get_member_data(expression.right)
 
@@ -2019,6 +2040,9 @@ def analysis(all_nodes, vul_function, back_node, vul_lineno, file_path, function
         if node.type == "VariableDeclaration":  # 函数赋值表达式
             for child_node in node.declarations:
 
+                # 追加到 back_node（即使在函数体内也追加，确保 parameters_back 能回溯到局部变量）
+                back_node.append(child_node)
+
                 if child_node.init:
                     if child_node.init.type == "CallExpression":
                         analysis_callexpression(child_node.init, vul_function, back_node, vul_lineno, file_path,
@@ -2037,6 +2061,21 @@ def analysis(all_nodes, vul_function, back_node, vul_lineno, file_path, function
                         child_params = get_param_list(child_node.init.params)
                         analysis(child_nodes, vul_function, back_node, vul_lineno, file_path,
                                  function_params=child_params, in_funtion=True)
+
+                    elif child_node.init.type == "AwaitExpression":
+                        # await expr：提取 argument（通常是 CallExpression）进行分析
+                        await_arg = child_node.init.argument
+                        if hasattr(await_arg, "type"):
+                            if await_arg.type == "CallExpression":
+                                analysis_callexpression(await_arg, vul_function, back_node, vul_lineno, file_path, function_params)
+                            # 其他类型（如 MemberExpression）暂不处理
+
+        if node.type == "TryStatement":
+            # 进入 try 块的 body 分析（async/await 常配合 try-catch）
+            try_block = node.block
+            if hasattr(try_block, "body"):
+                analysis(try_block.body, vul_function, back_node, vul_lineno, file_path,
+                         function_params=function_params, in_funtion=in_funtion)
 
         if node.type == "ClassDeclaration":
             # 处理 ES6 Class 的方法体
@@ -2182,6 +2221,16 @@ def _judge_from_summary_js(summary, call_args):
                         is_co, cp = is_controllable(call_args[param_idx])
                         if is_co == 1:
                             return (1, rf.origin, 0)
+            # 无内置知识库但有 dep_params → 追踪实参（用户自定义函数包装）
+            if rf.dep_params:
+                for param_idx in rf.dep_params:
+                    if param_idx < len(call_args):
+                        is_co, cp = is_controllable(call_args[param_idx])
+                        if is_co == 1:
+                            return (1, cp, 0)
+                        names = _collect_js_var_names(call_args[param_idx])
+                        if names:
+                            return ('deps', list(names), 0)
 
         elif rf.origin_type == "literal":
             continue

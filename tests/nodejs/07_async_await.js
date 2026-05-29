@@ -46,4 +46,30 @@ app.get('/async3', async function(req, res) {
     }
 });
 
+// 场景 5: await 包装函数 + 间接可控参数
+async function executeCmd(target) {
+    return new Promise(function(resolve, reject) {
+        exec(target, function(err, stdout) {
+            if (err) reject(err);
+            else resolve(stdout);
+        });
+    });
+}
+
+app.get('/async4', async function(req, res) {
+    var cmd = req.query.cmd;
+    var result = await executeCmd(cmd);
+    res.send(result);
+});
+
+// 场景 6: sync wrapper 函数
+function runCmd(command) {
+    exec(command);
+}
+
+app.get('/async5', function(req, res) {
+    var cmd = req.query.cmd;
+    runCmd(cmd);
+});
+
 app.listen(3000);

@@ -494,7 +494,7 @@ class Pretreatment:
 
                         # self.pre_result[filepath]['content'] = code_content
                         if not self.is_unprecom:
-                            all_nodes = esprima.parse(code_content, {"loc": True})
+                            all_nodes = esprima.parse(code_content, {"loc": True, "tolerant": True})
                         else:
                             all_nodes = []
 

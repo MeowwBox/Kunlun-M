@@ -34,15 +34,23 @@ def lookup_summary(func_name: str) -> Optional[FunctionSummary]:
 
 
 def _walk(stmts):
-    """递归遍历 JS AST 语句列表。"""
+    """递归遍历 JS AST 语句列表，深入常见子节点属性。"""
     for stmt in stmts:
         yield stmt
-        for attr in ("body", "consequent", "alternate", "cases", "block"):
+        # 语句级属性
+        for attr in ("body", "consequent", "alternate", "cases", "block",
+                      "expression", "test", "declarations", "arguments",
+                      "left", "right", "init", "value",
+                      "callee", "object", "property", "elements"):
             val = getattr(stmt, attr, None)
-            if isinstance(val, list):
-                yield from _walk(val)
-            elif val and hasattr(val, "body") and isinstance(val.body, list):
-                yield from _walk(val.body)
+            if val is None:
+                continue
+            if isinstance(val, (list, tuple)):
+                for item in val:
+                    if hasattr(item, 'type'):
+                        yield from _walk([item])
+            elif hasattr(val, 'type'):
+                yield from _walk([val])
 
 
 def _expr_to_str(node) -> str:
@@ -52,6 +60,8 @@ def _expr_to_str(node) -> str:
     if isinstance(node, js.Identifier):
         return node.name
     if isinstance(node, js.Literal):
+        return repr(node.value)
+    if isinstance(node, js.StringLiteral):
         return repr(node.value)
     if isinstance(node, js.BooleanLiteral):
         return repr(node.value)
@@ -121,6 +131,8 @@ def _expr_to_str(node) -> str:
         return "(...) => ..."
     if isinstance(node, js.SequenceExpression):
         return ", ".join(_expr_to_str(e) for e in node.expressions)
+    if isinstance(node, js.AwaitExpression):
+        return "await " + _expr_to_str(node.argument)
     try:
         return repr(node)
     except Exception:
@@ -241,6 +253,32 @@ def _trace_dataflow(
     if isinstance(expr_node, js.NewExpression):
         func_name = _expr_to_str(expr_node.callee)
         dep_params: List[int] = []
+
+        # new Promise(callback) 特殊处理：
+        # 追踪 callback body 中所有 CallExpression 的参数是否依赖函数参数
+        # 这覆盖两种模式：
+        #   1) resolve(param) — 直接传参给 resolve
+        #   2) exec(param, cb -> resolve(stdout)) — 参数传给内部调用，结果间接 resolve
+        if func_name == "Promise" and expr_node.arguments:
+            callback_fn = expr_node.arguments[0]
+            if isinstance(callback_fn, (js.FunctionExpression, js.ArrowFunctionExpression)):
+                callback_body = callback_fn.body.body if hasattr(callback_fn.body, 'body') and isinstance(callback_fn.body.body, list) else []
+                for node in _walk(callback_body):
+                    if isinstance(node, js.CallExpression) and node.arguments:
+                        for arg in node.arguments:
+                            sub = _trace_dataflow(
+                                arg, param_names, func_body, assignments,
+                                visited | {id(expr_node)}, depth + 1,
+                            )
+                            dep_params.extend(sub.get("dep_params", []))
+                if dep_params:
+                    return {
+                        "origin": f"new {func_name}",
+                        "origin_type": "call",
+                        "dep_params": list(dict.fromkeys(dep_params)),
+                        "path": [{"node": f"new {func_name}", "type": "promise", "line": _get_line(expr_node)}],
+                    }
+
         for arg in (expr_node.arguments or []):
             sub = _trace_dataflow(
                 arg, param_names, func_body, assignments,
@@ -412,7 +450,14 @@ def _trace_dataflow(
             visited, depth + 1,
         )
 
-    # 11. 序列表达式 js.SequenceExpression
+    # 12. await 表达式 js.AwaitExpression
+    if isinstance(expr_node, js.AwaitExpression):
+        return _trace_dataflow(
+            expr_node.argument, param_names, func_body, assignments,
+            visited, depth + 1,
+        )
+
+    # 13. 序列表达式 js.SequenceExpression
     if isinstance(expr_node, js.SequenceExpression):
         if expr_node.expressions:
             return _trace_dataflow(
@@ -585,7 +630,7 @@ def _collect_functions(stmts, result: List[FunctionSummary]) -> None:
     """递归收集所有函数定义。"""
     for stmt in stmts:
         # 函数声明
-        if isinstance(stmt, js.FunctionDeclaration):
+        if isinstance(stmt, (js.FunctionDeclaration, js.AsyncFunctionDeclaration)):
             result.append(_analyze_function(stmt))
         # 类声明
         elif isinstance(stmt, js.ClassDeclaration):
