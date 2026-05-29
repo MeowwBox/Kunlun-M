@@ -1,4 +1,29 @@
 ## 更新日志
+- 2026-05-29
+  - KunLun-M 2.11.0
+  - **Go 引擎重构：正则→纯 AST 追踪**
+    - 移除正则分析，`_trace_variable_in_lines_impl` 全面改为 tree-sitter AST 追踪
+    - 新增纯文本 fallback 追踪机制（CI 环境无 tree-sitter 时自动降级）
+    - 预建函数定义索引（`_func_def_index`），`function_back_go` 按名查表定位函数体
+    - `function_back_go` 新增 callee 函数体 sink 追踪逻辑
+    - 跨文件 import 解析和精确函数定位（`_trace_param_at_call_sites_ast`）
+  - **函数摘要系统（5 语言通用）**
+    - 新增 `core/core_engine/function_summary.py`：数据结构 + 缓存管理器（`SummaryCacheManager`）
+    - Go 引擎：`summary_generator.py` + 消费端集成 + 递归分析自定义方法调用 + 缓存持久化
+    - Python 引擎：`summary_generator.py` + 消费端集成
+    - PHP 引擎：`summary_generator.py` + 消费端集成
+    - JavaScript 引擎：`summary_generator.py` + 消费端集成
+  - **Java 引擎反向追踪重构**
+    - 从前向追踪重构为反向追踪模式，和 Go/Python/PHP/JS 四引擎统一
+  - **行号传递统一**
+    - Python 引擎：重构为返回值三元组 `(code, source, source_lineno)` 方式
+    - Go 引擎：重构为返回值元组 `(code, source_lineno)` 方式
+    - chain source 行号使用实际赋值行号而非 sink 行号
+  - **Bug 修复**
+    - `utils/file.py`：修复 `check_comment` 单行注释穿透 bug（注释内容未跳过导致 grep 误匹配）
+  - **CI 修复**
+    - 修复 `.gitignore` 导致 Go 规则文件（CVI_8001~8007）和 `rules/tamper/demo_go.py` 未入仓库的问题
+    - 修复 `_scan_go()` 中 `init_php_repair()` 的 `ModuleNotFoundError` 导致所有 Go 规则静默失败
 - 2026-05-27
   - KunLun-M 2.10.2
   - **新增 Go 语言扫描支持**

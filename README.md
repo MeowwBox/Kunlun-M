@@ -57,9 +57,11 @@ Cobra-W is a fork evolved from Cobra 2.0, shifting the tool's focus from discove
 
 Kunlun-Mirror evolved from Cobra-W 2.0. After going through the painful process of maintaining and improving the original tool, Kunlun-Mirror (昆仑镜) shifts the tool's focus towards serving security researchers, continuously improving the user experience around practical tool-based usage.
 
-The tool currently primarily supports semantic analysis for **PHP, JavaScript, Python, and Java**, as well as basic scanning for **Chrome extensions and Solidity**.
+The tool currently primarily supports semantic analysis for **PHP, JavaScript, Python, Java, and Go**, as well as basic scanning for **Chrome extensions and Solidity**.
 
 **Java scanning engine** (v2.9.0) supports AST-based taint analysis, framework-level vulnerability detection (Shiro/Struts2/Log4j/Fastjson etc.), and 58 built-in rules covering 20+ vulnerability types.
+
+**Go scanning engine** (v2.11.0) supports AST-based taint analysis with cross-file import resolution, function summary caching, and 8 built-in rules covering command injection, SQL injection, XSS, file operations, SSRF, path traversal, unsafe deserialization, and information disclosure.
 
 Built-in Skills have been added, **supporting one-click integration with AI Agents (OpenClaw / Codex / Claude Code / Hermes, etc.)** for rapid vulnerability scanning.
 
