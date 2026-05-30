@@ -470,6 +470,8 @@ def _find_assignment_at_line(tree, lineno, var_name, to_line=None):
         for sub in init_decl.children:
             if sub.type == "declarator":
                 name = _extract_declarator_name_simple(sub)
+            elif sub.type == "identifier" and not found_eq and name == "":
+                name = _node_text(sub).strip()
             elif sub.type == "=":
                 found_eq = True
             elif found_eq and sub.type not in (";", ",") and value_node is None:
@@ -858,7 +860,7 @@ def _init_function_summaries(file_path):
 
 def _trace_variable_in_lines(file_path, var_name, from_line, to_line,
                               repair_functions=None, controlled_params=None,
-                              depth=0, max_depth=5):
+                              depth=0, max_depth=10, visited=None):
     """在指定行范围内追踪变量的数据流（缓存包装层）。
 
     返回: (code, source_lineno) 元组
@@ -877,7 +879,7 @@ def _trace_variable_in_lines(file_path, var_name, from_line, to_line,
 
     code, source_lineno = _trace_variable_in_lines_impl(
         file_path, var_name, from_line, to_line,
-        repair_functions, controlled_params, depth, max_depth
+        repair_functions, controlled_params, depth, max_depth, visited
     )
 
     # 顶层调用写缓存（仅确定性结果）
@@ -889,7 +891,7 @@ def _trace_variable_in_lines(file_path, var_name, from_line, to_line,
 
 def _trace_variable_in_lines_impl(file_path, var_name, from_line, to_line,
                                   repair_functions, controlled_params,
-                                  depth, max_depth):
+                                  depth, max_depth, visited=None):
     """在指定行范围内追踪变量的数据流（实现层）。
 
     使用 tree-sitter AST 查找 var_name 的赋值，按节点类型分派分析。
@@ -903,6 +905,14 @@ def _trace_variable_in_lines_impl(file_path, var_name, from_line, to_line,
     """
     if depth > max_depth:
         return (-1, 0)
+
+    if visited is None:
+        visited = set()
+    trace_key = (file_path, var_name, int(to_line))
+    if trace_key in visited:
+        logger.debug("[AST][C] Circular trace detected: {}@{}".format(var_name, to_line))
+        return (-1, 0)
+    visited.add(trace_key)
 
     if repair_functions is None:
         repair_functions = is_repair_functions
@@ -939,7 +949,7 @@ def _trace_variable_in_lines_impl(file_path, var_name, from_line, to_line,
         # 搜索调用点
         call_result = _trace_param_at_call_sites(
             func_name, var_name, file_path, tree,
-            repair_functions, controlled_params, depth, max_depth
+            repair_functions, controlled_params, depth, max_depth, visited
         )
         if call_result is not None:
             return call_result
@@ -957,7 +967,7 @@ def _trace_variable_in_lines_impl(file_path, var_name, from_line, to_line,
                     continue
                 call_result = _trace_param_at_call_sites(
                     func_name, var_name, other_fp, other_tree,
-                    repair_functions, controlled_params, depth, max_depth
+                    repair_functions, controlled_params, depth, max_depth, visited
                 )
                 if call_result is not None:
                     return call_result
@@ -972,13 +982,13 @@ def _trace_variable_in_lines_impl(file_path, var_name, from_line, to_line,
         # 分析 RHS
         result = _analyze_rhs_node(
             rhs_node, var_name, file_path, assign_lineno, to_line,
-            repair_functions, controlled_params, depth, max_depth
+            repair_functions, controlled_params, depth, max_depth, visited
         )
         if result is not None:
             return result
 
     # ---- 查找以 var_name 作为参数的函数调用（如 snprintf(cmd, ...)）----
-    call_result = _find_call_with_var_as_arg(tree, to_line, var_name, to_line)
+    call_result = _find_call_with_var_as_arg(tree, to_line, var_name, to_line - 1)
     if call_result:
         call_node, arg_index, call_lineno = call_result
         callee_name = _get_call_func_name(call_node)
@@ -1004,50 +1014,18 @@ def _trace_variable_in_lines_impl(file_path, var_name, from_line, to_line,
                     for sv in sub_vars:
                         sub_code, sub_lineno = _trace_variable_in_lines(
                             file_path, sv, call_lineno, call_lineno,
-                            repair_functions, controlled_params, depth + 1, max_depth
+                            repair_functions, controlled_params, depth + 1, max_depth, visited
                         )
                         if sub_code == 1:
                             return (1, sub_lineno)
 
-    # ---- 查找以 var_name 作为参数的函数调用（如 snprintf(cmd, ...)）----
-    call_write_result = _find_call_with_var_as_arg(tree, to_line, var_name, to_line)
-    if call_write_result:
-        call_node, arg_index, call_lineno = call_write_result
-        callee_name = _get_callee_name(call_node)
-        if callee_name:
-            knowledge = lookup_builtin(callee_name)
-            if knowledge:
-                # 如果 var_name 在 passthrough 列表中，说明此参数是输出参数
-                if arg_index in knowledge.get("passthrough", []):
-                    # 检查其他参数是否包含可控源
-                    args = _get_call_args_from_ast(call_node)
-                    for i, arg in enumerate(args):
-                        if i == arg_index:
-                            continue
-                        if _is_literal_node(arg):
-                            continue
-                        arg_text = _node_text(arg)
-                        if _is_controllable_source(arg_text, controlled_params):
-                            logger.debug("[AST][C] Variable {} written by {} via arg[{}], other arg[{}] is controllable: {}".format(
-                                var_name, callee_name, arg_index, i, arg_text[:80]))
-                            return (1, call_lineno)
-                        # 递归追踪其他参数中的变量
-                        sub_vars = _collect_identifiers_from_ast(arg)
-                        for sv in sub_vars:
-                            sub_code, sub_lineno = _trace_variable_in_lines(
-                                file_path, sv, call_lineno, call_lineno,
-                                repair_functions, controlled_params, depth + 1, max_depth
-                            )
-                            if sub_code == 1:
-                                return (1, sub_lineno)
-
     # ---- 文本回退：逐行扫描 ----
     return _text_trace_variable(file_path, var_name, to_line,
-                                repair_functions, controlled_params, depth, max_depth)
+                                repair_functions, controlled_params, depth, max_depth, visited)
 
 
 def _analyze_rhs_node(rhs_node, var_name, file_path, lineno, to_line,
-                      repair_functions, controlled_params, depth, max_depth):
+                      repair_functions, controlled_params, depth, max_depth, visited=None):
     """根据 RHS AST 节点类型分派分析。
 
     返回: (code, source_lineno) 如果确定，None 如果需要继续扫描。
@@ -1076,14 +1054,14 @@ def _analyze_rhs_node(rhs_node, var_name, file_path, lineno, to_line,
     if node_type == "call_expression":
         return _handle_call_expression_rhs(
             rhs_node, var_name, file_path, lineno, to_line,
-            repair_functions, controlled_params, depth, max_depth
+            repair_functions, controlled_params, depth, max_depth, visited
         )
 
     # 字符串拼接 (binary_expression with +)
     if node_type == "binary_expression":
         return _handle_binary_expression_rhs(
             rhs_node, var_name, file_path, lineno, to_line,
-            repair_functions, controlled_params, depth, max_depth
+            repair_functions, controlled_params, depth, max_depth, visited
         )
 
     # 简单变量赋值: x = y
@@ -1095,7 +1073,7 @@ def _analyze_rhs_node(rhs_node, var_name, file_path, lineno, to_line,
             return (1, lineno)
         return _trace_variable_in_lines(
             file_path, name, lineno, to_line,
-            repair_functions, controlled_params, depth + 1, max_depth
+            repair_functions, controlled_params, depth + 1, max_depth, visited
         )
 
     # subscript_expression (如 argv[1])
@@ -1113,7 +1091,7 @@ def _analyze_rhs_node(rhs_node, var_name, file_path, lineno, to_line,
             if array.type == "identifier":
                 return _trace_variable_in_lines(
                     file_path, array_text, lineno, to_line,
-                    repair_functions, controlled_params, depth + 1, max_depth
+                    repair_functions, controlled_params, depth + 1, max_depth, visited
                 )
 
     # field_expression (如 obj.field, ptr->field)
@@ -1127,7 +1105,7 @@ def _analyze_rhs_node(rhs_node, var_name, file_path, lineno, to_line,
             if operand.type == "identifier":
                 return _trace_variable_in_lines(
                     file_path, operand_text, lineno, to_line,
-                    repair_functions, controlled_params, depth + 1, max_depth
+                    repair_functions, controlled_params, depth + 1, max_depth, visited
                 )
 
     # parenthesized_expression → 解包
@@ -1136,7 +1114,7 @@ def _analyze_rhs_node(rhs_node, var_name, file_path, lineno, to_line,
             if child.type not in ("(", ")"):
                 return _analyze_rhs_node(
                     child, var_name, file_path, lineno, to_line,
-                    repair_functions, controlled_params, depth, max_depth
+                    repair_functions, controlled_params, depth, max_depth, visited
                 )
 
     # cast_expression / type_conversion → 追踪被转换的值
@@ -1145,7 +1123,7 @@ def _analyze_rhs_node(rhs_node, var_name, file_path, lineno, to_line,
         if value:
             return _analyze_rhs_node(
                 value, var_name, file_path, lineno, to_line,
-                repair_functions, controlled_params, depth, max_depth
+                repair_functions, controlled_params, depth, max_depth, visited
             )
 
     # unary_expression (如 !x, -x, *ptr, &x, sizeof(x))
@@ -1154,7 +1132,7 @@ def _analyze_rhs_node(rhs_node, var_name, file_path, lineno, to_line,
         if operand:
             return _analyze_rhs_node(
                 operand, var_name, file_path, lineno, to_line,
-                repair_functions, controlled_params, depth, max_depth
+                repair_functions, controlled_params, depth, max_depth, visited
             )
 
     # pointer_expression / dereference_expression → 追踪被解引用的变量
@@ -1163,7 +1141,7 @@ def _analyze_rhs_node(rhs_node, var_name, file_path, lineno, to_line,
         if operand:
             return _analyze_rhs_node(
                 operand, var_name, file_path, lineno, to_line,
-                repair_functions, controlled_params, depth, max_depth
+                repair_functions, controlled_params, depth, max_depth, visited
             )
 
     # conditional_expression (三元运算符 ? :)
@@ -1174,7 +1152,7 @@ def _analyze_rhs_node(rhs_node, var_name, file_path, lineno, to_line,
             if part:
                 result = _analyze_rhs_node(
                     part, var_name, file_path, lineno, to_line,
-                    repair_functions, controlled_params, depth, max_depth
+                    repair_functions, controlled_params, depth, max_depth, visited
                 )
                 if result and result[0] in (1, 2):
                     return result
@@ -1189,7 +1167,7 @@ def _analyze_rhs_node(rhs_node, var_name, file_path, lineno, to_line,
             return (1, lineno)
         r = _trace_variable_in_lines(
             file_path, vn, lineno, to_line,
-            repair_functions, controlled_params, depth + 1, max_depth
+            repair_functions, controlled_params, depth + 1, max_depth, visited
         )
         if r[0] in (1, 2):
             return r
@@ -1198,7 +1176,7 @@ def _analyze_rhs_node(rhs_node, var_name, file_path, lineno, to_line,
 
 
 def _handle_call_expression_rhs(call_node, var_name, file_path, lineno, to_line,
-                                repair_functions, controlled_params, depth, max_depth):
+                                repair_functions, controlled_params, depth, max_depth, visited=None):
     """处理函数调用赋值的 RHS 分析。"""
     func_text = _get_call_func_text(call_node)
     args = _get_call_args_from_ast(call_node)
@@ -1222,7 +1200,7 @@ def _handle_call_expression_rhs(call_node, var_name, file_path, lineno, to_line,
                         return (1, lineno)
                     r = _trace_variable_in_lines(
                         file_path, vn, lineno, to_line,
-                        repair_functions, controlled_params, depth + 1, max_depth
+                        repair_functions, controlled_params, depth + 1, max_depth, visited
                     )
                     if r[0] in (1, 2):
                         return r
@@ -1248,7 +1226,7 @@ def _handle_call_expression_rhs(call_node, var_name, file_path, lineno, to_line,
                     continue
                 r = _trace_variable_in_lines(
                     file_path, dep_var, lineno, to_line,
-                    repair_functions, controlled_params, depth + 1, max_depth
+                    repair_functions, controlled_params, depth + 1, max_depth, visited
                 )
                 if r[0] in (1, 2):
                     return r
@@ -1262,7 +1240,7 @@ def _handle_call_expression_rhs(call_node, var_name, file_path, lineno, to_line,
 
 
 def _handle_binary_expression_rhs(bin_node, var_name, file_path, lineno, to_line,
-                                  repair_functions, controlled_params, depth, max_depth):
+                                  repair_functions, controlled_params, depth, max_depth, visited=None):
     """处理字符串拼接 (binary_expression) 的 RHS 分析。"""
     for child in bin_node.children:
         if child.type in ("+", "-", "*", "/", "%", "||", "&&", "|", "&", "^",
@@ -1278,7 +1256,7 @@ def _handle_binary_expression_rhs(bin_node, var_name, file_path, lineno, to_line
                 return (1, lineno)
             r = _trace_variable_in_lines(
                 file_path, vn, lineno, to_line,
-                repair_functions, controlled_params, depth + 1, max_depth
+                repair_functions, controlled_params, depth + 1, max_depth, visited
             )
             if r[0] in (1, 2):
                 return r
@@ -1287,7 +1265,7 @@ def _handle_binary_expression_rhs(bin_node, var_name, file_path, lineno, to_line
 
 def _text_trace_variable(file_path, var_name, vul_lineno,
                           repair_functions=None, controlled_params=None,
-                          depth=0, max_depth=5):
+                          depth=0, max_depth=10, visited=None):
     """纯文本 fallback 追踪：不依赖 tree-sitter AST。
 
     从 vul_lineno 向上逐行查找 var_name 的赋值，判断是否来自可控源。
@@ -1301,16 +1279,36 @@ def _text_trace_variable(file_path, var_name, vul_lineno,
     if depth > max_depth:
         return (-1, 0)
 
+    if visited is None:
+        visited = set()
+    trace_key = (file_path, var_name, int(vul_lineno))
+    if trace_key in visited:
+        return (-1, 0)
+    visited.add(trace_key)
+
     lines = _get_source_lines(file_path)
     if not lines:
         return (-1, 0)
 
-    # 向上查找赋值
-    for i in range(vul_lineno - 2, -1, -1):
+    # 向上查找赋值（最多 50 行，避免跨函数误匹配）
+    start = max(0, vul_lineno - 52)
+    for i in range(vul_lineno - 2, start, -1):
         line = lines[i].strip()
+
+        # 跳过空行和纯注释
+        if not line or line.startswith('//') or line.startswith('/*') or line.startswith('*'):
+            continue
 
         # 匹配 C 赋值: type var = ... 或 var = ...
         # 先匹配带类型的声明: int/char/... var = expr
+        # 排除关键字前缀（return/if/else/for/while/switch/case）
+        m_decl = re.match(
+            r'(?:return|if|else|for|while|switch|case|break|continue)\b',
+            line
+        )
+        if m_decl:
+            continue
+
         m_decl = re.match(
             r'(?:\w+(?:\s*\*)*)\s+' + re.escape(var_name) + r'\s*=\s*(.+)',
             line
@@ -1334,7 +1332,7 @@ def _text_trace_variable(file_path, var_name, vul_lineno,
             return (1, src_lineno)
 
         # 检查是否是修复函数
-        if _is_repair_function(rhs, controlled_params):
+        if _is_repair_function(rhs, repair_functions):
             return (2, src_lineno)
 
         # 检查子变量
@@ -1350,7 +1348,7 @@ def _text_trace_variable(file_path, var_name, vul_lineno,
                 return (1, src_lineno)
             sub_code, sub_line = _text_trace_variable(
                 file_path, sv, src_lineno,
-                repair_functions, controlled_params, depth + 1, max_depth
+                repair_functions, controlled_params, depth + 1, max_depth, visited
             )
             if sub_code == 1:
                 return (1, sub_line)
