@@ -76,6 +76,9 @@ C_CONTROLLED_SOURCES = [
     "cin",
 ]
 
+# scanf family: writes to args after the format string (arg 0)
+SCANF_FAMILY = {"scanf", "fscanf", "sscanf"}
+
 # C/C++ 字面量节点类型
 _LITERAL_NODE_TYPES = frozenset({
     "number_literal", "string_literal", "char_literal",
@@ -468,7 +471,7 @@ def _find_assignment_at_line(tree, lineno, var_name, to_line=None):
         value_node = None
         found_eq = False
         for sub in init_decl.children:
-            if sub.type == "declarator":
+            if sub.type in ("declarator", "pointer_declarator"):
                 name = _extract_declarator_name_simple(sub)
             elif sub.type == "identifier" and not found_eq and name == "":
                 name = _node_text(sub).strip()
@@ -664,8 +667,15 @@ def _build_func_def_index(file_path):
                     for child in declarator.children:
                         if child.type == "identifier" and not func_n:
                             func_n = _node_text(child)
-                        elif child.type in ("pointer_declarator", "parenthesized_declarator"):
-                            name = _extract_declarator_name_simple(child)
+                        elif child.type in ("pointer_declarator", "parenthesized_declarator", "function_declarator"):
+                            if child.type == "function_declarator":
+                                fn_id = child.child_by_field_name("declarator")
+                                if fn_id and fn_id.type == "identifier":
+                                    name = _node_text(fn_id)
+                                else:
+                                    name = _extract_declarator_name_simple(child)
+                            else:
+                                name = _extract_declarator_name_simple(child)
                             if name and not func_n:
                                 func_n = name
 
@@ -985,7 +995,21 @@ def _trace_variable_in_lines_impl(file_path, var_name, from_line, to_line,
             repair_functions, controlled_params, depth, max_depth, visited
         )
         if result is not None:
-            return result
+            code, src_lineno = result
+            # code=1(可控) 或 code=2(已修复) 是确定性结果，直接返回
+            # code=-1(不可控) 但赋值来源是 safe 函数（如 malloc）时，
+            # 变量内容可能被后续写入覆盖，需继续检查 _find_call_with_var_as_arg
+            if code in (1, 2):
+                return result
+            if code == -1:
+                rhs_text = _node_text(rhs_node)
+                callee = _get_call_func_name(rhs_node) if rhs_node and rhs_node.type == "call_expression" else None
+                if callee and lookup_builtin(callee) and lookup_builtin(callee).get("safe"):
+                    logger.debug("[AST][C] Variable {} assigned from safe function {}, checking subsequent writes".format(
+                        var_name, callee))
+                    # 不返回，继续到 _find_call_with_var_as_arg 检查后续写入
+                else:
+                    return result
 
     # ---- 查找以 var_name 作为参数的函数调用（如 snprintf(cmd, ...)）----
     call_result = _find_call_with_var_as_arg(tree, to_line, var_name, to_line - 1)
@@ -994,11 +1018,11 @@ def _trace_variable_in_lines_impl(file_path, var_name, from_line, to_line,
         callee_name = _get_call_func_name(call_node)
         if callee_name:
             knowledge = lookup_builtin(callee_name)
+            args = _get_call_args_from_ast(call_node)
             if knowledge and arg_index in knowledge.get("passthrough", []):
                 logger.debug("[AST][C] Variable {} is passthrough arg {} of {}".format(
                     var_name, arg_index, callee_name))
                 # 检查其他参数是否包含可控源
-                args = _get_call_args_from_ast(call_node)
                 for i, arg in enumerate(args):
                     if i == arg_index:
                         continue
@@ -1019,6 +1043,39 @@ def _trace_variable_in_lines_impl(file_path, var_name, from_line, to_line,
                         if sub_code == 1:
                             return (1, sub_lineno)
 
+            # Reverse check: write target (arg 0) inherits controllability from passthrough data-source args
+            if knowledge and knowledge.get("passthrough") and arg_index == 0:
+                for pt_idx in knowledge["passthrough"]:
+                    if pt_idx >= len(args) or pt_idx == arg_index:
+                        continue
+                    pt_arg = args[pt_idx]
+                    if _is_literal_node(pt_arg):
+                        continue
+                    pt_text = _node_text(pt_arg)
+                    if _is_controllable_source(pt_text, controlled_params):
+                        logger.debug("[AST][C] Write target {} inherits controllability from passthrough arg {}".format(
+                            var_name, pt_idx))
+                        return (1, call_lineno)
+                    pt_vars = _collect_identifiers_from_ast(pt_arg)
+                    for pv in pt_vars:
+                        if pv == var_name:
+                            continue
+                        if _is_controllable_source(pv, controlled_params):
+                            return (1, call_lineno)
+                        sub_code, _ = _trace_variable_in_lines(
+                            file_path, pv, call_lineno, call_lineno,
+                            repair_functions, controlled_params, depth + 1, max_depth, visited
+                        )
+                        if sub_code == 1:
+                            return (1, call_lineno)
+
+            # scanf family: non-format args (index >= 1) are output parameters, become controllable
+            short_callee = callee_name.split("::")[-1] if "::" in callee_name else callee_name
+            if short_callee in SCANF_FAMILY and arg_index >= 1:
+                logger.debug("[AST][C] Variable {} is scanf output arg {}".format(
+                    var_name, arg_index))
+                return (1, call_lineno)
+
     # ---- 文本回退：逐行扫描 ----
     return _text_trace_variable(file_path, var_name, to_line,
                                 repair_functions, controlled_params, depth, max_depth, visited)
@@ -1038,11 +1095,13 @@ def _analyze_rhs_node(rhs_node, var_name, file_path, lineno, to_line,
             var_name, rhs_text[:80]))
         return (1, lineno)
 
-    # 快速检查：修复函数
-    if _is_repair_function(rhs_text, repair_functions):
-        logger.debug("[AST][C] Variable {} RHS is repaired: {}".format(
-            var_name, rhs_text[:80]))
-        return (2, lineno)
+    # 快速检查：修复函数（仅检查 repair_functions 列表，不含 builtin safe）
+    if repair_functions:
+        for rf in repair_functions:
+            if rf in rhs_text:
+                logger.debug("[AST][C] Variable {} RHS is repaired: {}".format(
+                    var_name, rhs_text[:80]))
+                return (2, lineno)
 
     node_type = rhs_node.type
 
@@ -1362,7 +1421,7 @@ def _text_trace_variable(file_path, var_name, vul_lineno,
 
 def _trace_param_at_call_sites(func_name, param_name, file_path, tree,
                                repair_functions, controlled_params,
-                               depth, max_depth):
+                               depth, max_depth, visited=None):
     """用 AST 搜索函数调用点，追踪实参来源。
 
     返回 (code, source_lineno) 或 None。
@@ -1416,12 +1475,12 @@ def _trace_param_at_call_sites(func_name, param_name, file_path, tree,
         if actual_arg.type == "identifier":
             result = _trace_variable_in_lines(
                 file_path, actual_arg_text, call_lineno, call_lineno,
-                repair_functions, controlled_params, depth + 1, max_depth
+                repair_functions, controlled_params, depth + 1, max_depth, visited
             )
         else:
             result = _analyze_rhs_node(
                 actual_arg, param_name, file_path, call_lineno, call_lineno,
-                repair_functions, controlled_params, depth + 1, max_depth
+                repair_functions, controlled_params, depth + 1, max_depth, visited
             )
         if isinstance(result, tuple) and result[0] in (1, 2):
             return result
@@ -1754,7 +1813,7 @@ def _analyze_return_deps_c(formal_params, body_node, call_args_str,
             else:
                 ret_idents = _collect_identifiers_from_ast_str(ret_expr_text)
 
-            matched = ret_idents & controllable_local
+            matched = set(ret_idents) & controllable_local
             if matched:
                 deps = set()
                 for var in matched:
@@ -1809,6 +1868,10 @@ def _propagate_controllable_in_body(body_node, controllable_local):
             for child in node.children:
                 if child.type == "assignment_expression":
                     _process_assignment(child)
+                elif child.type == "call_expression":
+                    _process_call_for_propagation(child)
+        elif node.type == "call_expression":
+            _process_call_for_propagation(node)
         elif node.type == "assignment_expression":
             _process_assignment(node)
 
@@ -1863,6 +1926,42 @@ def _propagate_controllable_in_body(body_node, controllable_local):
                 if rhs_ids and (rhs_ids & controllable_local):
                     controllable_local.add(lhs_name)
                     changed = True
+
+    def _process_call_for_propagation(call_node):
+        nonlocal changed
+        callee_name = _get_call_func_name(call_node)
+        if not callee_name:
+            return
+        knowledge = lookup_builtin(callee_name)
+        if not knowledge:
+            return
+        # scanf family: non-format args (index >= 1) are output parameters
+        short_name = callee_name.split("::")[-1] if "::" in callee_name else callee_name
+        is_scanf = short_name in SCANF_FAMILY
+        passthrough = knowledge.get("passthrough", [])
+        args = _get_call_args_from_ast(call_node)
+        if not args:
+            return
+        for idx in passthrough:
+            if idx >= len(args):
+                continue
+            arg = args[idx]
+            if arg.type == "identifier":
+                var = _node_text(arg)
+                if var and var not in controllable_local:
+                    controllable_local.add(var)
+                    changed = True
+                    logger.debug("[AST][C] Propagation: {} is passthrough arg {} of {}".format(
+                        var, idx, callee_name))
+        # scanf family: all non-format args (index >= 1) become controllable
+        if is_scanf:
+            for idx in range(1, len(args)):
+                arg = args[idx]
+                if arg.type == "identifier":
+                    var = _node_text(arg)
+                    if var and var not in controllable_local:
+                        controllable_local.add(var)
+                        changed = True
 
     _walk(body_node)
     return changed
@@ -1986,6 +2085,21 @@ def scan_parser(rule_match, vul_lineno, file_path,
         # safe 标志仅用于嵌套调用的可控性判断（如修复函数），不应阻止
         # 对 sink 函数自身参数的可控性分析。
 
+        # Unconditionally dangerous functions — no parameter tracing needed
+        if matched_func in ("gets",):
+            logger.debug("[AST][C] {} is unconditionally dangerous".format(matched_func))
+            results.append({
+                "code": 1,
+                "vul_func": matched_func,
+                "param": "unbounded_input",
+                "language": "c",
+                "source_file": file_path,
+                "source_lineno": vul_lineno,
+                "chain": [],
+            })
+            scan_results = results
+            return results
+
         for arg_idx, arg_node in enumerate(ast_args):
             arg_text = _node_text(arg_node)
 
@@ -1993,6 +2107,49 @@ def scan_parser(rule_match, vul_lineno, file_path,
             if _is_literal_node(arg_node):
                 logger.debug("[AST][C] Arg[{}] is literal: {}".format(arg_idx, arg_text))
                 continue
+
+            # Function call as argument: trace return value controllability
+            if arg_node.type == "call_expression":
+                inner_func = _get_call_func_name(arg_node)
+                if inner_func:
+                    inner_args = _get_call_args_from_ast(arg_node)
+                    inner_args_str = ", ".join(_node_text(a) for a in inner_args)
+                    fb_result = function_back_c(
+                        inner_func, inner_args_str, vul_lineno, file_path,
+                        repair_functions, controlled_params
+                    )
+                    if isinstance(fb_result, tuple):
+                        code, deps = fb_result
+                        if code == 1:
+                            logger.debug("[AST][C] Return value of {} is controllable".format(inner_func))
+                            results.append({
+                                "code": 1,
+                                "vul_func": matched_func,
+                                "param": inner_func,
+                                "language": "c",
+                                "source_file": file_path,
+                                "source_lineno": vul_lineno,
+                                "chain": [],
+                            })
+                            scan_results = results
+                            return results
+                        elif code == "deps" and isinstance(deps, list):
+                            # Function return depends on internal controllable vars
+                            # If no call args (or deps aren't params), means internal controllable data
+                            if not inner_args or True:  # deps already validated as controllable inside
+                                logger.debug("[AST][C] Return value of {} depends on controllable internal vars: {}".format(
+                                    inner_func, deps))
+                                results.append({
+                                    "code": 1,
+                                    "vul_func": matched_func,
+                                    "param": inner_func,
+                                    "language": "c",
+                                    "source_file": file_path,
+                                    "source_lineno": vul_lineno,
+                                    "chain": [],
+                                })
+                                scan_results = results
+                                return results
 
             # 提取参数中的所有标识符
             var_names = _collect_identifiers_from_ast(arg_node)
