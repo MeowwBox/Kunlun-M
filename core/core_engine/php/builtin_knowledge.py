@@ -1447,6 +1447,20 @@ KNOWLEDGE: Dict[str, Dict[str, Union[List[int], bool]]] = {
     "mysqli_poll": {"passthrough": [], "safe": True},
     "mysqli_prepare": {"passthrough": [], "safe": True},
     "mysqli_query": {"passthrough": [0], "safe": False},
+
+    # ===== PostgreSQL =====
+    "pg_query":            {"passthrough": [0], "safe": False},
+    "pg_query_params":     {"passthrough": [0], "safe": False},
+    "pg_prepare":           {"passthrough": [0], "safe": False},
+    "pg_execute":           {"passthrough": [0], "safe": False},
+
+    # ===== PDO =====
+    "PDO::query":           {"passthrough": [0], "safe": False},
+    "PDO::exec":            {"passthrough": [0], "safe": False},
+    "PDO::prepare":         {"passthrough": [0], "safe": True},
+    "PDOStatement::execute": {"passthrough": [0], "safe": False},
+    "PDOStatement::fetch":  {"passthrough": [0], "safe": False},
+    "PDOStatement::fetchAll":{"passthrough": [0], "safe": False},
     "mysqli_real_connect": {"passthrough": [], "safe": True},
     "mysqli_real_query": {"passthrough": [], "safe": True},
     "mysqli_reap_async_query": {"passthrough": [], "safe": True},

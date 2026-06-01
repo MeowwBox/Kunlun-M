@@ -86,7 +86,6 @@ KNOWLEDGE: Dict[str, Dict[str, Union[List[int], bool]]] = {
         "getClass":     {"passthrough": [], "safe": True},
         "charAt":       {"passthrough": [0], "safe": False},
         "codePointAt":  {"passthrough": [], "safe": True},
-        "hashCode":     {"passthrough": [], "safe": True},
 
         # ===== JDK 核心安全函数 =====
         "Runtime.exec":                    {"passthrough": [0], "safe": False},

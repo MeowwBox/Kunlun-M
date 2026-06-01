@@ -304,7 +304,7 @@ KNOWLEDGE: Dict[str, Dict[str, Union[List[int], bool]]] = {
         "http.Client.Head":     {"passthrough": [0], "safe": False},
 
         # ===== fmt — 输出（可能 XSS） =====
-        "fmt.Fprintf":          {"passthrough": [1], "safe": False},  # w, format, args
+        "fmt.Fprintf":          {"passthrough": [1, 2], "safe": False},  # w, format, args (variadic)
         "fmt.Sprintf":          {"passthrough": [0], "safe": False},
         "fmt.Errorf":           {"passthrough": [0], "safe": False},
 

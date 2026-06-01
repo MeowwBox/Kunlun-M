@@ -249,7 +249,7 @@ KNOWLEDGE: Dict[str, Dict[str, Union[List[int], bool]]] = {
         "pandas.read_parquet":        {"passthrough": [0], "safe": False},
         "pandas.read_feather":        {"passthrough": [0], "safe": False},
         "pandas.read_hdf":            {"passthrough": [0], "safe": False},
-        "pandas.read_clipboard":      {"passthrough": [], "safe": True},
+        "pandas.read_clipboard":      {"passthrough": [], "safe": False},
         "pandas.DataFrame":           {"passthrough": [0], "safe": False},
         "pandas.Series":              {"passthrough": [0], "safe": False},
         "pandas.concat":              {"passthrough": [0], "safe": False},
