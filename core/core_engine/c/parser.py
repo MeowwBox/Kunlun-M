@@ -21,7 +21,7 @@ from typing import Optional, List, Dict, Set, Tuple, Any
 from utils.log import logger
 from core.pretreatment import ast_object as _ast_object_singleton
 from core.core_engine.trace_cache import TraceCache
-from core.core_engine.c.builtin_knowledge import KNOWLEDGE as _BUILTIN_KNOWLEDGE
+from core.core_engine.c.builtin_knowledge import lookup as lookup_builtin, KNOWLEDGE as _BUILTIN_KNOWLEDGE
 from core.core_engine.c.summary_generator import lookup_summary, _summary_registry
 from core.core_engine.function_summary import SummaryCacheManager
 
@@ -84,26 +84,6 @@ _LITERAL_NODE_TYPES = frozenset({
     "number_literal", "string_literal", "char_literal",
     "true", "false", "null",
 })
-
-
-# ---------------------------------------------------------------------------
-# 内置知识库 lookup
-# ---------------------------------------------------------------------------
-def lookup_builtin(func_name: str):
-    """查询 C/C++ 内置函数知识库。
-
-    :param func_name: 函数/方法名
-    :return: {"passthrough": [...], "safe": bool} 或 None
-    """
-    # 精确匹配
-    if func_name in _BUILTIN_KNOWLEDGE:
-        return _BUILTIN_KNOWLEDGE[func_name]
-    # 短名匹配（如 "mysql_real_escape_string" 或 "::" 分隔的 C++ 名）
-    if "::" in func_name:
-        short_name = func_name.split("::")[-1]
-        if short_name in _BUILTIN_KNOWLEDGE:
-            return _BUILTIN_KNOWLEDGE[short_name]
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -1019,7 +999,7 @@ def _trace_variable_in_lines_impl(file_path, var_name, from_line, to_line,
         if callee_name:
             knowledge = lookup_builtin(callee_name)
             args = _get_call_args_from_ast(call_node)
-            if knowledge and arg_index in knowledge.get("passthrough", []):
+            if knowledge and (arg_index in knowledge.get("passthrough", []) or arg_index in knowledge.get("param_flow", {})):
                 logger.debug("[AST][C] Variable {} is passthrough arg {} of {}".format(
                     var_name, arg_index, callee_name))
                 # 检查其他参数是否包含可控源
@@ -1043,38 +1023,35 @@ def _trace_variable_in_lines_impl(file_path, var_name, from_line, to_line,
                         if sub_code == 1:
                             return (1, sub_lineno)
 
-            # Reverse check: write target (arg 0) inherits controllability from passthrough data-source args
-            if knowledge and knowledge.get("passthrough") and arg_index == 0:
-                for pt_idx in knowledge["passthrough"]:
-                    if pt_idx >= len(args) or pt_idx == arg_index:
-                        continue
-                    pt_arg = args[pt_idx]
-                    if _is_literal_node(pt_arg):
-                        continue
-                    pt_text = _node_text(pt_arg)
-                    if _is_controllable_source(pt_text, controlled_params):
-                        logger.debug("[AST][C] Write target {} inherits controllability from passthrough arg {}".format(
-                            var_name, pt_idx))
-                        return (1, call_lineno)
-                    pt_vars = _collect_identifiers_from_ast(pt_arg)
-                    for pv in pt_vars:
-                        if pv == var_name:
-                            continue
-                        if _is_controllable_source(pv, controlled_params):
+            # param_flow check: output arg inherits controllability from input args
+            param_flow = knowledge.get("param_flow", {})
+            if knowledge and param_flow and arg_index in param_flow:
+                source_info = param_flow[arg_index]
+                if isinstance(source_info, str):
+                    # 隐式数据源（如 "stdin", "network"）— 直接标记为可控
+                    logger.debug("[AST][C] Variable {} is output arg {} of {} with implicit source {}".format(
+                        var_name, arg_index, callee_name, source_info))
+                    return (1, call_lineno)
+                elif isinstance(source_info, int) and source_info < len(args):
+                    pt_arg = args[source_info]
+                    if not _is_literal_node(pt_arg):
+                        pt_text = _node_text(pt_arg)
+                        if _is_controllable_source(pt_text, controlled_params):
+                            logger.debug("[AST][C] Write target {} inherits controllability from param_flow arg {}".format(
+                                var_name, source_info))
                             return (1, call_lineno)
-                        sub_code, _ = _trace_variable_in_lines(
-                            file_path, pv, call_lineno, call_lineno,
-                            repair_functions, controlled_params, depth + 1, max_depth, visited
-                        )
-                        if sub_code == 1:
-                            return (1, call_lineno)
-
-            # scanf family: non-format args (index >= 1) are output parameters, become controllable
-            short_callee = callee_name.split("::")[-1] if "::" in callee_name else callee_name
-            if short_callee in SCANF_FAMILY and arg_index >= 1:
-                logger.debug("[AST][C] Variable {} is scanf output arg {}".format(
-                    var_name, arg_index))
-                return (1, call_lineno)
+                        pt_vars = _collect_identifiers_from_ast(pt_arg)
+                        for pv in pt_vars:
+                            if pv == var_name:
+                                continue
+                            if _is_controllable_source(pv, controlled_params):
+                                return (1, call_lineno)
+                            sub_code, _ = _trace_variable_in_lines(
+                                file_path, pv, call_lineno, call_lineno,
+                                repair_functions, controlled_params, depth + 1, max_depth, visited
+                            )
+                            if sub_code == 1:
+                                return (1, call_lineno)
 
     # ---- 文本回退：逐行扫描 ----
     return _text_trace_variable(file_path, var_name, to_line,
@@ -1246,8 +1223,7 @@ def _handle_call_expression_rhs(call_node, var_name, file_path, lineno, to_line,
         if knowledge.get("safe") and not knowledge.get("passthrough"):
             logger.debug("[AST][C] RHS call {} is safe per knowledge base".format(func_text))
             return (-1, 0)
-        if knowledge.get("passthrough"):
-            # 追踪所有非字面量参数
+        if knowledge.get("passthrough") or knowledge.get("param_flow"):
             for arg_node in args:
                 if _is_literal_node(arg_node):
                     continue
@@ -1520,7 +1496,7 @@ def function_back_c(func_name, call_args, vul_lineno, file_path,
         # 1. 检查内置知识库
         knowledge = lookup_builtin(func_name)
         if knowledge:
-            if knowledge.get("safe") and not knowledge.get("passthrough"):
+            if knowledge.get("safe") and not knowledge.get("passthrough") and not knowledge.get("param_flow"):
                 return (-1, [])
 
         # 1.5. 查函数摘要
@@ -1627,9 +1603,9 @@ def _judge_from_summary(summary, call_args_str, controlled_params):
         elif rf.origin_type == "call":
             knowledge = lookup_builtin(rf.origin)
             if knowledge:
-                if knowledge.get("safe") and not knowledge.get("passthrough"):
+                if knowledge.get("safe") and not knowledge.get("passthrough") and not knowledge.get("param_flow"):
                     continue
-                if knowledge.get("passthrough"):
+                if knowledge.get("passthrough") or knowledge.get("param_flow"):
                     for param_idx in rf.dep_params:
                         if param_idx < len(summary.params):
                             actual_args = _split_args_respecting_parens(call_args_str) if call_args_str else []
@@ -1935,33 +1911,53 @@ def _propagate_controllable_in_body(body_node, controllable_local):
         knowledge = lookup_builtin(callee_name)
         if not knowledge:
             return
-        # scanf family: non-format args (index >= 1) are output parameters
-        short_name = callee_name.split("::")[-1] if "::" in callee_name else callee_name
-        is_scanf = short_name in SCANF_FAMILY
-        passthrough = knowledge.get("passthrough", [])
         args = _get_call_args_from_ast(call_node)
         if not args:
             return
-        for idx in passthrough:
-            if idx >= len(args):
-                continue
-            arg = args[idx]
-            if arg.type == "identifier":
-                var = _node_text(arg)
-                if var and var not in controllable_local:
-                    controllable_local.add(var)
-                    changed = True
-                    logger.debug("[AST][C] Propagation: {} is passthrough arg {} of {}".format(
-                        var, idx, callee_name))
-        # scanf family: all non-format args (index >= 1) become controllable
-        if is_scanf:
-            for idx in range(1, len(args)):
+
+        # passthrough: 返回值透传，标记调用结果为可控（如果透传参数可控）
+        passthrough = knowledge.get("passthrough", [])
+        if passthrough:
+            for idx in passthrough:
+                if idx >= len(args):
+                    continue
                 arg = args[idx]
                 if arg.type == "identifier":
                     var = _node_text(arg)
-                    if var and var not in controllable_local:
-                        controllable_local.add(var)
+                    if var and var in controllable_local:
                         changed = True
+                        logger.debug("[AST][C] Propagation: passthrough arg {} of {} is controllable".format(
+                            idx, callee_name))
+
+        # param_flow: 参数间数据流，标记输出参数为可控
+        param_flow = knowledge.get("param_flow", {})
+        if param_flow:
+            for out_idx, source_info in param_flow.items():
+                if not isinstance(out_idx, int) or out_idx >= len(args):
+                    continue
+                if isinstance(source_info, str):
+                    # 隐式数据源 → 输出参数直接可控
+                    arg = args[out_idx]
+                    if arg.type == "identifier":
+                        var = _node_text(arg)
+                        if var and var not in controllable_local:
+                            controllable_local.add(var)
+                            changed = True
+                            logger.debug("[AST][C] Propagation: {} is output arg {} of {} (source: {})".format(
+                                var, out_idx, callee_name, source_info))
+                elif isinstance(source_info, int) and source_info < len(args):
+                    # 参数间数据流：检查输入参数是否可控
+                    src_arg = args[source_info]
+                    src_text = _node_text(src_arg)
+                    if src_text in controllable_local or _is_controllable_source(src_text, controlled_params):
+                        arg = args[out_idx]
+                        if arg.type == "identifier":
+                            var = _node_text(arg)
+                            if var and var not in controllable_local:
+                                controllable_local.add(var)
+                                changed = True
+                                logger.debug("[AST][C] Propagation: {} is output arg {} of {} (from arg {})".format(
+                                    var, out_idx, callee_name, source_info))
 
     _walk(body_node)
     return changed

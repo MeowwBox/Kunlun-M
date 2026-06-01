@@ -22,8 +22,7 @@ from utils.log import logger
 from utils.status import SCAN_ID
 
 from core.pretreatment import ast_object
-from core.internal_defines.php.functions import function_dict as php_function_dict
-from core.internal_defines.php.class_functions import function_dict as php_magic_function_dict
+from core.core_engine.php.builtin_knowledge import KNOWLEDGE as PHP_BUILTIN_KNOWLEDGE
 from core.core_engine.trace_cache import TraceCache
 from core.core_engine.php.summary_generator import lookup_summary
 
@@ -1257,7 +1256,7 @@ def _parameters_back_impl(param, nodes, function_params=None, lineno=0,
                 scan_chain.append(('FunctionCall', code, file_path, node.lineno))
 
                 # 因为没办法解决内置函数的问题，所以尝试引入内置函数列表，如果在其中，则先跳过
-                if function_name in php_function_dict:
+                if function_name in PHP_BUILTIN_KNOWLEDGE:
                     logger.debug("[AST] function {} in php defined function list, continue...".format(function_name))
 
                 else:
@@ -1479,7 +1478,7 @@ def _parameters_back_impl(param, nodes, function_params=None, lineno=0,
                 if is_co == 3:  # 出现新的敏感函数，重新生成新的漏洞结构，进入新的遍历结构
 
                     # 检查函数是不是魔术方法
-                    if node.name in php_magic_function_dict:
+                    if node.name in PHP_BUILTIN_KNOWLEDGE:
                         logger.debug("[AST] param {} found in php magic funtion {}, continue.".format(param_name, node.name))
 
                     else:

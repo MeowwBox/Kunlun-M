@@ -464,9 +464,9 @@ def function_back_java(call_node, stmts, vul_lineno, file_path,
     for name_variant in [full_name, func_name]:
         knowledge = lookup_builtin(name_variant)
         if knowledge:
-            if knowledge.get("safe") and not knowledge.get("passthrough"):
+            if knowledge.get("safe") and not knowledge.get("passthrough") and not knowledge.get("param_flow"):
                 return (-1, None, 0)
-            if knowledge.get("passthrough"):
+            if knowledge.get("passthrough") or knowledge.get("param_flow"):
                 for pt_idx in knowledge["passthrough"]:
                     if pt_idx < len(call_node.arguments or []):
                         arg = call_node.arguments[pt_idx]
@@ -1013,9 +1013,9 @@ def _is_passthrough_method(method_node, param_name, repair_functions, class_meth
     if method_name:
         knowledge = lookup_builtin(method_name)
         if knowledge:
-            if knowledge["safe"] and not knowledge["passthrough"]:
+            if knowledge["safe"] and not knowledge["passthrough"] and not knowledge.get("param_flow"):
                 return False  # 安全过滤函数，不透传
-            if knowledge["passthrough"]:
+            if knowledge["passthrough"] or knowledge.get("param_flow"):
                 return True  # 透传参数
             return False  # 不透传
 

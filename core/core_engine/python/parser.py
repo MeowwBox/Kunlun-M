@@ -971,7 +971,7 @@ def _judge_from_summary_py(summary, call_node, controlled_params):
             if is_controllable(rf.origin, controlled_params):
                 return (1, rf.origin, getattr(call_node, 'lineno', 0))
             knowledge = lookup_builtin(rf.origin)
-            if knowledge and knowledge.get("passthrough"):
+            if knowledge and (knowledge.get("passthrough") or knowledge.get("param_flow")):
                 for param_idx in rf.dep_params:
                     if param_idx < len(call_args):
                         arg_str = _expr_to_str(call_args[param_idx])
@@ -1027,9 +1027,9 @@ def _trace_function_return(func_def, call_node, lineno, file_path,
     if call_func_name:
         knowledge = lookup_builtin(call_func_name)
         if knowledge:
-            if knowledge["safe"] and not knowledge["passthrough"]:
+            if knowledge["safe"] and not knowledge["passthrough"] and not knowledge.get("param_flow"):
                 return -1, None, 0
-            if knowledge["passthrough"]:
+            if knowledge["passthrough"] or knowledge.get("param_flow"):
                 deps = set()
                 for arg_idx in knowledge["passthrough"]:
                     if arg_idx < len(call_node.args or []):

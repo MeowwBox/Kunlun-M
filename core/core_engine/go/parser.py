@@ -139,7 +139,7 @@ def _extract_var_names_from_expr(expr):
         func_name = call_match.group(1)
         # 检查内置知识库
         knowledge = lookup_builtin(func_name)
-        if knowledge and knowledge.get("passthrough"):
+        if knowledge and (knowledge.get("passthrough") or knowledge.get("param_flow")):
             inner_args = call_match.group(2)
             for a in inner_args.split(','):
                 a = a.strip()
@@ -1074,9 +1074,9 @@ def _judge_from_summary(summary, call_args_str, controlled_params):
             # 返回值来自方法调用 → 查内置知识库
             knowledge = lookup_builtin(rf.origin)
             if knowledge:
-                if knowledge.get("safe") and not knowledge.get("passthrough"):
+                if knowledge.get("safe") and not knowledge.get("passthrough") and not knowledge.get("param_flow"):
                     continue  # 安全函数，检查下一条路径
-                if knowledge.get("passthrough"):
+                if knowledge.get("passthrough") or knowledge.get("param_flow"):
                     # 有 passthrough → 检查参数是否可控
                     for pt_idx in knowledge["passthrough"]:
                         # 摘要里这个 call 的 dep_params 对应的是当前函数的形参
@@ -1130,7 +1130,7 @@ def function_back_go(func_name, call_args, vul_lineno, file_path,
         # 1. 检查内置知识库
         knowledge = lookup_builtin(func_name)
         if knowledge:
-            if knowledge.get("safe") and not knowledge.get("passthrough"):
+            if knowledge.get("safe") and not knowledge.get("passthrough") and not knowledge.get("param_flow"):
                 return (-1, [])
             # passthrough 已在 _trace_variable_in_lines 中处理
 
@@ -1797,10 +1797,10 @@ def _handle_call_expression_rhs(call_node, var_name, file_path, lineno, to_line,
     # 检查内置知识库
     knowledge = lookup_builtin(func_text)
     if knowledge:
-        if knowledge.get("safe") and not knowledge.get("passthrough"):
+        if knowledge.get("safe") and not knowledge.get("passthrough") and not knowledge.get("param_flow"):
             logger.debug("[AST][Go] RHS call {} is safe per knowledge base".format(func_text))
             return (-1, 0)
-        if knowledge.get("passthrough"):
+        if knowledge.get("passthrough") or knowledge.get("param_flow"):
             # 关键修复：追踪 ALL 非字面量参数，不只是 passthrough 索引
             for arg_node in args:
                 if _is_literal_node(arg_node):

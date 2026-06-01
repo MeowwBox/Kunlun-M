@@ -16,7 +16,7 @@ from esprima.parser import SourceLocation, Position
 from utils.log import logger
 from core.pretreatment import ast_object
 
-from core.internal_defines.javascript.functions import function_dict, string_function
+from core.core_engine.javascript.builtin_knowledge import KNOWLEDGE as JS_BUILTIN_KNOWLEDGE
 from core.core_engine.trace_cache import TraceCache
 from core.core_engine.javascript.builtin_knowledge import lookup as lookup_builtin
 from core.core_engine.javascript.summary_generator import lookup_summary
@@ -887,7 +887,7 @@ def function_call_back(param, nodes, function_params, file_path=None, isback=Fal
 
         method_name = get_member_data(expression_property)
 
-        if method_name in string_function:
+        if method_name in JS_BUILTIN_KNOWLEDGE and "this" in JS_BUILTIN_KNOWLEDGE.get(method_name, {}).get("passthrough", []):
             logger.debug(
                 "[AST] param {} use internal function {}, pass".format(get_member_data(expression), method_name))
 
@@ -920,7 +920,7 @@ def function_call_back(param, nodes, function_params, file_path=None, isback=Fal
 
         return is_co, cp, expr_lineno
 
-    elif callee_name in function_dict:
+    elif callee_name in JS_BUILTIN_KNOWLEDGE:
 
         logger.debug("[AST] function {} from internal defines, pass".format(callee_name))
 

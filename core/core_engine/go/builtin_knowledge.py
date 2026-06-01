@@ -9,6 +9,8 @@ GOLANG 内置函数/方法可控性知识库
     - passthrough: 返回值依赖哪些参数的位置（0-indexed）。
       [] 表示返回值与输入参数无关（如 len() 返回整数）。
     - safe: True 表示该函数做了有效安全过滤，返回值不再构成安全威胁。
+    - param_flow: 参数间数据流映射 {输出参数索引: 输入参数索引}（可选）。
+      值可以是 int（参数位置）或 str（隐式源如 "stdin"）。
 """
 from typing import Dict, List, Optional, Union
 
@@ -102,12 +104,12 @@ KNOWLEDGE: Dict[str, Dict[str, Union[List[int], bool]]] = {
         "url.QueryUnescape":  {"passthrough": [0], "safe": False},
 
         # ===== encoding/json 解码 =====
-        "json.Unmarshal":     {"passthrough": [1], "safe": False},
+        "json.Unmarshal":     {"passthrough": [1], "safe": False, "param_flow": {1: 0}},
         "json.NewDecoder":    {"passthrough": [0], "safe": False},
         "json.Decoder.Decode": {"passthrough": [0], "safe": False},
 
         # ===== encoding/xml 解码 =====
-        "xml.Unmarshal":      {"passthrough": [1], "safe": False},
+        "xml.Unmarshal":      {"passthrough": [1], "safe": False, "param_flow": {1: 0}},
         "xml.NewDecoder":     {"passthrough": [0], "safe": False},
 
         # ===== reflect =====
@@ -630,7 +632,7 @@ def lookup(func_name: str) -> Optional[Dict[str, Union[List[int], bool]]]:
     查询该语言的内置函数知识库
 
     :param func_name: 函数/方法名
-    :return: {"passthrough": [...], "safe": bool} 或 None
+    :return: {"passthrough": [...], "safe": bool, "param_flow": dict} 或 None
     """
     # 精确匹配
     if func_name in KNOWLEDGE:
