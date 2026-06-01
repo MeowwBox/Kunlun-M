@@ -92,6 +92,7 @@ artifacts/
 tests/real_test/*
 tests/*
 !tests/nodejs/
+!tests/c/
 
 # scan artifacts
 *.pretty
@@ -119,6 +120,9 @@ rules/*
 !rules/tamper/demo_python.py
 !rules/go/
 !rules/go/*
+!rules/c/
+!rules/c/__init__.py
+!rules/c/*
 !rules/go/__init__.py
 !rules/nodejs/
 !rules/nodejs/*

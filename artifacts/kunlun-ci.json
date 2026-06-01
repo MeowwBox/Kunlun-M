@@ -1,26 +1,26 @@
 {
   "meta": {
     "target": "/home/ubuntu/.hermes/hermes-agent/Kunlun-M/ci_target",
-    "task_id": 765,
-    "project_id": 80,
-    "started_at": "2026-05-28T10:15:40.055423+00:00",
-    "finished_at": "2026-05-28T10:15:40.613516+00:00",
+    "task_id": 183,
+    "project_id": 130,
+    "started_at": "2026-05-29T10:22:07.365154+00:00",
+    "finished_at": "2026-05-29T10:22:08.537428+00:00",
     "fail_on": "none",
     "include_unconfirm": false,
     "with_vendor": false,
-    "settings_module": "Kunlun_M.settings",
+    "settings_module": "Kunlun_M.settings_ci",
     "mode": "expected_comparison"
   },
   "summary": {
-    "total": 4,
+    "total": 16,
     "by_severity": {
       "critical": 0,
-      "high": 4,
-      "medium": 0,
+      "high": 13,
+      "medium": 3,
       "low": 0
     },
     "max_severity": "high",
-    "expected_count": 2,
+    "expected_count": 13,
     "missing_count": 0,
     "unexpected_count": 2
   },
@@ -34,36 +34,91 @@
       "file": "cmd_inject.go",
       "cvi_id": "8001",
       "severity": "high"
+    },
+    {
+      "file": "cmd_inject_node.js",
+      "cvi_id": "3100",
+      "severity": "high"
+    },
+    {
+      "file": "cmd_inject.py",
+      "cvi_id": "7000",
+      "severity": "high"
+    },
+    {
+      "file": "cmd_inject.java",
+      "cvi_id": "6003",
+      "severity": "high"
+    },
+    {
+      "file": "xss.js",
+      "cvi_id": "3002",
+      "severity": "high"
+    },
+    {
+      "file": "cmd_inject.c",
+      "cvi_id": "9001",
+      "severity": "high"
+    },
+    {
+      "file": "format_string.c",
+      "cvi_id": "9002",
+      "severity": "high"
+    },
+    {
+      "file": "buffer_overflow.c",
+      "cvi_id": "9003",
+      "severity": "high"
+    },
+    {
+      "file": "path_traversal.c",
+      "cvi_id": "9004",
+      "severity": "high"
+    },
+    {
+      "file": "integer_overflow.c",
+      "cvi_id": "9005",
+      "severity": "high"
+    },
+    {
+      "file": "env_inject.c",
+      "cvi_id": "9006",
+      "severity": "high"
+    },
+    {
+      "file": "arbitrary_read.c",
+      "cvi_id": "9007",
+      "severity": "high"
     }
   ],
   "missing": [],
   "unexpected": [
     {
-      "id": 2655,
-      "cvi_id": "7000",
-      "rule_name": "命令注入",
+      "id": 574,
+      "cvi_id": "6023",
+      "rule_name": "ProcessBuilder Command Injection",
       "severity": "high",
-      "language": "python",
-      "file": "cmd_inject.py:4",
+      "language": "java",
+      "file": "cmd_inject.java:0",
       "is_unconfirm": false,
-      "result_type": "Function-param-controllable",
-      "source_code": "os.system(cmd)"
+      "result_type": "Regex-return-regex",
+      "source_code": "name:<7>, point:<new ProcessBuilder(cmd>"
     },
     {
-      "id": 2656,
-      "cvi_id": "7000",
-      "rule_name": "命令注入",
+      "id": 575,
+      "cvi_id": "6038",
+      "rule_name": "ProcessBuilder Command Injection (function-param-controllable)",
       "severity": "high",
-      "language": "python",
-      "file": "cmd_inject.py:5",
+      "language": "java",
+      "file": "cmd_inject.java:7",
       "is_unconfirm": false,
       "result_type": "Function-param-controllable",
-      "source_code": "subprocess.call(cmd, shell=True)"
+      "source_code": "new ProcessBuilder("
     }
   ],
   "vulnerabilities": [
     {
-      "id": 2654,
+      "id": 570,
       "cvi_id": "1005",
       "rule_name": "SQLI",
       "severity": "high",
@@ -74,7 +129,62 @@
       "source_code": "mysql_query(\"SELECT * FROM users WHERE id=\" . $id)"
     },
     {
-      "id": 2655,
+      "id": 571,
+      "cvi_id": "3002",
+      "rule_name": "XSS",
+      "severity": "medium",
+      "language": "javascript",
+      "file": "xss.js:4",
+      "is_unconfirm": false,
+      "result_type": "Function-param-controllable",
+      "source_code": "document.write"
+    },
+    {
+      "id": 572,
+      "cvi_id": "3100",
+      "rule_name": "命令注入",
+      "severity": "high",
+      "language": "javascript",
+      "file": "cmd_inject_node.js:7",
+      "is_unconfirm": false,
+      "result_type": "Function-param-controllable",
+      "source_code": "exec("
+    },
+    {
+      "id": 573,
+      "cvi_id": "6003",
+      "rule_name": "Command Injection",
+      "severity": "high",
+      "language": "java",
+      "file": "cmd_inject.java:7",
+      "is_unconfirm": false,
+      "result_type": "Function-param-controllable",
+      "source_code": "ProcessBuilder"
+    },
+    {
+      "id": 574,
+      "cvi_id": "6023",
+      "rule_name": "ProcessBuilder Command Injection",
+      "severity": "high",
+      "language": "java",
+      "file": "cmd_inject.java:0",
+      "is_unconfirm": false,
+      "result_type": "Regex-return-regex",
+      "source_code": "name:<7>, point:<new ProcessBuilder(cmd>"
+    },
+    {
+      "id": 575,
+      "cvi_id": "6038",
+      "rule_name": "ProcessBuilder Command Injection (function-param-controllable)",
+      "severity": "high",
+      "language": "java",
+      "file": "cmd_inject.java:7",
+      "is_unconfirm": false,
+      "result_type": "Function-param-controllable",
+      "source_code": "new ProcessBuilder("
+    },
+    {
+      "id": 576,
       "cvi_id": "7000",
       "rule_name": "命令注入",
       "severity": "high",
@@ -85,7 +195,7 @@
       "source_code": "os.system(cmd)"
     },
     {
-      "id": 2656,
+      "id": 577,
       "cvi_id": "7000",
       "rule_name": "命令注入",
       "severity": "high",
@@ -96,7 +206,7 @@
       "source_code": "subprocess.call(cmd, shell=True)"
     },
     {
-      "id": 2657,
+      "id": 578,
       "cvi_id": "8001",
       "rule_name": "命令注入",
       "severity": "high",
@@ -105,6 +215,83 @@
       "is_unconfirm": false,
       "result_type": "Function-param-controllable",
       "source_code": "exec.Command"
+    },
+    {
+      "id": 579,
+      "cvi_id": "9001",
+      "rule_name": "命令注入",
+      "severity": "high",
+      "language": "c",
+      "file": "cmd_inject.c:9",
+      "is_unconfirm": false,
+      "result_type": "Function-param-controllable",
+      "source_code": "system("
+    },
+    {
+      "id": 580,
+      "cvi_id": "9002",
+      "rule_name": "格式化字符串漏洞",
+      "severity": "high",
+      "language": "c",
+      "file": "format_string.c:6",
+      "is_unconfirm": false,
+      "result_type": "Function-param-controllable",
+      "source_code": "printf("
+    },
+    {
+      "id": 581,
+      "cvi_id": "9003",
+      "rule_name": "缓冲区溢出",
+      "severity": "high",
+      "language": "c",
+      "file": "buffer_overflow.c:8",
+      "is_unconfirm": false,
+      "result_type": "Function-param-controllable",
+      "source_code": "strcpy("
+    },
+    {
+      "id": 582,
+      "cvi_id": "9004",
+      "rule_name": "路径穿越",
+      "severity": "high",
+      "language": "c",
+      "file": "path_traversal.c:10",
+      "is_unconfirm": false,
+      "result_type": "Function-param-controllable",
+      "source_code": "fopen("
+    },
+    {
+      "id": 583,
+      "cvi_id": "9005",
+      "rule_name": "整数溢出",
+      "severity": "medium",
+      "language": "c",
+      "file": "integer_overflow.c:8",
+      "is_unconfirm": false,
+      "result_type": "Function-param-controllable",
+      "source_code": "malloc("
+    },
+    {
+      "id": 584,
+      "cvi_id": "9006",
+      "rule_name": "环境变量注入",
+      "severity": "medium",
+      "language": "c",
+      "file": "env_inject.c:6",
+      "is_unconfirm": false,
+      "result_type": "Function-param-controllable",
+      "source_code": "putenv("
+    },
+    {
+      "id": 585,
+      "cvi_id": "9007",
+      "rule_name": "任意文件读取",
+      "severity": "high",
+      "language": "c",
+      "file": "arbitrary_read.c:11",
+      "is_unconfirm": false,
+      "result_type": "Function-param-controllable",
+      "source_code": "open("
     }
   ],
   "exit": {
