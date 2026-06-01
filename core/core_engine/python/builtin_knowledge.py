@@ -109,6 +109,23 @@ KNOWLEDGE: Dict[str, Dict[str, Union[List[int], bool]]] = {
         "yaml.dump":            {"passthrough": [0], "safe": False},
         "yaml.load":            {"passthrough": [0], "safe": False},
 
+        # ===== 代码执行/命令执行（危险 sink） =====
+        "eval":               {"passthrough": [0], "safe": False},
+        "exec":               {"passthrough": [], "safe": False},
+        "os.system":          {"passthrough": [0], "safe": False},
+        "os.popen":           {"passthrough": [0], "safe": False},
+        "subprocess.Popen":   {"passthrough": [0], "safe": False},
+        "subprocess.call":    {"passthrough": [0], "safe": False},
+        "subprocess.run":     {"passthrough": [0], "safe": False},
+        "subprocess.check_output": {"passthrough": [0], "safe": False},
+        "os.execv":            {"passthrough": [0], "safe": False},
+        "os.execvp":           {"passthrough": [0], "safe": False},
+
+        # ===== 输入源（source） =====
+        "input":              {"passthrough": [], "safe": False},  # Python 3 input
+        "open":               {"passthrough": [0], "safe": False},  # 文件内容透传
+        "urllib.request.urlopen": {"passthrough": [0], "safe": False},
+
         # ===== 安全过滤函数 =====
         "html.escape":              {"passthrough": [0], "safe": True},
         "markupsafe.escape":        {"passthrough": [0], "safe": True},

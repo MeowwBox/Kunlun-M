@@ -23,8 +23,8 @@ KNOWLEDGE = {
     # ============ 字符串处理 ============
     # 返回值透传
     "strlen":  {"passthrough": [], "safe": True},
-    "strdup":  {"passthrough": [], "safe": False},
-    "strndup": {"passthrough": [], "safe": False},
+    "strdup":  {"passthrough": [0], "safe": False},
+    "strndup": {"passthrough": [0], "safe": False},
     "strstr":  {"passthrough": [0, 1], "safe": False},
     "strtok":  {"passthrough": [0], "safe": False},
     "strsep":  {"passthrough": [0], "safe": False},
@@ -41,12 +41,12 @@ KNOWLEDGE = {
     "memchr":  {"passthrough": [0], "safe": False},
 
     # 参数间数据流
-    "strcpy":  {"passthrough": [], "safe": False, "param_flow": {0: 1}},
-    "strncpy": {"passthrough": [], "safe": False, "param_flow": {0: 1}},
-    "strcat":  {"passthrough": [], "safe": False, "param_flow": {0: 1}},
-    "strncat": {"passthrough": [], "safe": False, "param_flow": {0: 1}},
-    "memcpy":  {"passthrough": [], "safe": False, "param_flow": {0: 1}},
-    "memmove": {"passthrough": [], "safe": False, "param_flow": {0: 1}},
+    "strcpy":  {"passthrough": [0], "safe": False, "param_flow": {0: 1}},
+    "strncpy": {"passthrough": [0], "safe": False, "param_flow": {0: 1}},
+    "strcat":  {"passthrough": [0], "safe": False, "param_flow": {0: 1}},
+    "strncat": {"passthrough": [0], "safe": False, "param_flow": {0: 1}},
+    "memcpy":  {"passthrough": [0], "safe": False, "param_flow": {0: 1}},
+    "memmove": {"passthrough": [0], "safe": False, "param_flow": {0: 1}},
     "memset":  {"passthrough": [], "safe": True},
     "memcmp":  {"passthrough": [], "safe": True},
 
@@ -56,8 +56,8 @@ KNOWLEDGE = {
     "printf":   {"passthrough": [], "safe": True},
     "fprintf":  {"passthrough": [], "safe": True},
     "scanf":  {"passthrough": [], "safe": False, "param_flow": {1: "stdin", 2: "stdin", 3: "stdin"}},
-    "fscanf": {"passthrough": [], "safe": False, "param_flow": {2: 1}},
-    "sscanf": {"passthrough": [], "safe": False, "param_flow": {1: 0}},
+    "fscanf": {"passthrough": [], "safe": False, "param_flow": {2: 0}},
+    "sscanf": {"passthrough": [], "safe": False, "param_flow": {2: 0}},
 
     # ============ 类型转换 ============
     "atoi":     {"passthrough": [0], "safe": False},
@@ -103,7 +103,7 @@ KNOWLEDGE = {
     # ============ I/O 函数 ============
     "fgets":   {"passthrough": [], "safe": False, "param_flow": {0: 2}},
     "gets":    {"passthrough": [], "safe": False, "param_flow": {0: "stdin"}},
-    "getline": {"passthrough": [], "safe": False, "param_flow": {0: 1}},
+    "getline": {"passthrough": [], "safe": False, "param_flow": {0: 2}},
     "fread":   {"passthrough": [], "safe": False, "param_flow": {0: 3}},
     "fwrite":  {"passthrough": [], "safe": True},
     "fputs":   {"passthrough": [], "safe": True},
@@ -140,7 +140,7 @@ KNOWLEDGE = {
     "tmpnam":    {"passthrough": [], "safe": True},
     "remove":    {"passthrough": [], "safe": True},
     "rename":    {"passthrough": [], "safe": True},
-    "getline_r": {"passthrough": [], "safe": False, "param_flow": {0: 1}},
+    "getline_r": {"passthrough": [], "safe": False, "param_flow": {0: 2}},
 
     # ============ stdlib.h 其他 ============
     "atexit":  {"passthrough": [], "safe": True},

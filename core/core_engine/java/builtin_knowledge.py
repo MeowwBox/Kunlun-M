@@ -88,6 +88,33 @@ KNOWLEDGE: Dict[str, Dict[str, Union[List[int], bool]]] = {
         "codePointAt":  {"passthrough": [], "safe": True},
         "hashCode":     {"passthrough": [], "safe": True},
 
+        # ===== JDK 核心安全函数 =====
+        "Runtime.exec":                    {"passthrough": [0], "safe": False},
+        "ProcessBuilder.start":             {"passthrough": [0], "safe": False},
+        "Statement.execute":                {"passthrough": [0], "safe": False},
+        "Statement.executeQuery":           {"passthrough": [], "safe": False, "param_flow": {"self": 0}},
+        "Statement.executeUpdate":          {"passthrough": [], "safe": False, "param_flow": {"self": 0}},
+        "Class.forName":                    {"passthrough": [0], "safe": False},
+        "ClassLoader.loadClass":           {"passthrough": [0], "safe": False},
+        "Class.newInstance":                {"passthrough": [], "safe": False},
+
+        # ===== JDBC PreparedStatement =====
+        "PreparedStatement.setString":     {"passthrough": [], "safe": True, "param_flow": {"self": 1}},
+        "PreparedStatement.setInt":        {"passthrough": [], "safe": True, "param_flow": {"self": 1}},
+        "PreparedStatement.setObject":      {"passthrough": [], "safe": True, "param_flow": {"self": 1}},
+        "PreparedStatement.executeQuery":   {"passthrough": [], "safe": False, "param_flow": {"self": 0}},
+        "PreparedStatement.executeUpdate":   {"passthrough": [], "safe": False, "param_flow": {"self": 0}},
+
+        # ===== 集合类 param_flow =====
+        "HashMap.put":                       {"passthrough": [], "safe": True, "param_flow": {"self": 1}},
+        "ArrayList.add":                     {"passthrough": [], "safe": True, "param_flow": {"self": 0}},
+        "LinkedList.add":                    {"passthrough": [], "safe": True, "param_flow": {"self": 0}},
+        "HashSet.add":                       {"passthrough": [], "safe": True, "param_flow": {"self": 0}},
+
+        # ===== Servlet attribute param_flow =====
+        "HttpServletRequest.setAttribute":   {"passthrough": [], "safe": True, "param_flow": {"self": 1}},
+        "ServletContext.setAttribute":       {"passthrough": [], "safe": True, "param_flow": {"self": 1}},
+
         # ===== Spring Framework =====
         "HtmlUtils.htmlEscape":              {"passthrough": [0], "safe": True},
         "HtmlUtils.htmlEscapeDecimal":       {"passthrough": [0], "safe": True},
@@ -100,7 +127,7 @@ KNOWLEDGE: Dict[str, Dict[str, Union[List[int], bool]]] = {
         "getParameterMap":      {"passthrough": [0], "safe": False},
         "getHeader":            {"passthrough": [0], "safe": False},
         "getHeaders":           {"passthrough": [0], "safe": False},
-        "getHeaderNames":       {"passthrough": [0], "safe": False},
+        "getHeaderNames":       {"passthrough": [], "safe": False},
         "getCookies":           {"passthrough": [0], "safe": False},
         "getQueryString":       {"passthrough": [0], "safe": False},
         "getRequestURI":        {"passthrough": [0], "safe": False},

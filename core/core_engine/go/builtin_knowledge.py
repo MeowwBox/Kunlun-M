@@ -267,6 +267,8 @@ KNOWLEDGE: Dict[str, Dict[str, Union[List[int], bool]]] = {
         "template.ParseFiles":  {"passthrough": [0], "safe": False},
         "template.ParseGlob":   {"passthrough": [0], "safe": False},
         "template.ParseFS":     {"passthrough": [0], "safe": False},
+        "template.Execute":     {"passthrough": [0], "safe": False, "param_flow": {"self": 0}},
+        "template.ExecuteTemplate": {"passthrough": [0], "safe": False, "param_flow": {"self": 0}},
 
         # ===== os 文件操作 — 路径遍历 =====
         "os.Open":              {"passthrough": [0], "safe": False},
@@ -305,7 +307,6 @@ KNOWLEDGE: Dict[str, Dict[str, Union[List[int], bool]]] = {
         "fmt.Fprintf":          {"passthrough": [1], "safe": False},  # w, format, args
         "fmt.Sprintf":          {"passthrough": [0], "safe": False},
         "fmt.Errorf":           {"passthrough": [0], "safe": False},
-        "fmt.Sprintf":          {"passthrough": [0], "safe": False},
 
         # ===== unsafe =====
         "unsafe.Pointer":       {"passthrough": [0], "safe": False},
@@ -423,7 +424,6 @@ KNOWLEDGE: Dict[str, Dict[str, Union[List[int], bool]]] = {
         "strings.Repeat":          {"passthrough": [0], "safe": False},
         "strings.Title":           {"passthrough": [0], "safe": False},
         "strings.Map":             {"passthrough": [1], "safe": False},
-        "strings.TrimSpace":       {"passthrough": [0], "safe": False},
         "strings.NewReplacer":     {"passthrough": [0], "safe": False},
         "strings.Reader":          {"passthrough": [0], "safe": False},
         "strings.Builder.String":  {"passthrough": [0], "safe": False},
@@ -553,7 +553,6 @@ KNOWLEDGE: Dict[str, Dict[str, Union[List[int], bool]]] = {
         "complex":          {"passthrough": [], "safe": True},
         "real":             {"passthrough": [], "safe": True},
         "imag":             {"passthrough": [], "safe": True},
-        "real":             {"passthrough": [], "safe": True},
 
         # ===== 类型转换（返回安全类型） =====
         "string":           {"passthrough": [0], "safe": False},
@@ -589,7 +588,7 @@ KNOWLEDGE: Dict[str, Dict[str, Union[List[int], bool]]] = {
 
         # ===== errors =====
         "errors.New":        {"passthrough": [0], "safe": False},
-        "fmt.Errorf":        {"passthrough": [0], "safe": False},
+        "fmt.Errorf":         {"passthrough": [0], "safe": False},
 
         # ===== regexp =====
         "regexp.Compile":        {"passthrough": [0], "safe": False},
