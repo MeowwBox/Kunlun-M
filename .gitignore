@@ -92,6 +92,7 @@ artifacts/
 tests/real_test/*
 tests/*
 !tests/nodejs/
+!tests/c/
 
 # scan artifacts
 *.pretty
