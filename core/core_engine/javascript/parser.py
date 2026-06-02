@@ -1101,14 +1101,28 @@ def extract_constraints_from_js_expr(expr):
     constraints = []
     node_type = expr.get('type', '')
 
-    if node_type == 'LogicalExpression':
+    if node_type == 'LogicalExpression' or (node_type == 'BinaryExpression' and expr.get('operator') in ('&&', '||')):
         op = expr.get('operator', '')
         if op == '&&':
             left = extract_constraints_from_js_expr(expr.get('left'))
             right = extract_constraints_from_js_expr(expr.get('right'))
             constraints = left + right
-        # '||' 忽略
-        return constraints
+        elif op == '||':
+            # '||' 枚举：a === 'x' || a === 'y' → in 约束
+            left = extract_constraints_from_js_expr(expr.get('left'))
+            right = extract_constraints_from_js_expr(expr.get('right'))
+            # 检查是否为枚举模式（同一变量，不同值）
+            left_var = left[0].var_name if left else None
+            right_var = right[0].var_name if right else None
+            if left_var and right_var and left_var == right_var:
+                values = []
+                for c in left + right:
+                    if c.op in ('==', '==='):
+                        values.append(c.value)
+                if len(values) == len(left + right) and values:
+                    constraints.append(BranchConstraint(var_name=left_var, op='in', value=values))
+            else:
+                constraints = left + right
 
     if node_type == 'UnaryExpression' and expr.get('operator') == '!':
         inner = extract_constraints_from_js_expr(expr.get('argument'))
@@ -1150,7 +1164,7 @@ def _extract_js_literal(node):
     if not isinstance(node, dict):
         return None
     node_type = node.get('type', '')
-    if node_type == 'Literal':
+    if node_type == 'Literal' or node_type == 'StringLiteral':
         return node.get('value')
     if node_type == 'Identifier' and node.get('name') == 'null':
         return None
@@ -1677,11 +1691,11 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
             scan_chain.append(('Function', code, file_path, function_lineno))
 
             for function_node in function_body:
-                if function_node is not None and function_node.loc.end.line <= int(lineno):
+                if function_node is not None and int(function_lineno) <= function_node.loc.start.line <= int(lineno):
                     vul_nodes.append(function_node)
 
             if len(vul_nodes) > 0:
-                is_co, cp, expr_lineno = parameters_back(param, vul_nodes, function_params, function_lineno,
+                is_co, cp, expr_lineno = parameters_back(param, vul_nodes, function_params, lineno,
                                                          function_flag=1, vul_function=vul_function,
                                                          file_path=file_path,
                                                          isback=isback, method_name=method_name)
@@ -1747,14 +1761,16 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
             logger.debug("[AST] sink_branch={} for param {} lineno {}".format(sink_branch, param_name, lineno))
 
             # 2. 提取当前分支的条件约束并确定分支体
+            # esprima AST 节点是自定义对象，需转为 dict 供约束提取使用
+            test_expr = node.test.toDict() if hasattr(node.test, 'toDict') else node.test
             if sink_branch == 'if':
-                constraints = extract_constraints_from_js_expr(node.test)
+                constraints = extract_constraints_from_js_expr(test_expr)
                 if_body = node.consequent
                 if if_body.type != "BlockStatement":
                     if_body = [if_body]
                 body_nodes = if_body
             elif sink_branch == 'else':
-                constraints = [c.negate() for c in extract_constraints_from_js_expr(node.test)]
+                constraints = [c.negate() for c in extract_constraints_from_js_expr(test_expr)]
                 else_body = node.alternate
                 if hasattr(else_body, "type") and else_body.type == "IfStatement":
                     else_body = [else_body]
@@ -1779,8 +1795,10 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
 
             # 3. 立即检查约束（仅在 sink 在具体分支内时执行）
             if sink_branch != 'outside':
+                # param_name 可能是列表形式（如 ['input']），统一转为字符串比较
+                _param_str = param_name[0] if isinstance(param_name, list) else str(param_name)
                 for c in constraints:
-                    if c.var_name == param_name and c.op in ('==', '===', 'in'):
+                    if c.var_name == _param_str and c.op in ('==', '===', 'in'):
                         logger.info("[AST] Branch constraint BLOCKS param {}: {} {}".format(param_name, c.op, c.value))
                         return -1, param, 0
 
