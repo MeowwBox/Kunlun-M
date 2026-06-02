@@ -24,6 +24,7 @@ from utils.status import SCAN_ID
 from core.pretreatment import ast_object
 from core.core_engine.php.builtin_knowledge import KNOWLEDGE as PHP_BUILTIN_KNOWLEDGE
 from core.core_engine.trace_cache import TraceCache
+from core.core_engine.branch_constraint import BranchConstraint, BranchContext
 from core.core_engine.php.summary_generator import lookup_summary
 
 # lphply >= 2.0.0 新增的等价节点类型（字段与原类型完全一致）
@@ -1044,7 +1045,7 @@ def new_class_back(param, nodes, vul_function=None, file_path=None, isback=None)
 
 def parameters_back(param, nodes, function_params=None, lineno=0,
                     function_flag=0, vul_function=None, file_path=None,
-                    isback=None, parent_node=None):
+                    isback=None, parent_node=None, branch_ctx=None):
     """
     parameters_back 入口（带运行时缓存）。
     缓存查询命中则直接返回；否则调用 _parameters_back_impl，并在确定性结果时写入缓存。
@@ -1064,7 +1065,7 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
     # 调用实际实现
     result = _parameters_back_impl(param, nodes, function_params, lineno,
                                     function_flag, vul_function, file_path,
-                                    isback, parent_node)
+                                    isback, parent_node, branch_ctx)
     is_co = result[0]
 
     # 写入缓存：仅缓存确定性结果（-1=不可控, 1=可控, 2=已修复）
@@ -1074,9 +1075,115 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
     return result
 
 
+def extract_constraints_from_php_expr(expr):
+    """
+    从 PHP 条件表达式中提取 BranchConstraint 列表。
+
+    phply AST 中：
+    - isset($var)           -> IsSet 节点
+    - empty($var)           -> Empty 节点
+    - !isset($var)          -> UnaryOp(op='!', expr=IsSet(...))
+    - !empty($var)          -> UnaryOp(op='!', expr=Empty(...))
+    - $var === value        -> BinaryOp(op='===')
+    - $a && $b              -> BinaryOp(op='&&')
+    - $a || $b              -> BinaryOp(op='||')
+    """
+    if expr is None:
+        return []
+
+    constraints = []
+
+    if isinstance(expr, php.IsSet):
+        # isset($var) 或 isset($_GET['id'])
+        op = 'isset'
+        for node in (expr.nodes or []):
+            var_name = _extract_var_name(node)
+            if var_name:
+                constraints.append(BranchConstraint(var_name=var_name, op=op))
+
+    elif isinstance(expr, php.Empty):
+        # empty($var)
+        op = '!isset'
+        var_name = _extract_var_name(expr.expr)
+        if var_name:
+            constraints.append(BranchConstraint(var_name=var_name, op=op))
+
+    elif isinstance(expr, php.UnaryOp) and expr.op == '!':
+        # !isset($x) -> UnaryOp(op='!', expr=IsSet(...))
+        # !empty($x) -> UnaryOp(op='!', expr=Empty(...))
+        inner = expr.expr
+        if isinstance(inner, php.IsSet):
+            for node in (inner.nodes or []):
+                var_name = _extract_var_name(node)
+                if var_name:
+                    constraints.append(BranchConstraint(var_name=var_name, op='!isset'))
+        elif isinstance(inner, php.Empty):
+            var_name = _extract_var_name(inner.expr)
+            if var_name:
+                constraints.append(BranchConstraint(var_name=var_name, op='isset'))
+
+    elif isinstance(expr, php.BinaryOp):
+        if expr.op == '&&':
+            # 逻辑 AND：两个约束都要满足
+            left = extract_constraints_from_php_expr(expr.left)
+            right = extract_constraints_from_php_expr(expr.right)
+            constraints = left + right
+        elif expr.op == '||':
+            # 逻辑 OR：不能同时保证，忽略
+            constraints = []
+        elif expr.op in ('==', '===', '!=', '!=='):
+            # 比较运算：$var == value
+            var_name = _extract_var_name(expr.left)
+            if var_name:
+                value = _extract_literal_value(expr.right)
+                constraints.append(BranchConstraint(var_name=var_name, op=expr.op, value=value))
+
+    return constraints
+
+
+def _extract_var_name(node):
+    """
+    从 AST 节点中提取变量名（字符串形式）。
+    支持 Variable, ArrayOffset 等常见形式。
+    返回 None 表示无法提取。
+    """
+    if node is None:
+        return None
+    if isinstance(node, php.Variable):
+        name = node.name
+        if isinstance(name, str):
+            return name
+    if isinstance(node, php.ArrayOffset):
+        # 如 $_GET['id'] -> 提取为 "$_GET" (忽略 key)
+        array_name = get_node_name(node.node)
+        if isinstance(array_name, str):
+            return array_name
+    return None
+
+
+def _extract_literal_value(node):
+    """
+    从 AST 节点中提取字面量值。
+    支持 Constant, string/number 字面量。
+    返回 None 表示不是字面量。
+    """
+    if node is None:
+        return None
+    if isinstance(node, php.Constant):
+        # php.Constant: node.name 可能是字符串值本身（去掉引号）
+        val = node.name
+        if isinstance(val, str):
+            return val
+    if isinstance(node, str):
+        return node
+    if isinstance(node, (int, float)):
+        return node
+    return None
+
+
 def _parameters_back_impl(param, nodes, function_params=None, lineno=0,
                     function_flag=0, vul_function=None, file_path=None,
-                    isback=None, parent_node=None):  # 用来得到回溯过程中的被赋值的变量是否与敏感函数变量相等,param是当前需要跟踪的污点
+                    isback=None, parent_node=None, branch_ctx=None):  # 用来得到回溯过程中的被赋值的变量是否与敏感函数变量相等,param是当前需要跟踪的污点
     """
     递归回溯敏感函数的赋值流程，param为跟踪的污点，当找到param来源时-->分析复制表达式-->获取新污点；否则递归下一个节点
     :param parent_node: 父节点 ，为了处理无法确定当前节点位置的问题, 如果是0则是最基础列表
@@ -1540,10 +1647,23 @@ def _parameters_back_impl(param, nodes, function_params=None, lineno=0,
             else:
                 if_nodes = []
 
-            # 进入分析if内的代码块，如果返回参数不同于进入参数，那么在不同的代码块中，变量值不同，不能统一处理，需要递归进入不同的部分
+            # ===== 分支约束追踪 =====
+            if_constraints = extract_constraints_from_php_expr(node.expr)
+            else_constraints = [c.negate() for c in if_constraints]
+
+            # if 分支：传入 if 约束
+            if branch_ctx and if_constraints:
+                if_ctx = branch_ctx.merge(if_constraints)
+            elif if_constraints:
+                if_ctx = BranchContext(if_constraints)
+            else:
+                if_ctx = None
+
+            # 进入分析if内的代码块
             is_co, cp, expr_lineno = parameters_back(param, if_nodes, function_params, lineno,
                                                      function_flag=function_flag, vul_function=vul_function,
-                                                     file_path=file_path, isback=isback, parent_node=node)
+                                                     file_path=file_path, isback=isback, parent_node=node,
+                                                     branch_ctx=if_ctx)
 
             # 如果是3 应该传递cp
             if is_co == 3:
@@ -1565,10 +1685,21 @@ def _parameters_back_impl(param, nodes, function_params=None, lineno=0,
 
                     logger.debug("[AST] param {} line {} in new branch for else if".format(param, elseif_lineno))
 
+                    # elseif 的隐含约束 = else_constraints AND elif_constraints
+                    elif_constraints = extract_constraints_from_php_expr(node_elseifs_node.expr)
+                    combined = else_constraints + elif_constraints
+                    if branch_ctx and combined:
+                        elif_ctx = branch_ctx.merge(combined)
+                    elif combined:
+                        elif_ctx = BranchContext(combined)
+                    else:
+                        elif_ctx = None
+
                     is_co, cp, expr_lineno = parameters_back(param, elif_nodes, function_params, lineno,
                                                              function_flag=function_flag, vul_function=vul_function,
                                                              file_path=file_path,
-                                                             isback=isback, parent_node=node)
+                                                             isback=isback, parent_node=node,
+                                                             branch_ctx=elif_ctx)
 
                 if _is_co != 3 and is_co == 3:
                     _is_co = is_co
@@ -1585,13 +1716,29 @@ def _parameters_back_impl(param, nodes, function_params=None, lineno=0,
                 else:
                     else_nodes = []
 
+                # else 分支：传入否定约束
+                if branch_ctx and else_constraints:
+                    else_ctx = branch_ctx.merge(else_constraints)
+                elif else_constraints:
+                    else_ctx = BranchContext(else_constraints)
+                else:
+                    else_ctx = None
+
                 is_co, cp, expr_lineno = parameters_back(param, else_nodes, function_params, lineno,
                                                          function_flag=function_flag, vul_function=vul_function,
-                                                         file_path=file_path, isback=isback, parent_node=node)
+                                                         file_path=file_path, isback=isback, parent_node=node,
+                                                         branch_ctx=else_ctx)
 
                 if _is_co != 3 and is_co == 3:
                     _is_co = is_co
                     _cp = cp
+
+            # ===== 约束影响判定 =====
+            # 如果 is_co==1 且有分支约束，降级为 3（不确定）
+            # 这意味着：变量在某分支可控但在另一分支不可控 → 不能确定可控
+            if is_co == 1 and branch_ctx and branch_ctx.applies_to(param_name):
+                is_co = 3
+                cp = param
 
             if is_co == 1:  # 目标确定直接返回
                 return is_co, cp, expr_lineno
