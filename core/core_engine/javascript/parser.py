@@ -18,7 +18,7 @@ from core.pretreatment import ast_object
 
 from core.core_engine.javascript.builtin_knowledge import KNOWLEDGE as JS_BUILTIN_KNOWLEDGE
 from core.core_engine.trace_cache import TraceCache
-from core.core_engine.branch_constraint import BranchConstraint, BranchContext
+from core.core_engine.branch_constraint import BranchConstraint
 from core.core_engine.javascript.builtin_knowledge import lookup as lookup_builtin
 from core.core_engine.javascript.summary_generator import lookup_summary
 
@@ -1051,6 +1051,36 @@ def function_call_back(param, nodes, function_params, file_path=None, isback=Fal
 
     return is_co, cp, expr_lineno
 
+def _find_sink_branch_js(if_node, lineno):
+    """判断 sink 行号位于 JS if/else 的哪个分支。返回 'if', 'else', 'outside'。"""
+    if not lineno:
+        return 'outside'
+    lineno = int(lineno)
+
+    # if 体范围
+    if_body = if_node.consequent
+    if if_body.type == "BlockStatement":
+        if_nodes = if_body.body
+    else:
+        if_nodes = [if_body]
+    if if_nodes and int(if_nodes[0].loc.start.line) <= lineno <= int(if_nodes[-1].loc.end.line):
+        return 'if'
+
+    # else 体范围
+    if if_node.alternate:
+        alt = if_node.alternate
+        if hasattr(alt, "type"):
+            if alt.type == "IfStatement":
+                return _find_sink_branch_js(alt, lineno)
+            elif alt.type == "BlockStatement":
+                else_nodes = alt.body
+            else:
+                else_nodes = [alt]
+            if else_nodes and int(else_nodes[0].loc.start.line) <= lineno <= int(else_nodes[-1].loc.end.line):
+                return 'else'
+
+    return 'outside'
+
 
 def extract_constraints_from_js_expr(expr):
     """
@@ -1131,7 +1161,7 @@ def _extract_js_literal(node):
 
 def parameters_back(param, nodes, function_params=None, lineno=0,
                     function_flag=0, vul_function=None, file_path=None,
-                    isback=None, method_name=None, branch_ctx=None):  # 用来得到回溯过程中的被赋值的变量是否与敏感函数变量相等,param是当前需要跟踪的污点
+                    isback=None, method_name=None):  # 用来得到回溯过程中的被赋值的变量是否与敏感函数变量相等,param是当前需要跟踪的污点
     """
     递归回溯敏感函数的赋值流程，param为跟踪的污点，当找到param来源时-->分析复制表达式-->获取新污点；否则递归下一个节点
     :param method_name: 恶意属性名，针对对member型的回溯拓展
@@ -1712,55 +1742,56 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
             logger.debug(
                 "[AST] param {} line {} in if/else, start ast in if/else".format(param_name, node.loc.start.line))
 
-            if_condition = node.test
-            if_body = node.consequent
+            # 1. 判断 sink 在哪个分支
+            sink_branch = _find_sink_branch_js(node, lineno)
+            logger.debug("[AST] sink_branch={} for param {} lineno {}".format(sink_branch, param_name, lineno))
 
-            if if_body.type != "BlockStatement":
-                if_body = [if_body]
-
-            # ===== 分支约束追踪 =====
-            js_constraints = extract_constraints_from_js_expr(if_condition)
-            else_constraints = [c.negate() for c in js_constraints]
-
-            # if 分支：传入 if 约束
-            if branch_ctx and js_constraints:
-                if_ctx = branch_ctx.merge(js_constraints)
-            elif js_constraints:
-                if_ctx = BranchContext(js_constraints)
-            else:
-                if_ctx = None
-
-            is_co, cp, expr_lineno = parameters_back(param, if_body, function_params, lineno,
-                                                     function_flag=function_flag, vul_function=vul_function,
-                                                     file_path=file_path,
-                                                     isback=isback, method_name=method_name,
-                                                     branch_ctx=if_ctx)
-
-            if is_co != 1 and node.alternate:
+            # 2. 提取当前分支的条件约束并确定分支体
+            if sink_branch == 'if':
+                constraints = extract_constraints_from_js_expr(node.test)
+                if_body = node.consequent
+                if if_body.type != "BlockStatement":
+                    if_body = [if_body]
+                body_nodes = if_body
+            elif sink_branch == 'else':
+                constraints = [c.negate() for c in extract_constraints_from_js_expr(node.test)]
                 else_body = node.alternate
-
                 if hasattr(else_body, "type") and else_body.type == "IfStatement":
                     else_body = [else_body]
-
-                # else 分支：传入否定约束
-                if branch_ctx and else_constraints:
-                    else_ctx = branch_ctx.merge(else_constraints)
-                elif else_constraints:
-                    else_ctx = BranchContext(else_constraints)
-                else:
-                    else_ctx = None
-
-                is_co, cp, expr_lineno = parameters_back(param, else_body, function_params, lineno,
+                body_nodes = else_body if else_body else []
+            else:
+                # sink 在 if/else 之外 → 遍历所有分支找变量重赋值
+                if_body = node.consequent
+                if if_body.type != "BlockStatement":
+                    if_body = [if_body]
+                is_co, cp, expr_lineno = parameters_back(param, if_body, function_params, lineno,
                                                          function_flag=function_flag, vul_function=vul_function,
                                                          file_path=file_path,
-                                                         isback=isback, method_name=method_name,
-                                                         branch_ctx=else_ctx)
+                                                         isback=isback, method_name=method_name)
+                if is_co != 1 and node.alternate:
+                    else_body = node.alternate
+                    if hasattr(else_body, "type") and else_body.type == "IfStatement":
+                        else_body = [else_body]
+                    is_co, cp, expr_lineno = parameters_back(param, else_body, function_params, lineno,
+                                                             function_flag=function_flag, vul_function=vul_function,
+                                                             file_path=file_path,
+                                                             isback=isback, method_name=method_name)
 
-            # ===== 约束影响判定 =====
-            # 如果 is_co==1 且有分支约束涉及追踪变量，降级为 3
-            if is_co == 1 and branch_ctx and branch_ctx.applies_to(param_name):
-                is_co = 3
-                cp = param
+            # 3. 立即检查约束（仅在 sink 在具体分支内时执行）
+            if sink_branch != 'outside':
+                for c in constraints:
+                    if c.var_name == param_name and c.op in ('==', '===', 'in'):
+                        logger.info("[AST] Branch constraint BLOCKS param {}: {} {}".format(param_name, c.op, c.value))
+                        return -1, param, 0
+
+                # 4. 不等约束不阻断，继续回溯分支体
+                is_co, cp, expr_lineno = parameters_back(param, body_nodes, function_params, lineno,
+                                                         function_flag=function_flag, vul_function=vul_function,
+                                                         file_path=file_path,
+                                                         isback=isback, method_name=method_name)
+
+            if is_co == 1:
+                return is_co, cp, expr_lineno
 
         elif node.type == "WhileStatement":
             logger.debug("[AST] Param {} line {} in while, start ast in while".format(param_name, node.loc.start.line))
