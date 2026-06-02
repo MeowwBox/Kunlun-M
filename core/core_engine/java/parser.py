@@ -6,6 +6,7 @@ import javalang
 from utils.log import logger
 from core.pretreatment import ast_object as _ast_object_singleton
 from core.core_engine.trace_cache import TraceCache
+from core.core_engine.branch_constraint import BranchConstraint, BranchContext
 from core.core_engine.java.builtin_knowledge import lookup as lookup_builtin
 from core.core_engine.java.summary_generator import lookup_summary
 
@@ -237,8 +238,108 @@ def _walk_for_calls(node, sensitive_func, target_line, results):
             _walk_for_calls(child, sensitive_func, target_line, results)
 
 
+
+def extract_constraints_from_java_expr(expr):
+    """
+    从 Java 条件表达式中提取 BranchConstraint 列表。
+
+    javalang AST 节点类型：
+    - x == value     -> BinaryOperation(operator='==', operandl, operandr)
+    - x != null      -> BinaryOperation(operator='!=', operandl, operandr)
+    - x instanceof T  -> BinaryOperation(operator='instanceof') → 暂不提取
+    - x && y          -> BinaryOperation(operator='&&')
+    - x || y          -> BinaryOperation(operator='||')
+    - !expr           -> UnaryOperation(operator='!', operand)
+    - x.equals(y)    -> MethodInvocation(member='equals') → 简化提取
+    - x != null       -> MemberReference/member + BinaryOperation
+    """
+    if expr is None:
+        return []
+
+    constraints = []
+
+    if isinstance(expr, javalang.tree.BinaryOperation):
+        op = expr.operator
+
+        if op == '&&':
+            left = extract_constraints_from_java_expr(expr.operandl)
+            right = extract_constraints_from_java_expr(expr.operandr)
+            return left + right
+
+        if op == '||':
+            return []
+
+        # 比较运算
+        if op in ('==', '!=', '>=', '<=', '>', '<'):
+            var_name = _get_java_expr_name(expr.operandl)
+            if var_name:
+                value = _get_java_literal(expr.operandr)
+                constraints.append(BranchConstraint(var_name=var_name, op=op, value=value))
+            return constraints
+
+        # instanceof → 暂不提取
+        return []
+
+    if isinstance(expr, javalang.tree.UnaryOperation) and expr.operator == '!':
+        inner = extract_constraints_from_java_expr(expr.operand)
+        return [c.negate() for c in inner]
+
+    # x.equals(y) — 方法调用中的相等检查
+    if isinstance(expr, javalang.tree.MethodInvocation):
+        if hasattr(expr, 'member') and expr.member == 'equals' and len(expr.arguments or []) >= 1:
+            obj = _get_java_expr_name(expr.qualifier) if expr.qualifier else None
+            if obj:
+                value = _get_java_literal(expr.arguments[0])
+                constraints.append(BranchConstraint(var_name=obj, op='==', value=value))
+        return []
+
+    # x != null → BinaryOperation(operator='!=', operandl=MemberReference, operandr=Literal('null'))
+    return constraints
+
+
+def _get_java_expr_name(expr):
+    """从 Java 表达式提取变量名字符串。"""
+    if expr is None:
+        return None
+    if isinstance(expr, javalang.tree.MemberReference):
+        return expr.member
+    if isinstance(expr, javalang.tree.This):
+        return 'this'
+    return None
+
+
+def _get_java_literal(expr):
+    """从 Java 表达式提取字面量值。"""
+    if expr is None:
+        return None
+    if isinstance(expr, javalang.tree.Literal):
+        val = expr.value
+        # javalang 把字面量当字符串存储，尝试解析
+        if val == 'null':
+            return None
+        if val == 'true':
+            return True
+        if val == 'false':
+            return False
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            pass
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            pass
+        # 去除引号
+        if isinstance(val, str) and len(val) >= 2:
+            if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
+                return val[1:-1]
+        return val
+    return None
+
+
 def parameters_back(param_name, stmts, vul_lineno, file_path,
-                     repair_functions=None, controlled_params=None, depth=0, max_depth=10):
+                     repair_functions=None, controlled_params=None, depth=0, max_depth=10,
+                     branch_ctx=None):
     """
     反向追踪变量 param_name 的数据流来源。
     遍历 stmts 从 vul_lineno 往回找对 param_name 的赋值，判断赋值表达式是否可控。
@@ -300,12 +401,79 @@ def parameters_back(param_name, stmts, vul_lineno, file_path,
                     return result
 
         # 控制流：递归进入
-        if isinstance(stmt, (javalang.tree.IfStatement, javalang.tree.ForStatement,
-                             javalang.tree.WhileStatement, javalang.tree.DoStatement)):
+        if isinstance(stmt, javalang.tree.IfStatement):
+            # ===== 分支约束追踪 =====
+            java_constraints = extract_constraints_from_java_expr(stmt.expression)
+            else_constraints = [c.negate() for c in java_constraints]
+
+            # if/then 分支
+            then_stmts = _get_block_stmts(stmt.then_statement) if stmt.then_statement else []
+            if then_stmts:
+                # if 分支：传入 if 约束
+                if branch_ctx and java_constraints:
+                    then_ctx = branch_ctx.merge(java_constraints)
+                elif java_constraints:
+                    then_ctx = BranchContext(java_constraints)
+                else:
+                    then_ctx = None
+
+                then_result = parameters_back(param_name, then_stmts, stmt_line, file_path,
+                                               repair_functions, controlled_params, depth + 1, max_depth,
+                                               branch_ctx=then_ctx)
+            else:
+                then_result = (-1, None, 0)
+
+            # else 分支
+            else_result = (-1, None, 0)
+            if stmt.else_statement:
+                # javalang 的 else_statement 可能是 IfStatement（else if）或 BlockStatement
+                if isinstance(stmt.else_statement, javalang.tree.IfStatement):
+                    # else if: 用否定约束递归处理
+                    if branch_ctx and else_constraints:
+                        else_ctx = branch_ctx.merge(else_constraints)
+                    elif else_constraints:
+                        else_ctx = BranchContext(else_constraints)
+                    else:
+                        else_ctx = None
+                    # 将 else if 作为 IfStatement 递归
+                    else_stmts = [stmt.else_statement]
+                    else_result = parameters_back(param_name, else_stmts, stmt_line, file_path,
+                                                  repair_functions, controlled_params, depth + 1, max_depth,
+                                                  branch_ctx=else_ctx)
+                else:
+                    else_stmts = _get_block_stmts(stmt.else_statement) if stmt.else_statement else []
+                    if else_stmts:
+                        if branch_ctx and else_constraints:
+                            else_ctx = branch_ctx.merge(else_constraints)
+                        elif else_constraints:
+                            else_ctx = BranchContext(else_constraints)
+                        else:
+                            else_ctx = None
+
+                        else_result = parameters_back(param_name, else_stmts, stmt_line, file_path,
+                                                      repair_functions, controlled_params, depth + 1, max_depth,
+                                                      branch_ctx=else_ctx)
+
+            # ===== 约束影响判定 =====
+            if then_result[0] == 1 and else_result[0] in (1, 2, 3):
+                # if 可控但 else 也存在 → 不确定
+                _trace_cache.put(file_path, param_name, vul_lineno, (3, param_name, 0))
+                return (3, param_name, 0)
+
+            if then_result[0] in (1, 2):
+                _trace_cache.put(file_path, param_name, vul_lineno, then_result)
+                return then_result
+            if else_result[0] in (1, 2):
+                _trace_cache.put(file_path, param_name, vul_lineno, else_result)
+                return else_result
+
+        elif isinstance(stmt, (javalang.tree.ForStatement,
+                               javalang.tree.WhileStatement, javalang.tree.DoStatement)):
             block_stmts = _get_block_stmts(stmt)
             if block_stmts:
                 result = parameters_back(param_name, block_stmts, stmt_line, file_path,
-                                          repair_functions, controlled_params, depth + 1, max_depth)
+                                          repair_functions, controlled_params, depth + 1, max_depth,
+                                          branch_ctx=branch_ctx)
                 if result[0] in (1, 2):
                     _trace_cache.put(file_path, param_name, vul_lineno, result)
                     return result

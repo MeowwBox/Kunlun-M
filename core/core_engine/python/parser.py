@@ -19,6 +19,7 @@ import traceback
 from utils.log import logger
 from core.pretreatment import ast_object as _ast_object_singleton
 from core.core_engine.trace_cache import TraceCache
+from core.core_engine.branch_constraint import BranchConstraint, BranchContext
 from core.core_engine.python.builtin_knowledge import lookup as lookup_builtin
 from core.core_engine.python.summary_generator import lookup_summary
 
@@ -373,7 +374,7 @@ def is_repair(expr_str, repair_functions=None):
 
 def parameters_back(param_name, nodes, vul_lineno, file_path,
                      repair_functions=None, controlled_params=None,
-                     visited_funcs=None, depth=0):
+                     visited_funcs=None, depth=0, branch_ctx=None):
     """
     从 vul_lineno 行向上遍历 AST 节点，反向追踪 param_name 的数据流来源。
 
@@ -417,12 +418,12 @@ def parameters_back(param_name, nodes, vul_lineno, file_path,
         # 在函数内追踪
         result = _trace_in_function(param_name, func_node, int(vul_lineno),
                                    file_path, repair_functions, controlled_params,
-                                   visited_funcs, depth, tree)
+                                   visited_funcs, depth, tree, branch_ctx=branch_ctx)
     else:
         # 模块级别追踪
         result = _trace_in_stmts(param_name, relevant_stmts, int(vul_lineno),
                                 file_path, repair_functions, controlled_params,
-                                visited_funcs, depth, tree)
+                                visited_funcs, depth, tree, branch_ctx=branch_ctx)
 
     # 写入缓存（只缓存确定性结果，跳过中间状态）
     if vul_lineno and file_path and result is not None:
@@ -604,7 +605,7 @@ def _trace_property_getter(prop_func, vul_lineno, file_path,
 
 def _trace_in_function(param_name, func_node, vul_lineno, file_path,
                         repair_functions, controlled_params,
-                        visited_funcs, depth, tree):
+                        visited_funcs, depth, tree, branch_ctx=None):
     """在函数体内追踪变量来源"""
     # 注意：不把当前函数名加入 visited_funcs
     # 因为同一函数内可能需要追踪多个变量的来源（如 full_cmd → arg）
@@ -614,13 +615,13 @@ def _trace_in_function(param_name, func_node, vul_lineno, file_path,
     return _trace_in_stmts(param_name, stmts, vul_lineno, file_path,
                             repair_functions, controlled_params,
                             visited_funcs, depth, tree,
-                            func_node=func_node)
+                            func_node=func_node, branch_ctx=branch_ctx)
 
 
 def _trace_in_stmts(param_name, stmts, vul_lineno, file_path,
                      repair_functions, controlled_params,
                      visited_funcs, depth, tree,
-                     func_node=None):
+                     func_node=None, branch_ctx=None):
     """在语句列表中反向追踪变量来源"""
 
     # 过滤出 vul_lineno 之前的语句，倒序遍历
@@ -632,7 +633,8 @@ def _trace_in_stmts(param_name, stmts, vul_lineno, file_path,
     for stmt in reversed(prior_stmts):
         result = _trace_stmt(param_name, stmt, vul_lineno, file_path,
                               repair_functions, controlled_params,
-                              visited_funcs, depth, tree, func_node)
+                              visited_funcs, depth, tree, func_node,
+                              branch_ctx=branch_ctx)
         if result is not None:
             # 处理函数返回的依赖变量：赋值右部是函数调用，返回值依赖调用者变量
             # 需要继续向上查找这些变量的更早赋值
@@ -646,7 +648,8 @@ def _trace_in_stmts(param_name, stmts, vul_lineno, file_path,
                         if hasattr(earlier_stmt, 'lineno') and earlier_stmt.lineno < stmt.lineno:
                             r = _trace_stmt(dep_var, earlier_stmt, stmt.lineno - 1, file_path,
                                              repair_functions, controlled_params,
-                                             visited_funcs, depth, tree, func_node)
+                                             visited_funcs, depth, tree, func_node,
+                                             branch_ctx=branch_ctx)
                             if r is not None:
                                 if isinstance(r, tuple) and len(r) >= 2 and r[0] == 'deps':
                                     continue  # 依赖链太深，跳过
@@ -684,9 +687,73 @@ def _trace_in_stmts(param_name, stmts, vul_lineno, file_path,
     return -1, None, 0
 
 
+def extract_constraints_from_py_expr(expr):
+    """
+    从 Python 条件表达式中提取 BranchConstraint 列表。
+
+    使用标准库 ast 模块的节点类型：
+    - isinstance(x, type)    -> 类型约束（暂不提取）
+    - x is None / x is not None -> 等值约束
+    - x == value / x != value   -> 等值约束
+    - x in list              -> 成员约束（简化：提取变量名，op='in'）
+    - hasattr(x, attr)       -> 属性存在约束（暂不提取）
+    - x and y               -> AND：两个约束都要满足
+    - x or y                -> OR：忽略
+    - not expr              -> 取反
+    """
+    if expr is None:
+        return []
+
+    constraints = []
+
+    if isinstance(expr, ast.BoolOp):
+        if isinstance(expr.op, ast.And):
+            for val in expr.values:
+                constraints.extend(extract_constraints_from_py_expr(val))
+        # ast.Or 忽略
+        return constraints
+
+    if isinstance(expr, ast.UnaryOp) and isinstance(expr.op, ast.Not):
+        inner = extract_constraints_from_py_expr(expr.operand)
+        constraints = [c.negate() for c in inner]
+        return constraints
+
+    if isinstance(expr, ast.Compare):
+        left = _get_name(expr.left)
+        if left:
+            for op, comparator in zip(expr.ops, expr.comparators):
+                if isinstance(op, ast.Eq):
+                    value = _extract_py_literal(comparator)
+                    constraints.append(BranchConstraint(var_name=left, op='==', value=value))
+                elif isinstance(op, ast.NotEq):
+                    value = _extract_py_literal(comparator)
+                    constraints.append(BranchConstraint(var_name=left, op='!=', value=value))
+                elif isinstance(op, ast.Is):
+                    # x is None
+                    constraints.append(BranchConstraint(var_name=left, op='==', value=None))
+                elif isinstance(op, ast.IsNot):
+                    # x is not None
+                    constraints.append(BranchConstraint(var_name=left, op='!=', value=None))
+        return constraints
+
+    if isinstance(expr, ast.Call):
+        # isinstance(x, type) → 暂不提取（类型对可控性无直接影响）
+        # hasattr(x, attr) → 暂不提取
+        pass
+
+    return constraints
+
+
+def _extract_py_literal(node):
+    """从 Python AST 节点提取字面量值。"""
+    if isinstance(node, ast.Constant):
+        return node.value
+    return None
+
+
 def _trace_stmt(param_name, stmt, vul_lineno, file_path,
                  repair_functions, controlled_params,
-                 visited_funcs, depth, tree, func_node):
+                 visited_funcs, depth, tree, func_node, branch_ctx=None):
     """处理单个语句的追踪逻辑"""
 
     # --- 赋值语句: x = expr ---
@@ -733,19 +800,54 @@ def _trace_stmt(param_name, stmt, vul_lineno, file_path,
 
     # --- if 语句 ---
     elif isinstance(stmt, ast.If):
+        # ===== 分支约束追踪 =====
+        if_constraints = extract_constraints_from_py_expr(stmt.test)
+        else_constraints = [c.negate() for c in if_constraints]
+
+        # if 分支：传入 if 约束
+        if branch_ctx and if_constraints:
+            if_ctx = branch_ctx.merge(if_constraints)
+        elif if_constraints:
+            if_ctx = BranchContext(if_constraints)
+        else:
+            if_ctx = None
+
         # 先搜 if 体
         result = _trace_in_stmts(param_name, stmt.body, vul_lineno, file_path,
                                   repair_functions, controlled_params,
-                                  visited_funcs, depth, tree, func_node)
-        if result and result[0] != -1:
-            return result
+                                  visited_funcs, depth, tree, func_node,
+                                  branch_ctx=if_ctx)
+
+        # 记录 if 分支结果
+        if_result = result
+
         # 再搜 else/elif 体
+        else_result = None
         if stmt.orelse:
-            result = _trace_in_stmts(param_name, stmt.orelse, vul_lineno, file_path,
-                                      repair_functions, controlled_params,
-                                      visited_funcs, depth, tree, func_node)
-            if result and result[0] != -1:
-                return result
+            # else 分支：传入否定约束
+            if branch_ctx and else_constraints:
+                else_ctx = branch_ctx.merge(else_constraints)
+            elif else_constraints:
+                else_ctx = BranchContext(else_constraints)
+            else:
+                else_ctx = None
+
+            else_result = _trace_in_stmts(param_name, stmt.orelse, vul_lineno, file_path,
+                                           repair_functions, controlled_params,
+                                           visited_funcs, depth, tree, func_node,
+                                           branch_ctx=else_ctx)
+
+        # ===== 约束影响判定 =====
+        # 如果 if 分支可控，需要检查 else 分支是否有不同结果
+        if if_result and if_result[0] == 1 and else_result is not None:
+            # if 可控但 else 也存在 → 不确定
+            return 3, param_name, 0
+
+        # 返回先找到的可控结果（if 优先）
+        if if_result and if_result[0] != -1:
+            return if_result
+        if else_result and else_result[0] != -1:
+            return else_result
 
     # --- for 循环 ---
     elif isinstance(stmt, ast.For):
