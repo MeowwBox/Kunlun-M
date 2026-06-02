@@ -52,7 +52,7 @@ class BranchConstraint:
 
 
 class BranchContext:
-    """管理当前分支的约束集合"""
+    """管理当前分支的约束集合（供 JS/Python/Java/Go 引擎使用）"""
 
     def __init__(self, constraints=None):
         self.constraints = constraints or []

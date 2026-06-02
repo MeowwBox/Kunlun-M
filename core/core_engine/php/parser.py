@@ -24,7 +24,7 @@ from utils.status import SCAN_ID
 from core.pretreatment import ast_object
 from core.core_engine.php.builtin_knowledge import KNOWLEDGE as PHP_BUILTIN_KNOWLEDGE
 from core.core_engine.trace_cache import TraceCache
-from core.core_engine.branch_constraint import BranchConstraint, BranchContext
+from core.core_engine.branch_constraint import BranchConstraint
 from core.core_engine.php.summary_generator import lookup_summary
 
 # lphply >= 2.0.0 新增的等价节点类型（字段与原类型完全一致）
@@ -1045,7 +1045,7 @@ def new_class_back(param, nodes, vul_function=None, file_path=None, isback=None)
 
 def parameters_back(param, nodes, function_params=None, lineno=0,
                     function_flag=0, vul_function=None, file_path=None,
-                    isback=None, parent_node=None, branch_ctx=None):
+                    isback=None, parent_node=None):
     """
     parameters_back 入口（带运行时缓存）。
     缓存查询命中则直接返回；否则调用 _parameters_back_impl，并在确定性结果时写入缓存。
@@ -1065,7 +1065,7 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
     # 调用实际实现
     result = _parameters_back_impl(param, nodes, function_params, lineno,
                                     function_flag, vul_function, file_path,
-                                    isback, parent_node, branch_ctx)
+                                    isback, parent_node)
     is_co = result[0]
 
     # 写入缓存：仅缓存确定性结果（-1=不可控, 1=可控, 2=已修复）
@@ -1073,6 +1073,97 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
         _trace_cache.put(file_path, str(_pname), int(lineno), result)
 
     return result
+
+
+def _get_body_nodes(node):
+    """从 if/elseif/else body 节点提取语句列表"""
+    if isinstance(node, php.Block):
+        return node.nodes or []
+    elif node is not None:
+        return [node]
+    return []
+
+
+def _get_max_lineno(nodes):
+    """递归获取节点列表中所有节点的最大行号（包括嵌套子节点）"""
+    max_lineno = 0
+    for node in nodes:
+        if node is None:
+            continue
+        if hasattr(node, 'lineno') and node.lineno:
+            max_lineno = max(max_lineno, int(node.lineno))
+        # 递归处理子节点列表属性
+        for attr in ('nodes', 'expr', 'node', 'elseifs', 'else_', 'params', 'key', 'value', 'arguments'):
+            child = getattr(node, attr, None)
+            if child is None:
+                continue
+            if isinstance(child, list):
+                max_lineno = max(max_lineno, _get_max_lineno(child))
+            elif hasattr(child, 'lineno'):
+                max_lineno = max(max_lineno, int(child.lineno))
+                # 再递归一层（处理 Block 节点等情况）
+                for sub_attr in ('nodes', 'node'):
+                    sub_child = getattr(child, sub_attr, None)
+                    if sub_child is None:
+                        continue
+                    if isinstance(sub_child, list):
+                        max_lineno = max(max_lineno, _get_max_lineno(sub_child))
+                    elif hasattr(sub_child, 'lineno'):
+                        max_lineno = max(max_lineno, int(sub_child.lineno))
+    return max_lineno
+
+
+def _find_sink_branch(if_node, lineno):
+    """
+    判断 lineno（sink行号）位于 if/else 的哪个分支。
+
+    phply AST 行号规则（已验证）：
+    - If.lineno: if 关键字行号
+    - ElseIf.lineno: elseif 关键字行号
+    - Else.lineno: else 关键字行号
+
+    返回: 'if', 'elseif_N', 'else', 'outside'
+    """
+    if not lineno:
+        return 'outside'
+
+    lineno = int(lineno)
+
+    # 收集各分支的 (起始行号, 类型, 索引)
+    boundaries = [(if_node.lineno, 'if', None)]
+    for i, ei in enumerate(if_node.elseifs or []):
+        boundaries.append((ei.lineno, 'elseif', i))
+    if if_node.else_:
+        boundaries.append((if_node.else_.lineno, 'else', None))
+
+    # 按行号排序
+    boundaries.sort(key=lambda x: x[0])
+
+    # 计算每个分支的行号范围
+    for idx, (start, btype, bindex) in enumerate(boundaries):
+        if idx + 1 < len(boundaries):
+            end = boundaries[idx + 1][0] - 1
+        else:
+            if btype == 'if':
+                body_nodes = _get_body_nodes(if_node.node)
+            elif btype == 'elseif':
+                body_nodes = _get_body_nodes(if_node.elseifs[bindex].node)
+            elif btype == 'else':
+                body_nodes = _get_body_nodes(if_node.else_.node) if if_node.else_ else []
+            else:
+                body_nodes = []
+
+            if body_nodes:
+                end = body_nodes[-1].lineno
+            else:
+                end = start
+
+        if start <= lineno <= end:
+            if btype == 'elseif':
+                return f'elseif_{bindex}'
+            return btype
+
+    return 'outside'
 
 
 def extract_constraints_from_php_expr(expr):
@@ -1129,8 +1220,22 @@ def extract_constraints_from_php_expr(expr):
             right = extract_constraints_from_php_expr(expr.right)
             constraints = left + right
         elif expr.op == '||':
-            # 逻辑 OR：不能同时保证，忽略
-            constraints = []
+            # 检查是否为同一变量的枚举：$a == "x" || $a == "y" → $a in ["x", "y"]
+            left = extract_constraints_from_php_expr(expr.left)
+            right = extract_constraints_from_php_expr(expr.right)
+            # 只在两边都是 == 且针对同一变量时合并为 in 约束
+            if (len(left) == 1 and len(right) == 1
+                    and left[0].op in ('==', '===') and right[0].op in ('==', '===')
+                    and left[0].var_name == right[0].var_name):
+                values = []
+                if left[0].value is not None:
+                    values.append(left[0].value)
+                if right[0].value is not None:
+                    values.append(right[0].value)
+                if values:
+                    constraints.append(BranchConstraint(
+                        var_name=left[0].var_name, op='in', value=values))
+            # 否则忽略（不能同时保证 OR 条件）
         elif expr.op in ('==', '===', '!=', '!=='):
             # 比较运算：$var == value
             var_name = _extract_var_name(expr.left)
@@ -1183,7 +1288,7 @@ def _extract_literal_value(node):
 
 def _parameters_back_impl(param, nodes, function_params=None, lineno=0,
                     function_flag=0, vul_function=None, file_path=None,
-                    isback=None, parent_node=None, branch_ctx=None):  # 用来得到回溯过程中的被赋值的变量是否与敏感函数变量相等,param是当前需要跟踪的污点
+                    isback=None, parent_node=None):  # 用来得到回溯过程中的被赋值的变量是否与敏感函数变量相等,param是当前需要跟踪的污点
     """
     递归回溯敏感函数的赋值流程，param为跟踪的污点，当找到param来源时-->分析复制表达式-->获取新污点；否则递归下一个节点
     :param parent_node: 父节点 ，为了处理无法确定当前节点位置的问题, 如果是0则是最基础列表
@@ -1540,7 +1645,8 @@ def _parameters_back_impl(param, nodes, function_params=None, lineno=0,
 
             # 在这里想一个解决办法，如果当前父节点为0
             # 然后最后一个为函数节点，那么如果其中的最后一行代码行数小于目标行数，则不进入
-            if not function_nodes or function_nodes[-1].lineno < int(lineno):
+            max_lineno_in_func = _get_max_lineno(function_nodes)
+            if not function_nodes or max_lineno_in_func < int(lineno):
                 is_co, cp, expr_lineno = parameters_back(param, nodes[:-1], function_params, lineno,
                                                          function_flag=0, vul_function=vul_function,
                                                          file_path=file_path,
@@ -1640,118 +1746,74 @@ def _parameters_back_impl(param, nodes, function_params=None, lineno=0,
             logger.debug(
                 "[AST] param {} line {} in if/else, start ast in if/else".format(param_name, node.lineno))
 
-            if isinstance(node.node, php.Block):  # if里可能是代码块，也可能就一句语句
-                if_nodes = node.node.nodes
-            elif node.node is not None:
-                if_nodes = [node.node]
+            # 1. 判断 sink 在哪个分支
+            sink_branch = _find_sink_branch(node, lineno)
+            logger.debug("[AST] sink_branch={} for param {} lineno {}".format(sink_branch, param_name, lineno))
+
+            # 2. 提取当前分支的条件约束并确定分支体
+            if sink_branch == 'if':
+                constraints = extract_constraints_from_php_expr(node.expr)
+                body_nodes = _get_body_nodes(node.node)
+            elif sink_branch.startswith('elseif_'):
+                ei_idx = int(sink_branch.split('_')[1])
+                ei_node = node.elseifs[ei_idx]
+                constraints = extract_constraints_from_php_expr(ei_node.expr)
+                body_nodes = _get_body_nodes(ei_node.node)
+            elif sink_branch == 'else':
+                constraints = [c.negate() for c in extract_constraints_from_php_expr(node.expr)]
+                body_nodes = _get_body_nodes(node.else_.node) if node.else_ else []
             else:
-                if_nodes = []
-
-            # ===== 分支约束追踪 =====
-            if_constraints = extract_constraints_from_php_expr(node.expr)
-            else_constraints = [c.negate() for c in if_constraints]
-
-            # if 分支：传入 if 约束
-            if branch_ctx and if_constraints:
-                if_ctx = branch_ctx.merge(if_constraints)
-            elif if_constraints:
-                if_ctx = BranchContext(if_constraints)
-            else:
-                if_ctx = None
-
-            # 进入分析if内的代码块
-            is_co, cp, expr_lineno = parameters_back(param, if_nodes, function_params, lineno,
-                                                     function_flag=function_flag, vul_function=vul_function,
-                                                     file_path=file_path, isback=isback, parent_node=node,
-                                                     branch_ctx=if_ctx)
-
-            # 如果是3 应该传递cp
-            if is_co == 3:
-                _is_co = is_co
-                _cp = cp
-
-            if is_co != 1 and node.elseifs != []:  # elseif可能有多个，所以需要列表
-
-                for node_elseifs_node in node.elseifs:
-                    if isinstance(node_elseifs_node.node, php.Block):
-                        elif_nodes = node_elseifs_node.node.nodes
-                        elseif_lineno = node_elseifs_node.node.lineno
-                    elif node_elseifs_node.node is not None:
-                        elif_nodes = [node_elseifs_node.node]
-                        elseif_lineno = node_elseifs_node.node.lineno
-                    else:
-                        elif_nodes = []
-                        elseif_lineno = lineno
-
-                    logger.debug("[AST] param {} line {} in new branch for else if".format(param, elseif_lineno))
-
-                    # elseif 的隐含约束 = else_constraints AND elif_constraints
-                    elif_constraints = extract_constraints_from_php_expr(node_elseifs_node.expr)
-                    combined = else_constraints + elif_constraints
-                    if branch_ctx and combined:
-                        elif_ctx = branch_ctx.merge(combined)
-                    elif combined:
-                        elif_ctx = BranchContext(combined)
-                    else:
-                        elif_ctx = None
-
-                    is_co, cp, expr_lineno = parameters_back(param, elif_nodes, function_params, lineno,
-                                                             function_flag=function_flag, vul_function=vul_function,
-                                                             file_path=file_path,
-                                                             isback=isback, parent_node=node,
-                                                             branch_ctx=elif_ctx)
-
-                if _is_co != 3 and is_co == 3:
-                    _is_co = is_co
-                    _cp = cp
-
-            if is_co != 1 and node.else_ != [] and node.else_ is not None:
-
-                logger.debug("[AST] param {} line {} in new branch for else".format(param, node.else_.lineno))
-
-                if isinstance(node.else_.node, php.Block):
-                    else_nodes = node.else_.node.nodes
-                elif node.else_.node is not None:
-                    else_nodes = [node.else_.node]
-                else:
-                    else_nodes = []
-
-                # else 分支：传入否定约束
-                if branch_ctx and else_constraints:
-                    else_ctx = branch_ctx.merge(else_constraints)
-                elif else_constraints:
-                    else_ctx = BranchContext(else_constraints)
-                else:
-                    else_ctx = None
-
-                is_co, cp, expr_lineno = parameters_back(param, else_nodes, function_params, lineno,
+                # sink 在 if/else 之外 → 遍历所有分支找变量重赋值
+                _is_co = 0
+                _cp = None
+                if_nodes = _get_body_nodes(node.node)
+                is_co, cp, expr_lineno = parameters_back(param, if_nodes, function_params, lineno,
                                                          function_flag=function_flag, vul_function=vul_function,
-                                                         file_path=file_path, isback=isback, parent_node=node,
-                                                         branch_ctx=else_ctx)
-
-                if _is_co != 3 and is_co == 3:
+                                                         file_path=file_path, isback=isback, parent_node=node)
+                if is_co == 3:
                     _is_co = is_co
                     _cp = cp
+                if is_co != 1 and node.elseifs:
+                    for node_elseifs_node in node.elseifs:
+                        elif_nodes = _get_body_nodes(node_elseifs_node.node)
+                        is_co, cp, expr_lineno = parameters_back(param, elif_nodes, function_params, lineno,
+                                                                 function_flag=function_flag, vul_function=vul_function,
+                                                                 file_path=file_path, isback=isback, parent_node=node)
+                    if _is_co != 3 and is_co == 3:
+                        _is_co = is_co
+                        _cp = cp
+                if is_co != 1 and node.else_ and node.else_ is not None:
+                    else_nodes = _get_body_nodes(node.else_.node) if node.else_ else []
+                    is_co, cp, expr_lineno = parameters_back(param, else_nodes, function_params, lineno,
+                                                             function_flag=function_flag, vul_function=vul_function,
+                                                             file_path=file_path, isback=isback, parent_node=node)
+                    if _is_co != 3 and is_co == 3:
+                        _is_co = is_co
+                        _cp = cp
+                if _is_co == 3 and _cp != param:
+                    is_co = _is_co
+                    cp = _cp
+                    param = _cp
+                    file_path = os.path.normpath(file_path)
+                    code = "New {} param back from if/else".format(param)
+                    scan_chain.append(('NewIFBack', code, file_path, node.lineno))
+                # outside 情况已处理完，fall through 到 L1902 的 is_co==1 return 检查
 
-            # ===== 约束影响判定 =====
-            # 如果 is_co==1 且有分支约束，降级为 3（不确定）
-            # 这意味着：变量在某分支可控但在另一分支不可控 → 不能确定可控
-            if is_co == 1 and branch_ctx and branch_ctx.applies_to(param_name):
-                is_co = 3
-                cp = param
+            # 3. 立即检查约束（仅在 sink 在具体分支内时执行，即 sink_branch != 'outside'）
+            if sink_branch != 'outside':
+                for c in constraints:
+                    if c.var_name == param_name and c.op in ('==', '===', 'in'):
+                        # 等值约束：变量被限定为固定值，不可控
+                        logger.info("[AST] Branch constraint BLOCKS param {}: {} {}".format(param_name, c.op, c.value))
+                        return -1, param, 0
+
+                # 4. 不等约束不阻断，继续回溯分支体
+                is_co, cp, expr_lineno = parameters_back(param, body_nodes, function_params, lineno,
+                                                         function_flag=function_flag, vul_function=vul_function,
+                                                         file_path=file_path, isback=isback, parent_node=node)
 
             if is_co == 1:  # 目标确定直接返回
                 return is_co, cp, expr_lineno
-
-            if _is_co == 3 and _cp != param:
-                # 如果不等于，说明在if/else块中产生了变化
-                is_co = _is_co
-                cp = _cp
-                param = _cp
-
-                file_path = os.path.normpath(file_path)
-                code = "New {} param back from if/else".format(param)
-                scan_chain.append(('NewIFBack', code, file_path, node.lineno))
 
         elif isinstance(node, php.While) or isinstance(node, php.DoWhile):
             logger.debug(
