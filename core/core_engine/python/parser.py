@@ -867,9 +867,14 @@ def _trace_stmt(param_name, stmt, vul_lineno, file_path,
                 return -1, None, 0
 
         # 4. 不等约束不阻断，继续回溯分支体
-        return _trace_in_stmts(param_name, body_stmts, vul_lineno, file_path,
+        result = _trace_in_stmts(param_name, body_stmts, vul_lineno, file_path,
                                 repair_functions, controlled_params,
                                 visited_funcs, depth, tree, func_node)
+        # 在分支体内找到了明确的追踪结果，返回
+        if result and result[0] in (1, 2, 4, 5):
+            return result
+        # 分支体内未找到赋值来源（code 3/-1），让外层 _trace_in_stmts 继续追踪更早语句
+        return None
 
     # --- for 循环 ---
     elif isinstance(stmt, ast.For):
