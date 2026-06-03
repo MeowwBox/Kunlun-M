@@ -420,8 +420,36 @@ def extract_constraints_from_go_expr(expr_node):
             return constraints
 
         if op_text == '||':
-            # OR: 忽略
-            return []
+            # OR: x == "a" || x == "b" → 收集同一变量的枚举约束
+            children = expr_node.children
+            left_node = None
+            right_node = None
+            found_op = False
+            for child in children:
+                if _get_node_text(child) == '||':
+                    found_op = True
+                    continue
+                if not found_op and left_node is None:
+                    left_node = child
+                elif found_op and right_node is None:
+                    right_node = child
+            or_constraints = []
+            if left_node:
+                or_constraints.extend(extract_constraints_from_go_expr(left_node))
+            if right_node:
+                or_constraints.extend(extract_constraints_from_go_expr(right_node))
+            # 收集同一变量的所有 == 值
+            from collections import defaultdict
+            eq_values = defaultdict(list)
+            for c in or_constraints:
+                if c.op == '==' and c.var_name:
+                    eq_values[c.var_name].append(c.value)
+            for var_name, values in eq_values.items():
+                if values:
+                    constraints.append(BranchConstraint(
+                        var_name=var_name, op='in',
+                        value=values if len(values) > 1 else values[0]))
+            return constraints
 
         # 比较运算
         if op_text in ('==', '!=', '>=', '<=', '>', '<'):
