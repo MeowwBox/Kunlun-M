@@ -345,10 +345,10 @@ def is_controllable(expr_str, controlled_params=None):
     for cp in controlled_params:
         if cp in expr_str:
             return True
-        # 特殊处理：可控源是 func() 形式，表达式是 func(...) 或纯 func 名
+        # 特殊处理：可控源是 func() 形式，匹配显式调用 func(...)
         if cp.endswith('()'):
             func_name = cp[:-2]
-            if expr_str == func_name or expr_str.startswith(func_name + '('):
+            if expr_str.startswith(func_name + '('):
                 return True
 
     return False
@@ -728,7 +728,23 @@ def extract_constraints_from_py_expr(expr):
         if isinstance(expr.op, ast.And):
             for val in expr.values:
                 constraints.extend(extract_constraints_from_py_expr(val))
-        # ast.Or 忽略
+        elif isinstance(expr.op, ast.Or):
+            # x == "a" or x == "b" 等价于 x in ["a", "b"]
+            # 提取同一变量的枚举约束
+            or_constraints = []
+            for val in expr.values:
+                or_constraints.extend(extract_constraints_from_py_expr(val))
+            # 收集同一变量的所有 == 值
+            from collections import defaultdict
+            eq_values = defaultdict(list)
+            for c in or_constraints:
+                if c.op == '==' and c.var_name:
+                    eq_values[c.var_name].append(c.value)
+            for var_name, values in eq_values.items():
+                if values:
+                    constraints.append(BranchConstraint(
+                        var_name=var_name, op='in',
+                        value=values if len(values) > 1 else values[0]))
         return constraints
 
     if isinstance(expr, ast.UnaryOp) and isinstance(expr.op, ast.Not):

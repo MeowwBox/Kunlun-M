@@ -267,7 +267,22 @@ def extract_constraints_from_java_expr(expr):
             return left + right
 
         if op == '||':
-            return []
+            # x.equals("a") || x.equals("b") → 收集同一变量的枚举约束
+            from collections import defaultdict
+            left = extract_constraints_from_java_expr(expr.operandl)
+            right = extract_constraints_from_java_expr(expr.operandr)
+            or_constraints = left + right
+            eq_values = defaultdict(list)
+            for c in or_constraints:
+                if c.op == '==' and c.var_name:
+                    eq_values[c.var_name].append(c.value)
+            result = []
+            for var_name, values in eq_values.items():
+                if values:
+                    result.append(BranchConstraint(
+                        var_name=var_name, op='in',
+                        value=values if len(values) > 1 else values[0]))
+            return result
 
         # 比较运算
         if op in ('==', '!=', '>=', '<=', '>', '<'):
@@ -280,9 +295,8 @@ def extract_constraints_from_java_expr(expr):
         # instanceof → 暂不提取
         return []
 
-    if isinstance(expr, javalang.tree.UnaryOperation) and expr.operator == '!':
-        inner = extract_constraints_from_java_expr(expr.operand)
-        return [c.negate() for c in inner]
+    # ljavalang 没有 UnaryOperation，!expr 通过 prefix_operators 处理
+    # 这里暂不处理 !expr 的约束提取
 
     # x.equals(y) — 方法调用中的相等检查
     if isinstance(expr, javalang.tree.MethodInvocation):
@@ -290,8 +304,12 @@ def extract_constraints_from_java_expr(expr):
             obj = _get_java_expr_name(expr.qualifier) if expr.qualifier else None
             if obj:
                 value = _get_java_literal(expr.arguments[0])
-                constraints.append(BranchConstraint(var_name=obj, op='==', value=value))
-        return []
+                c = BranchConstraint(var_name=obj, op='==', value=value)
+                # ljavalang: !expr 通过 prefix_operators 处理
+                if hasattr(expr, 'prefix_operators') and '!' in expr.prefix_operators:
+                    c = c.negate()
+                constraints.append(c)
+        return constraints
 
     # x != null → BinaryOperation(operator='!=', operandl=MemberReference, operandr=Literal('null'))
     return constraints
@@ -301,6 +319,8 @@ def _get_java_expr_name(expr):
     """从 Java 表达式提取变量名字符串。"""
     if expr is None:
         return None
+    if isinstance(expr, str):
+        return expr
     if isinstance(expr, javalang.tree.MemberReference):
         return expr.member
     if isinstance(expr, javalang.tree.This):
@@ -401,7 +421,7 @@ def parameters_back(param_name, stmts, vul_lineno, file_path,
 
         # 控制流：递归进入
         if isinstance(stmt, javalang.tree.IfStatement):
-            java_constraints = extract_constraints_from_java_expr(stmt.expression)
+            java_constraints = extract_constraints_from_java_expr(stmt.condition)
 
             # 判断 sink 在哪个分支
             sink_branch = _find_sink_branch_java(stmt, vul_lineno)
@@ -1946,7 +1966,12 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
                     logger.debug("[AST][Java] parameters_back('{}') => code={}, cp={}".format(
                         arg_name, code, cp))
 
-                    if code == 1:
+                    if code == -1:
+                        # 分支约束阻断：参数不可控
+                        scan_results.append({"code": -1, "chain": scan_chain})
+                        found = True
+                        break
+                    elif code == 1:
                         scan_results.append(_build_result(code, scan_chain, cp, source_lines,
                                          lineno, file_path, controlled_params,
                                          repair_functions, is_config_vuln))
@@ -1988,7 +2013,11 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
                         repair_functions, controlled_params
                     )
 
-                    if code == 1:
+                    if code == -1:
+                        scan_results.append({"code": -1, "chain": scan_chain})
+                        found = True
+                        break
+                    elif code == 1:
                         scan_results.append(_build_result(code, scan_chain, cp, source_lines,
                                          lineno, file_path, controlled_params,
                                          repair_functions, is_config_vuln))
