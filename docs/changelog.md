@@ -1,4 +1,12 @@
 ## 更新日志
+- 2026-06-03
+  - **分支约束端到端测试套件**
+    - 新增 `tests/branch_constraint/` 目录，23 个端到端测试用例覆盖 PHP/Python/JS/Java/Go 5 种语言
+    - 覆盖场景：== 约束阻断（误报消除）、无约束真阳性、else 分支真阳性、!= 约束不阻断、枚举约束
+    - 使用 `run_tests.py` 运行器，通过 subprocess 调用 `ci_scan.py` 避免 Django DB 连接缓存问题
+  - **修复 Python parser 分支约束回溯 bug**
+    - `ast.If` 处理中，分支体内回溯返回 `code 3` (unconfirmed) 时直接 return，导致外层 `_trace_in_stmts` 循环终止
+    - 修复：code 3/-1 时返回 `None`，让外层循环继续追踪 if 语句之前的赋值语句
 - 2026-06-01
   - KunLun-M 2.13.1
   - **内置知识库重构：统一合并 `core/internal_defines/` 旧系统 → `builtin_knowledge.py` 新系统**
