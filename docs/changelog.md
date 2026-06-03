@@ -1,5 +1,10 @@
 ## 更新日志
 - 2026-06-03
+  - **C/C++ if/else + switch/case 分支约束追踪**
+    - 新增 `_extract_constraints_from_c_expr`：支持 `strcmp(x,"v")==0`、`x == value`、`!` 取反、`&&`/`||` 组合
+    - 新增 `_check_sink_branch_constraints`：在 `scan_parser` 的直接可控源和反向追踪两条路径中检查分支约束
+    - 支持 if/else 分支约束（`==`/`!=`/`in`/`not in`）和 switch/case（非 default 阻断）
+    - 端到端测试 46/46 全通过（含 7 个新增 C 测试用例）
   - **switch/case 分支约束追踪（PHP/JS/Java/Go 四语言）**
     - PHP: 修复 phply `Default` 节点无 `expr` 属性导致 `AttributeError` 被静默吞掉的问题
     - Java: 修复 javalang default case 的 `case` 属性为空列表（非 `None`）的判断
