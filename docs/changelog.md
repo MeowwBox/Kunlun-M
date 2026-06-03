@@ -1,4 +1,11 @@
 ## 更新日志
+- 2026-06-04
+  - **分支约束追踪补全 — C 三元 / Python match/case / while 循环 / JS ForStatement 修复（6 语言）**
+    - C/C++: 新增三元表达式（conditional_expression）约束追踪
+    - Python: 新增 match/case（Python 3.10+）分支约束追踪，兼容 Python < 3.10
+    - 6 语言新增 while 循环条件等值约束检查（PHP/Python/JS/Java/Go/C）
+    - JS: 修复 `_parameters_back_impl` 缺少 ForStatement/ForInStatement/ForOfStatement 处理的功能性缺陷
+    - 端到端测试扩展至 56 个用例，全部通过（新增 10 个 while + 2 个 Python match + 2 个 C 三元）
 - 2026-06-03
   - **C/C++ if/else + switch/case 分支约束追踪**
     - 新增 `_extract_constraints_from_c_expr`：支持 `strcmp(x,"v")==0`、`x == value`、`!` 取反、`&&`/`||` 组合
