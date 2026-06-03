@@ -891,8 +891,76 @@ def _trace_stmt(param_name, stmt, vul_lineno, file_path,
         if result and result[0] != -1:
             return result
 
+    # --- match/case (Python 3.10+) ---
+    if hasattr(ast, 'Match') and isinstance(stmt, ast.Match):
+        subject_name = _get_name(stmt.subject)
+
+        # 找到 sink 行号所在的 case
+        target_case = None
+        for case in stmt.cases:
+            if case.body and int(case.body[0].lineno) <= vul_lineno <= int(case.body[-1].end_lineno):
+                target_case = case
+                break
+
+        if target_case is not None:
+            pattern = target_case.pattern
+
+            # MatchValue(value=Constant(value=...)) — 固定值匹配
+            if hasattr(ast, 'MatchValue') and isinstance(pattern, ast.MatchValue):
+                if isinstance(pattern.value, ast.Constant) and subject_name == param_name:
+                    logger.info("[AST][Python] match/case MatchValue BLOCKS param {}: {} == {}".format(
+                        param_name, subject_name, pattern.value.value))
+                    return -1, None, 0
+
+            # MatchSingleton(value=True/False/None) — 类似 MatchValue
+            elif hasattr(ast, 'MatchSingleton') and isinstance(pattern, ast.MatchSingleton):
+                if subject_name == param_name:
+                    logger.info("[AST][Python] match/case MatchSingleton BLOCKS param {}: {} == {}".format(
+                        param_name, subject_name, pattern.value))
+                    return -1, None, 0
+
+            # MatchAs(pattern=None) — 通配符 _ → 不阻断
+            elif hasattr(ast, 'MatchAs') and isinstance(pattern, ast.MatchAs) and pattern.pattern is None:
+                pass
+
+            # 其他 pattern 类型 → 不阻断
+            else:
+                pass
+
+            # 继续在 case body 内回溯
+            result = _trace_in_stmts(param_name, target_case.body, vul_lineno, file_path,
+                                      repair_functions, controlled_params,
+                                      visited_funcs, depth, tree, func_node)
+            if result and result[0] in (1, 2, 4, 5):
+                return result
+            return None
+
+        else:
+            # sink 在 match 外或不在任何 case 中 → 遍历所有 case 的 body 搜索赋值
+            for case in stmt.cases:
+                result = _trace_in_stmts(param_name, case.body, vul_lineno, file_path,
+                                          repair_functions, controlled_params,
+                                          visited_funcs, depth, tree, func_node)
+                if result and result[0] in (1, 2, 3):
+                    return result
+            return None
+
     # --- while 循环 ---
     elif isinstance(stmt, ast.While):
+        # 1. 检查 sink 是否在 while 体内
+        sink_in_body = (stmt.body and
+                        int(stmt.body[0].lineno) <= vul_lineno <= int(stmt.body[-1].end_lineno))
+
+        # 2. 如果 sink 在循环体内，提取 while 条件约束并检查等值约束
+        if sink_in_body:
+            constraints = extract_constraints_from_py_expr(stmt.test)
+            for c in constraints:
+                if c.var_name == param_name and c.op in ('==', '===', 'in'):
+                    logger.info("[AST][Python] While constraint BLOCKS param {}: {} {} {}".format(
+                        param_name, c.var_name, c.op, c.value))
+                    return -1, None, 0
+
+        # 3. 继续在循环体内搜索
         result = _trace_in_stmts(param_name, stmt.body, vul_lineno, file_path,
                                   repair_functions, controlled_params,
                                   visited_funcs, depth, tree, func_node)

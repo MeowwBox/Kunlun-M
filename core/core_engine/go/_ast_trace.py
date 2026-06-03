@@ -871,6 +871,33 @@ def trace_go_stmt(var_name, stmt_node, file_path, vul_lineno, to_line,
 
     # for 语句
     elif stmt_node.type == 'for_statement':
+        # 检测是否为 while 形式的 for（有 condition 但没有 init/update）
+        _is_while_form = True
+        _for_condition = None
+        _for_block = None
+        for child in stmt_node.children:
+            if child.type == ';':
+                _is_while_form = False
+            elif child.type == 'range_clause':
+                _is_while_form = False
+            elif child.type == 'block':
+                _for_block = child
+            elif child.type != 'for':
+                if _for_condition is None:
+                    _for_condition = child
+
+        # while 形式的 for 条件等值约束检查：如果条件中 var_name 有 == 约束，且 sink 在 for 体内 → 阻断
+        if _is_while_form and _for_condition and _for_block and vul_lineno:
+            target_line = int(vul_lineno)
+            block_start = _for_block.start_point[0] + 1
+            block_end = _for_block.end_point[0] + 1
+            if block_start <= target_line <= block_end:
+                constraints = extract_constraints_from_go_expr(_for_condition)
+                for c in constraints:
+                    if c.var_name == var_name and c.op in ('==', '===', 'in'):
+                        logger.info("[AST][Go] While constraint BLOCKS var {}: {} {}".format(var_name, c.op, c.value))
+                        return (-1, 0)
+
         for child in stmt_node.children:
             if child.type == 'block':
                 result = _find_assignment_in_block(child, var_name)

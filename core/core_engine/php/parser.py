@@ -1838,6 +1838,18 @@ def _parameters_back_impl(param, nodes, function_params=None, lineno=0,
             else:
                 while_nodes = []
 
+            # while 循环条件等值约束检查：如果 while 条件中 param_name 有 == 约束，且 sink 在 while 体内 → 阻断
+            if while_nodes and lineno:
+                _lineno = int(lineno)
+                body_start = while_nodes[0].lineno
+                body_end = while_nodes[-1].lineno
+                if body_start and body_end and body_start <= _lineno <= body_end:
+                    constraints = extract_constraints_from_php_expr(node.expr)
+                    for c in constraints:
+                        if c.var_name == param_name and c.op in ('==', '===', 'in'):
+                            logger.info("[AST] While constraint BLOCKS param {}: {} {}".format(param_name, c.op, c.value))
+                            return -1, param, 0
+
             is_co, cp, expr_lineno = parameters_back(param, while_nodes, function_params, lineno,
                                                      function_flag=1, vul_function=vul_function, file_path=file_path,
                                                      isback=isback, parent_node=node)

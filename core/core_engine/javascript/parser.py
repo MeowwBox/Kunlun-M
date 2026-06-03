@@ -1878,7 +1878,39 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
 
             while_body = node.body.body
 
+            # while 循环条件等值约束检查：如果 while 条件中 param_name 有 == 约束，且 sink 在 while 体内 → 阻断
+            if while_body and lineno:
+                _lineno = int(lineno)
+                body_start = node.body.loc.start.line
+                body_end = node.body.loc.end.line
+                if body_start <= _lineno <= body_end:
+                    test_expr = node.test.toDict() if hasattr(node.test, 'toDict') else node.test
+                    constraints = extract_constraints_from_js_expr(test_expr)
+                    _param_str = param_name[0] if isinstance(param_name, list) else str(param_name)
+                    for c in constraints:
+                        if c.var_name == _param_str and c.op in ('==', '===', 'in'):
+                            logger.info("[AST] While constraint BLOCKS param {}: {} {}".format(param_name, c.op, c.value))
+                            return -1, param, 0
+
             is_co, cp, expr_lineno = parameters_back(param, while_body, function_params, lineno,
+                                                     function_flag=function_flag, vul_function=vul_function,
+                                                     file_path=file_path,
+                                                     isback=isback, method_name=method_name)
+
+        elif node.type == "ForStatement":
+            logger.debug("[AST] Param {} line {} in for loop".format(param_name, node.loc.start.line))
+            for_body = node.body.body if hasattr(node.body, 'body') else []
+
+            is_co, cp, expr_lineno = parameters_back(param, for_body, function_params, lineno,
+                                                     function_flag=function_flag, vul_function=vul_function,
+                                                     file_path=file_path,
+                                                     isback=isback, method_name=method_name)
+
+        elif node.type in ("ForInStatement", "ForOfStatement"):
+            logger.debug("[AST] Param {} line {} in for-in/of loop".format(param_name, node.loc.start.line))
+            for_body = node.body.body if hasattr(node.body, 'body') else []
+
+            is_co, cp, expr_lineno = parameters_back(param, for_body, function_params, lineno,
                                                      function_flag=function_flag, vul_function=vul_function,
                                                      file_path=file_path,
                                                      isback=isback, method_name=method_name)

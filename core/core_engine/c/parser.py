@@ -546,6 +546,19 @@ def _get_c_var_name(node):
     return None
 
 
+def _collect_var_names_recursive(node, names):
+    """递归收集 AST 节点中所有 identifier 变量名（用于三元分支变量收集）。"""
+    if node is None:
+        return
+    if node.type == 'identifier':
+        name = _node_text(node)
+        if name:
+            names.add(name)
+        return
+    for child in node.children:
+        _collect_var_names_recursive(child, names)
+
+
 def _get_c_literal_value(node):
     """从 tree-sitter C 节点提取字面量值。"""
     if node is None:
@@ -597,6 +610,10 @@ def _check_sink_branch_constraints(tree, vul_lineno, var_name, func_body_node):
                 return result
         elif child.type == 'switch_statement':
             result = _check_switch_branch_constraint(child, vul_lineno, var_name)
+            if result is not None:
+                return result
+        elif child.type in ('while_statement', 'do_statement'):
+            result = _check_while_constraint(child, vul_lineno, var_name)
             if result is not None:
                 return result
         elif child.type == 'compound_statement':
@@ -673,6 +690,67 @@ def _check_if_branch_constraint(if_node, vul_lineno, var_name):
             return True
         if in_else and c.op in ('!=', 'not in'):
             logger.info("[AST][C] Branch constraint BLOCKS: else ({} {} {}) at line {}".format(
+                c.var_name, c.op, c.value, vul_lineno))
+            return True
+
+    return False
+
+
+def _check_while_constraint(while_node, vul_lineno, var_name):
+    """检查 while 循环条件约束。
+
+    tree-sitter C while_statement 结构:
+      while_statement
+        ├── "while"
+        ├── parenthesized_expression   ← 条件
+        └── compound_statement         ← 循环体
+
+    tree-sitter C do_statement 结构:
+      do_statement
+        ├── "do"
+        ├── compound_statement         ← 循环体
+        ├── "while"
+        └── parenthesized_expression   ← 条件
+
+    如果 sink 在 while 体内，且条件中有 var_name 的等值约束 → 阻断。
+    返回 True（阻断）/ False（不阻断）/ None（vul_lineno 不在此 while 中）。
+    """
+    if not vul_lineno:
+        return None
+
+    vul_lineno = int(vul_lineno)
+
+    cond_node = None
+    body_node = None
+
+    for child in while_node.children:
+        if child.type == 'parenthesized_expression':
+            cond_node = child
+        elif child.type == 'compound_statement' and body_node is None:
+            body_node = child
+
+    if body_node is None:
+        return None
+
+    body_start = body_node.start_point[0] + 1
+    body_end = body_node.end_point[0] + 1
+
+    if not (body_start <= vul_lineno <= body_end):
+        return None
+
+    if cond_node is None:
+        return False
+
+    # 从条件表达式中提取内部表达式（去掉括号）
+    inner_cond = None
+    if cond_node.children and len(cond_node.children) >= 2:
+        inner_cond = cond_node.children[1]
+
+    constraints = _extract_constraints_from_c_expr(inner_cond)
+
+    for c in constraints:
+        if c.var_name == var_name and c.op in ('==', 'in'):
+            logger.info("[AST][C] While constraint BLOCKS: while ({} {} {}) at line {}".format(
                 c.var_name, c.op, c.value, vul_lineno))
             return True
 
@@ -1541,8 +1619,37 @@ def _analyze_rhs_node(rhs_node, var_name, file_path, lineno, to_line,
 
     # conditional_expression (三元运算符 ? :)
     if node_type == "conditional_expression":
+        condition = rhs_node.child_by_field_name("condition")
         consequence = rhs_node.child_by_field_name("consequence")
         alternative = rhs_node.child_by_field_name("alternative")
+
+        # 提取三元条件约束
+        constraints = _extract_constraints_from_c_expr(condition)
+
+        # 收集 true/false 分支中的变量名
+        true_names = set()
+        false_names = set()
+        if consequence:
+            _collect_var_names_recursive(consequence, true_names)
+        if alternative:
+            _collect_var_names_recursive(alternative, false_names)
+
+        # 检查约束是否与分支中的变量匹配
+        for c in constraints:
+            c_name = c.var_name
+            # var_name (追踪变量如 result) 不在条件约束中，但条件约束的变量（如 cmd）在分支中
+            # 所以：约束变量在 true 分支 + op== → 阻断 true 分支
+            #       约束变量在 false 分支 + op!= → 阻断 false 分支
+            if c.op in ('==', 'in') and c_name in true_names and c_name not in false_names:
+                logger.info("[AST][C] Ternary constraint BLOCKS: {} {} {} at line {}".format(
+                    c_name, c.op, c.value, lineno))
+                return (-1, 0)
+            if c.op == '!=' and c_name in false_names and c_name not in true_names:
+                logger.info("[AST][C] Ternary constraint BLOCKS: {} {} {} at line {}".format(
+                    c_name, c.op, c.value, lineno))
+                return (-1, 0)
+
+        # 不受约束，继续追踪两个分支
         for part in (consequence, alternative):
             if part:
                 result = _analyze_rhs_node(

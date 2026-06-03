@@ -497,8 +497,28 @@ def parameters_back(param_name, stmts, vul_lineno, file_path,
                         _trace_cache.put(file_path, param_name, vul_lineno, else_result)
                         return else_result
 
-        elif isinstance(stmt, (javalang.tree.ForStatement,
-                               javalang.tree.WhileStatement, javalang.tree.DoStatement)):
+        elif isinstance(stmt, (javalang.tree.WhileStatement, javalang.tree.DoStatement)):
+            block_stmts = _get_block_stmts(stmt)
+            # while 循环条件等值约束检查：如果 while 条件中 param_name 有 == 约束，且 sink 在 while 体内 → 阻断
+            if block_stmts and vul_lineno:
+                _vul_line = int(vul_lineno)
+                body_start = _get_stmt_line(block_stmts[0])
+                body_end = _get_stmt_line(block_stmts[-1])
+                if body_start and body_end and body_start <= _vul_line <= body_end:
+                    constraints = extract_constraints_from_java_expr(stmt.condition)
+                    for c in constraints:
+                        if c.var_name == param_name and c.op in ('==', '===', 'in'):
+                            logger.info("[AST][Java] While constraint BLOCKS param {}: {} {}".format(param_name, c.op, c.value))
+                            _trace_cache.put(file_path, param_name, vul_lineno, (-1, None, 0))
+                            return (-1, None, 0)
+            if block_stmts:
+                result = parameters_back(param_name, block_stmts, stmt_line, file_path,
+                                          repair_functions, controlled_params, depth + 1, max_depth)
+                if result[0] in (1, 2):
+                    _trace_cache.put(file_path, param_name, vul_lineno, result)
+                    return result
+
+        elif isinstance(stmt, javalang.tree.ForStatement):
             block_stmts = _get_block_stmts(stmt)
             if block_stmts:
                 result = parameters_back(param_name, block_stmts, stmt_line, file_path,
