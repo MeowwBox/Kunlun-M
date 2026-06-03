@@ -346,20 +346,17 @@ def _find_sink_branch_go(if_node, vul_lineno):
         return 'outside'
     vul_lineno = int(vul_lineno)
 
+    found_else = False
     for child in if_node.children:
+        if child.type == 'else':
+            found_else = True
+            continue
         if child.type == 'block':
-            # if 体
             if hasattr(child, 'start_point') and hasattr(child, 'end_point'):
                 if child.start_point[0] <= vul_lineno <= child.end_point[0]:
-                    return 'if'
-        elif child.type == 'else_clause':
-            for ec_child in child.children:
-                if ec_child.type == 'block':
-                    if hasattr(ec_child, 'start_point') and hasattr(ec_child, 'end_point'):
-                        if ec_child.start_point[0] <= vul_lineno <= ec_child.end_point[0]:
-                            return 'else'
-                elif ec_child.type == 'if_statement':
-                    return _find_sink_branch_go(ec_child, vul_lineno)
+                    return 'else' if found_else else 'if'
+        elif child.type == 'if_statement' and found_else:
+            return _find_sink_branch_go(child, vul_lineno)
 
     return 'outside'
 
@@ -802,10 +799,12 @@ def trace_go_stmt(var_name, stmt_node, file_path, vul_lineno, to_line,
     
     # if 语句
     elif stmt_node.type == 'if_statement':
-        # 提取 if 条件（tree-sitter if_statement 的第一个 expression 子节点）
+        # 提取 if 条件（Go tree-sitter: 条件是 if_statement 的直接子节点，
+        # 类型可能是 binary_expression / unary_expression / call_expression / parenthesized_expression 等）
         if_expr_node = None
         for child in stmt_node.children:
-            if child.type == 'expression':
+            if child.type in ('binary_expression', 'unary_expression', 'call_expression',
+                              'parenthesized_expression', 'identifier', 'expression'):
                 if_expr_node = child
                 break
         go_constraints = extract_constraints_from_go_expr(if_expr_node)
@@ -836,24 +835,27 @@ def trace_go_stmt(var_name, stmt_node, file_path, vul_lineno, to_line,
                     logger.info("[AST][Go] Branch constraint BLOCKS var {}: {} {}".format(var_name, c.op, c.value))
                     return (-1, 0)
             # 回溯 else 体
+            found_else = False
             for child in stmt_node.children:
-                if child.type == 'else_clause':
-                    for ec_child in child.children:
-                        if ec_child.type == 'block':
-                            result = _find_assignment_in_block(ec_child, var_name)
-                            if result:
-                                rhs_node, lineno = result
-                                return trace_go_expr(var_name, rhs_node, file_path, lineno, to_line,
-                                                     repair_functions, controlled_params, depth, max_depth,
-                                                     function_back_go_fn, trace_variable_fn)
-                        elif ec_child.type == 'if_statement':
-                            return trace_go_stmt(var_name, ec_child, file_path, vul_lineno, to_line,
-                                                repair_functions, controlled_params, depth, max_depth,
-                                                function_back_go_fn, trace_variable_fn)
+                if child.type == 'else':
+                    found_else = True
+                    continue
+                if found_else:
+                    if child.type == 'block':
+                        result = _find_assignment_in_block(child, var_name)
+                        if result:
+                            rhs_node, lineno = result
+                            return trace_go_expr(var_name, rhs_node, file_path, lineno, to_line,
+                                                 repair_functions, controlled_params, depth, max_depth,
+                                                 function_back_go_fn, trace_variable_fn)
+                    elif child.type == 'if_statement':
+                        return trace_go_stmt(var_name, child, file_path, vul_lineno, to_line,
+                                            repair_functions, controlled_params, depth, max_depth,
+                                            function_back_go_fn, trace_variable_fn)
                     break
 
         else:
-            # outside: 遍历所有分支
+            # outside: 遍历所有分支（if 体 + else 体）
             for child in stmt_node.children:
                 if child.type == 'block':
                     result = _find_assignment_in_block(child, var_name)
@@ -862,19 +864,10 @@ def trace_go_stmt(var_name, stmt_node, file_path, vul_lineno, to_line,
                         return trace_go_expr(var_name, rhs_node, file_path, lineno, to_line,
                                              repair_functions, controlled_params, depth, max_depth,
                                              function_back_go_fn, trace_variable_fn)
-                elif child.type == 'else_clause':
-                    for ec_child in child.children:
-                        if ec_child.type == 'block':
-                            result = _find_assignment_in_block(ec_child, var_name)
-                            if result:
-                                rhs_node, lineno = result
-                                return trace_go_expr(var_name, rhs_node, file_path, lineno, to_line,
-                                                     repair_functions, controlled_params, depth, max_depth,
-                                                     function_back_go_fn, trace_variable_fn)
-                        elif ec_child.type == 'if_statement':
-                            return trace_go_stmt(var_name, ec_child, file_path, vul_lineno, to_line,
-                                                repair_functions, controlled_params, depth, max_depth,
-                                                function_back_go_fn, trace_variable_fn)
+                elif child.type == 'if_statement':
+                    return trace_go_stmt(var_name, child, file_path, vul_lineno, to_line,
+                                        repair_functions, controlled_params, depth, max_depth,
+                                        function_back_go_fn, trace_variable_fn)
 
     # for 语句
     elif stmt_node.type == 'for_statement':
