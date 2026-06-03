@@ -1,5 +1,13 @@
 ## 更新日志
 - 2026-06-03
+  - **switch/case 分支约束追踪（PHP/JS/Java/Go 四语言）**
+    - PHP: 修复 phply `Default` 节点无 `expr` 属性导致 `AttributeError` 被静默吞掉的问题
+    - Java: 修复 javalang default case 的 `case` 属性为空列表（非 `None`）的判断
+    - Java: 修复 switch default case 未找到赋值时提前返回 `-1`，改为 fallthrough 继续搜索 switch 前的语句
+    - JS: 新增 `SwitchStatement` 分支约束追踪（sink 在非 default case 时阻断）
+    - Go: 修复 `trace_go_stmt` 中 switch 分支 `UnboundLocalError`（`lineno` 变量未定义），修正 AST 节点类型名称
+    - Go: `_search_in_switch` 增加对 `default_case` 的搜索
+    - 测试套件扩展至 39 个用例，全部通过（新增 8 个三元表达式 + 6 个 switch/case + 2 个 JS switch）
   - **分支约束端到端测试套件**
     - 新增 `tests/branch_constraint/` 目录，23 个端到端测试用例覆盖 PHP/Python/JS/Java/Go 5 种语言
     - 覆盖场景：== 约束阻断（误报消除）、无约束真阳性、else 分支真阳性、!= 约束不阻断、枚举约束
