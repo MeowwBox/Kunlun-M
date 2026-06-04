@@ -3194,6 +3194,154 @@ def _init_function_summaries(file_path):
         _summaries_initialized = True
 
 
+def find_sinks(sink_names, files):
+    """
+    AST-based sink 查找。遍历所有文件的 AST 节点，查找匹配的函数调用。
+    支持直接调用匹配和间接调用检测。
+
+    :param sink_names: list of SinkName(class_, method) from parse_sink_names()
+    :param files: 文件路径列表
+    :return: list of dict, 每项包含:
+        - 'file_path': 文件路径
+        - 'lineno': 行号
+        - 'node': AST 调用节点
+        - 'is_indirect': bool, 是否为间接调用
+        - 'callee_name': str, 被调用函数名/方法名
+        - 'class_name': str or None, 类名/对象名
+        - 'matched_sink': SinkName or None, 匹配到的 sink 定义
+        - 'callback_callee': Variable or None, 回调参数中的 callee
+    """
+    results = []
+
+    for file_path in files:
+        # 将文件路径规范化为 pretreatment 中使用的完整路径
+        file_path = ast_object.get_path(file_path)
+        if not file_path:
+            continue
+        all_nodes = ast_object.get_nodes(file_path)
+        if not all_nodes:
+            continue
+
+        call_count = 0
+        for node in all_nodes:
+            if not isinstance(node, _FUNCTION_CALL_TYPES):
+                continue
+
+            matched = _match_call_node(node, sink_names)
+            if matched:
+                results.append({
+                    'file_path': file_path,
+                    'lineno': node.lineno,
+                    'node': node,
+                    'is_indirect': matched['is_indirect'],
+                    'callee_name': matched['callee_name'],
+                    'class_name': matched['class_name'],
+                    'matched_sink': matched['matched_sink'],
+                    'callback_callee': matched['callback_callee'],
+                })
+
+    return results
+
+
+def _match_call_node(node, sink_names):
+    """
+    匹配单个调用节点与 sink_names 列表。
+
+    :param node: FunctionCall / MethodCall / StaticMethodCall 节点
+    :param sink_names: list of SinkName
+    :return: dict with match info, or None if no match
+    """
+    is_indirect = False
+    callee_name = None
+    class_name = None
+    callback_callee = None
+
+    if isinstance(node, php.FunctionCall):
+        if isinstance(node.name, str):
+            callee_name = node.name
+        elif isinstance(node.name, php.Variable):
+            is_indirect = True
+            callee_name = node.name.name
+
+    elif isinstance(node, php.MethodCall):
+        if isinstance(node.name, str):
+            callee_name = node.name
+        elif isinstance(node.name, php.Variable):
+            is_indirect = True
+            callee_name = node.name.name
+
+        obj = node.node
+        if isinstance(obj, php.Variable):
+            class_name = obj.name
+        elif hasattr(obj, 'name'):
+            class_name = obj.name
+
+    elif isinstance(node, php.StaticMethodCall):
+        callee_name = node.name
+        class_name = node.class_
+
+    else:
+        return None
+
+    if not callee_name:
+        return None
+
+    # 回调间接调用检测 (call_user_func($func, $arg) 等)
+    if not is_indirect and isinstance(node, php.FunctionCall) and isinstance(node.name, str):
+        callback_funcs = {'call_user_func', 'call_user_func_array', 'array_map',
+                          'usort', 'uasort', 'uksort', 'array_filter',
+                          'array_walk', 'array_walk_recursive',
+                          'register_shutdown_function', 'register_tick_function'}
+        if node.name in callback_funcs and node.params:
+            first_param = node.params[0]
+            param_expr = first_param.node if hasattr(first_param, 'node') else first_param
+            if isinstance(param_expr, php.Variable):
+                is_indirect = True
+                callback_callee = param_expr
+
+    # 匹配 sink_names
+    for sink in sink_names:
+        if is_indirect and not callback_callee:
+            # 纯间接调用 $func() 或 $obj->$method()
+            return {
+                'is_indirect': True,
+                'callee_name': callee_name,
+                'class_name': class_name,
+                'matched_sink': sink,
+                'callback_callee': None,
+            }
+
+        if callback_callee:
+            return {
+                'is_indirect': True,
+                'callee_name': callee_name,
+                'class_name': class_name,
+                'matched_sink': sink,
+                'callback_callee': callback_callee,
+            }
+
+        if callee_name == sink.method:
+            if sink.class_ is None:
+                return {
+                    'is_indirect': False,
+                    'callee_name': callee_name,
+                    'class_name': class_name,
+                    'matched_sink': sink,
+                    'callback_callee': None,
+                }
+            else:
+                if class_name and class_name == sink.class_:
+                    return {
+                        'is_indirect': False,
+                        'callee_name': callee_name,
+                        'class_name': class_name,
+                        'matched_sink': sink,
+                        'callback_callee': None,
+                    }
+
+    return None
+
+
 def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], controlled_params=[], svid=0):
     """
     开始检测函数

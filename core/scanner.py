@@ -20,10 +20,11 @@ import portalocker
 from core.rule import Rule
 from core.matcher import VulnerabilityMatcher as Core
 from core.rule_generator import NewCore
+from core.core_engine.php.parser import find_sinks as php_find_sinks
 from Kunlun_M import const
 from Kunlun_M.const import VulnerabilityResult
 from utils.utils import show_context
-from utils.file import FileParseAll
+from utils.file import FileParseAll, file_list_parse
 from utils.log import logger
 from utils.status import get_scan_id
 
@@ -405,6 +406,40 @@ class SingleRule(object):
                 logger.debug(traceback.format_exc())
                 return None
 
+            # AST-based sink finding for indirect call detection
+            try:
+                if hasattr(self.sr, 'match') and self.sr.match:
+                    from core.utils import parse_sink_names
+                    sink_names = parse_sink_names(self.sr.match)
+                    if sink_names:
+                        # self.files 是 dict 格式 {('.php', {'count': N, 'list': [paths]})}
+                        # 需要用 file_list_parse 提取实际文件路径列表
+                        scan_file_list = file_list_parse(self.files, language=self.lan)
+                        if scan_file_list:
+                            indirect_sinks = php_find_sinks(sink_names, scan_file_list)
+                            if indirect_sinks:
+                                for sink_info in indirect_sinks:
+                                    if sink_info['is_indirect']:
+                                        file_path = sink_info['file_path']
+                                        lineno = str(sink_info['lineno'])
+                                        callee = sink_info['callee_name']
+                                        matched_text = '{callee}()'.format(callee=callee)
+                                        indirect_result = {
+                                            'file_path': file_path,
+                                            'lineno': lineno,
+                                            'matched_text': matched_text,
+                                            'node': sink_info['node'],
+                                            'is_indirect': True,
+                                            'sink_info': sink_info,
+                                        }
+                                        if result is None:
+                                            result = []
+                                        if isinstance(result, list):
+                                            result.append(indirect_result)
+            except Exception as e:
+                logger.debug('find_sinks exception ({e})'.format(e=e))
+                logger.debug(traceback.format_exc())
+
         elif self.sr.match_mode == const.mm_regex_return_regex:
             # 回馈式正则匹配，将匹配到的内容返回，然后合入正则表达式
 
@@ -557,6 +592,42 @@ class SingleRule(object):
             return self.rule_vulnerabilities
 
         origin_vulnerabilities = origin_results
+
+        # 分离间接调用结果和直接调用结果
+        direct_results = []
+        indirect_results = []
+        if origin_vulnerabilities:
+            for ov in origin_vulnerabilities:
+                if isinstance(ov, dict) and ov.get('is_indirect'):
+                    indirect_results.append(ov)
+                else:
+                    direct_results.append(ov)
+
+        # 处理间接调用结果（任意函数调用检测）
+        for ir in indirect_results:
+            try:
+                file_path = ir['file_path']
+                lineno = ir['lineno']
+                matched_text = ir['matched_text']
+                vulnerability = VulnerabilityResult.from_match(
+                    (file_path, lineno, matched_text),
+                    svid=self.sr.svid,
+                    language=self.sr.language,
+                    rule_name=self.sr.vulnerability,
+                    author=self.sr.author
+                )
+                if vulnerability:
+                    vulnerability.analysis = "Arbitrary-function-call"
+                    vulnerability.chain = [("IndirectCall", matched_text, file_path, int(lineno))]
+                    self.rule_vulnerabilities.append(vulnerability)
+                    logger.debug('[CVI-{cvi}] [INDIRECT] Arbitrary function call: {call}'.format(
+                        cvi=self.sr.svid, call=matched_text))
+            except Exception as e:
+                logger.debug('indirect call exception ({e})'.format(e=e))
+                logger.debug(traceback.format_exc())
+
+        # 直接调用结果走正常流程
+        origin_vulnerabilities = direct_results
         for index, origin_vulnerability in enumerate(origin_vulnerabilities):
             logger.debug(
                 '[CVI-{cvi}] [ORIGIN] {line}'.format(cvi=self.sr.svid, line=": ".join(list(origin_vulnerability))))
