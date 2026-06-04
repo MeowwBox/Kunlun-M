@@ -87,6 +87,11 @@ class TraceCache:
         """清空运行时缓存（内置知识库不受影响）"""
         self._runtime_cache.clear()
 
+    def invalidate(self, file_path, var_name, lineno):
+        """删除指定缓存条目"""
+        key = self._make_key(file_path, var_name, lineno)
+        self._runtime_cache.pop(key, None)
+
     @property
     def size(self):
         """当前缓存条目数"""

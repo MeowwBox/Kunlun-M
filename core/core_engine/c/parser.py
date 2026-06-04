@@ -21,6 +21,7 @@ from typing import Optional, List, Dict, Set, Tuple, Any
 from utils.log import logger
 from core.pretreatment import ast_object as _ast_object_singleton
 from core.core_engine.trace_cache import TraceCache
+from core.core_engine.branch_constraint import BranchConstraint
 from core.core_engine.c.builtin_knowledge import lookup as lookup_builtin, KNOWLEDGE as _BUILTIN_KNOWLEDGE
 from core.core_engine.c.summary_generator import lookup_summary, _summary_registry
 from core.core_engine.function_summary import SummaryCacheManager
@@ -388,6 +389,436 @@ def _find_call_at_line(tree, lineno, func_name):
         return None
 
     return _search(tree.root_node)
+
+
+# ---------------------------------------------------------------------------
+# 分支约束追踪（if/else, switch/case）
+# ---------------------------------------------------------------------------
+
+def _extract_constraints_from_c_expr(cond_node):
+    """从 C 条件表达式中提取 BranchConstraint 列表。
+
+    支持的模式:
+    - x == value         -> BranchConstraint(x, ==, value)
+    - x != value         -> BranchConstraint(x, !=, value)
+    - strcmp(x, "str") == 0  -> BranchConstraint(x, ==, "str")
+    - strcmp(x, "str") != 0  -> BranchConstraint(x, !=, "str")
+    - !strcmp(x, "str")      -> BranchConstraint(x, ==, "str")
+    - x && y / x || y        -> 递归拆分
+    """
+    if cond_node is None:
+        return []
+
+    constraints = []
+    node_type = cond_node.type
+
+    if node_type == 'binary_expression':
+        children = cond_node.children
+        op_node = None
+        left_node = None
+        right_node = None
+        found_op = False
+        for child in children:
+            if child.type in ('==', '!=', '>=', '<=', '>', '<', '&&', '||'):
+                if not found_op:
+                    op_node = child
+                    found_op = True
+                continue
+            if not found_op and left_node is None:
+                left_node = child
+            elif found_op and right_node is None:
+                right_node = child
+
+        op_text = _node_text(op_node) if op_node else ''
+
+        if op_text == '&&':
+            if left_node:
+                constraints.extend(_extract_constraints_from_c_expr(left_node))
+            if right_node:
+                constraints.extend(_extract_constraints_from_c_expr(right_node))
+            return constraints
+
+        if op_text == '||':
+            or_constraints = []
+            if left_node:
+                or_constraints.extend(_extract_constraints_from_c_expr(left_node))
+            if right_node:
+                or_constraints.extend(_extract_constraints_from_c_expr(right_node))
+            # 同一变量的多个 == 值合并为 in 约束
+            from collections import defaultdict
+            eq_values = defaultdict(list)
+            other = []
+            for c in or_constraints:
+                if c.op == '==' and c.var_name:
+                    eq_values[c.var_name].append(c.value)
+                else:
+                    other.append(c)
+            for var_name, values in eq_values.items():
+                constraints.append(BranchConstraint(
+                    var_name=var_name, op='in',
+                    value=values if len(values) > 1 else values[0]))
+            constraints.extend(other)
+            return constraints
+
+        # strcmp(x, "str") == 0 / != 0 模式
+        if op_text in ('==', '!='):
+            if left_node and right_node:
+                strcmp_info = _extract_strcmp_constraint(left_node, right_node, op_text)
+                if strcmp_info:
+                    return [strcmp_info]
+                strcmp_info = _extract_strcmp_constraint(right_node, left_node, op_text)
+                if strcmp_info:
+                    return [strcmp_info]
+
+            # 普通比较: x == value / x != value
+            if op_text in ('==', '!='):
+                var_name = _get_c_var_name(left_node)
+                if var_name:
+                    value = _get_c_literal_value(right_node)
+                    constraints.append(BranchConstraint(var_name=var_name, op=op_text, value=value))
+
+        return constraints
+
+    if node_type == 'unary_expression':
+        if cond_node.children:
+            op_text = _node_text(cond_node.children[0])
+            if op_text == '!' and len(cond_node.children) > 1:
+                inner = cond_node.children[1]
+                # !strcmp(x, "str") -> strcmp == 0 的简写
+                inner_constraints = _extract_constraints_from_c_expr(inner)
+                if inner_constraints:
+                    constraints = [c.negate() for c in inner_constraints]
+                    return constraints
+        return constraints
+
+    if node_type == 'parenthesized_expression':
+        if cond_node.children and len(cond_node.children) >= 2:
+            return _extract_constraints_from_c_expr(cond_node.children[1])
+
+    return constraints
+
+
+def _extract_strcmp_constraint(call_node, literal_node, op_text):
+    """检查是否为 strcmp(x, "str") == 0 或 != 0 模式。
+
+    返回 BranchConstraint 或 None。
+    """
+    if call_node is None or call_node.type != 'call_expression':
+        return None
+    callee = _get_call_func_name(call_node)
+    if callee not in ('strcmp', 'strncmp', 'strcasecmp', 'strncasecmp', 'memcmp', 'bcmp'):
+        return None
+    args = _get_call_args_from_ast(call_node)
+    if len(args) < 2:
+        return None
+    # 判断哪边是变量哪边是字面量
+    var_name = _get_c_var_name(args[0])
+    value = None
+    if var_name:
+        value = _get_c_literal_value(args[1])
+    else:
+        var_name = _get_c_var_name(args[1])
+        if var_name:
+            value = _get_c_literal_value(args[0])
+    if not var_name or value is None:
+        return None
+    # strcmp 返回 0 表示相等
+    literal_val = _get_c_literal_value(literal_node)
+    if literal_val == 0:
+        return BranchConstraint(var_name=var_name, op=op_text, value=value)
+    if literal_val != 0:
+        neg_op = '!=' if op_text == '==' else '=='
+        return BranchConstraint(var_name=var_name, op=neg_op, value=value)
+    return None
+
+
+def _get_c_var_name(node):
+    """从 tree-sitter C 节点提取变量名。"""
+    if node is None:
+        return None
+    if node.type == 'identifier':
+        return _node_text(node)
+    if node.type == 'subscript_expression':
+        # arr[i] -> arr
+        array_node = node.child_by_field_name('argument') or (node.children[0] if node.children else None)
+        if array_node and array_node.type == 'identifier':
+            return _node_text(array_node)
+    return None
+
+
+def _collect_var_names_recursive(node, names):
+    """递归收集 AST 节点中所有 identifier 变量名（用于三元分支变量收集）。"""
+    if node is None:
+        return
+    if node.type == 'identifier':
+        name = _node_text(node)
+        if name:
+            names.add(name)
+        return
+    for child in node.children:
+        _collect_var_names_recursive(child, names)
+
+
+def _get_c_literal_value(node):
+    """从 tree-sitter C 节点提取字面量值。"""
+    if node is None:
+        return None
+    if node.type == 'number_literal':
+        text = _node_text(node).strip()
+        try:
+            if text.startswith('0x') or text.startswith('0X'):
+                return int(text, 16)
+            return int(text)
+        except (ValueError, TypeError):
+            try:
+                return float(text)
+            except (ValueError, TypeError):
+                return text
+    if node.type == 'string_literal':
+        text = _node_text(node)
+        if text.startswith('"') and text.endswith('"'):
+            return text[1:-1]
+        return text
+    if node.type == 'char_literal':
+        text = _node_text(node)
+        # 'x' -> x
+        if text.startswith("'") and text.endswith("'"):
+            return text[1:-1]
+        return text
+    if node.type == 'identifier' and _node_text(node) in ('NULL', 'nullptr'):
+        return None
+    if node.type == 'true':
+        return True
+    if node.type == 'false':
+        return False
+    return None
+
+
+def _check_sink_branch_constraints(tree, vul_lineno, var_name, func_body_node):
+    """检查 sink 所在的分支是否有约束阻断。
+
+    遍历函数体内的 if/switch 语句，判断 sink 是否在受约束的分支中。
+    返回 True 表示应阻断（返回 (-1, 0)），False 表示不阻断。
+    """
+    if not func_body_node:
+        return False
+
+    for child in func_body_node.children:
+        if child.type == 'if_statement':
+            result = _check_if_branch_constraint(child, vul_lineno, var_name)
+            if result is not None:
+                return result
+        elif child.type == 'switch_statement':
+            result = _check_switch_branch_constraint(child, vul_lineno, var_name)
+            if result is not None:
+                return result
+        elif child.type in ('while_statement', 'do_statement'):
+            result = _check_while_constraint(child, vul_lineno, var_name)
+            if result is not None:
+                return result
+        elif child.type == 'compound_statement':
+            # 嵌套的 compound_statement（如 for/while 循环体），递归检查
+            if _check_sink_branch_constraints(tree, vul_lineno, var_name, child):
+                return True
+
+    return False
+
+
+def _check_if_branch_constraint(if_node, vul_lineno, var_name):
+    """检查 if/else 分支约束。
+
+    tree-sitter C if_statement 结构:
+      if_statement
+        ├── "if"
+        ├── parenthesized_expression   ← 条件
+        ├── compound_statement         ← if body
+        └── else_clause                ← 可选
+             ├── "else"
+             ├── compound_statement    ← else body
+             └── if_statement          ← else if
+
+    返回 True（阻断）/ False（不阻断）/ None（vul_lineno 不在此 if 中）。
+    """
+    cond_node = None
+    if_body = None
+    else_body = None
+
+    for child in if_node.children:
+        if child.type == 'parenthesized_expression':
+            cond_node = child
+        elif child.type == 'compound_statement' and if_body is None:
+            if_body = child
+        elif child.type == 'else_clause':
+            for ec in child.children:
+                if ec.type == 'compound_statement':
+                    else_body = ec
+                elif ec.type == 'if_statement':
+                    # else if: 递归处理
+                    return _check_if_branch_constraint(ec, vul_lineno, var_name)
+
+    if cond_node is None:
+        return None
+
+    # 提取 if body 和 else body 的行范围
+    if_start = if_body.start_point[0] + 1 if if_body else None
+    if_end = if_body.end_point[0] + 1 if if_body else None
+    else_start = else_body.start_point[0] + 1 if else_body else None
+    else_end = else_body.end_point[0] + 1 if else_body else None
+
+    # 如果没有 else body，只用 if body 的行范围来判断
+    # vul_lineno 必须在 if 或 else 的范围内
+    in_if = if_start is not None and if_end is not None and if_start <= vul_lineno <= if_end
+    in_else = else_start is not None and else_end is not None and else_start <= vul_lineno <= else_end
+
+    if not in_if and not in_else:
+        return None
+
+    # 从条件表达式中提取内部表达式（去掉括号）
+    inner_cond = None
+    if cond_node.children and len(cond_node.children) >= 2:
+        inner_cond = cond_node.children[1]
+
+    constraints = _extract_constraints_from_c_expr(inner_cond)
+
+    # 检查约束是否匹配 var_name
+    for c in constraints:
+        if c.var_name != var_name:
+            continue
+        if in_if and c.op in ('==', 'in'):
+            logger.info("[AST][C] Branch constraint BLOCKS: if ({} {} {}) at line {}".format(
+                c.var_name, c.op, c.value, vul_lineno))
+            return True
+        if in_else and c.op in ('!=', 'not in'):
+            logger.info("[AST][C] Branch constraint BLOCKS: else ({} {} {}) at line {}".format(
+                c.var_name, c.op, c.value, vul_lineno))
+            return True
+
+    return False
+
+
+def _check_while_constraint(while_node, vul_lineno, var_name):
+    """检查 while 循环条件约束。
+
+    tree-sitter C while_statement 结构:
+      while_statement
+        ├── "while"
+        ├── parenthesized_expression   ← 条件
+        └── compound_statement         ← 循环体
+
+    tree-sitter C do_statement 结构:
+      do_statement
+        ├── "do"
+        ├── compound_statement         ← 循环体
+        ├── "while"
+        └── parenthesized_expression   ← 条件
+
+    如果 sink 在 while 体内，且条件中有 var_name 的等值约束 → 阻断。
+    返回 True（阻断）/ False（不阻断）/ None（vul_lineno 不在此 while 中）。
+    """
+    if not vul_lineno:
+        return None
+
+    vul_lineno = int(vul_lineno)
+
+    cond_node = None
+    body_node = None
+
+    for child in while_node.children:
+        if child.type == 'parenthesized_expression':
+            cond_node = child
+        elif child.type == 'compound_statement' and body_node is None:
+            body_node = child
+
+    if body_node is None:
+        return None
+
+    body_start = body_node.start_point[0] + 1
+    body_end = body_node.end_point[0] + 1
+
+    if not (body_start <= vul_lineno <= body_end):
+        return None
+
+    if cond_node is None:
+        return False
+
+    # 从条件表达式中提取内部表达式（去掉括号）
+    inner_cond = None
+    if cond_node.children and len(cond_node.children) >= 2:
+        inner_cond = cond_node.children[1]
+
+    constraints = _extract_constraints_from_c_expr(inner_cond)
+
+    for c in constraints:
+        if c.var_name == var_name and c.op in ('==', 'in'):
+            logger.info("[AST][C] While constraint BLOCKS: while ({} {} {}) at line {}".format(
+                c.var_name, c.op, c.value, vul_lineno))
+            return True
+
+    return False
+
+
+def _check_switch_branch_constraint(switch_node, vul_lineno, var_name):
+    """检查 switch/case 分支约束。
+
+    tree-sitter C switch_statement 结构:
+      switch_statement
+        ├── "switch"
+        ├── parenthesized_expression    ← switch 表达式
+        └── compound_statement         ← switch body
+             ├── case_statement         ← case 值
+             │    ├── "case"
+             │    ├── char_literal / number_literal
+             │    ├── ":"
+             │    └── ...               ← case body
+             └── case_statement         ← default
+                  ├── "default"
+                  ├── ":"
+                  └── ...
+
+    如果 sink 在非 default case 中 → 阻断（变量值被限定）。
+    如果在 default 中 → 不阻断。
+
+    返回 True（阻断）/ False（不阻断）/ None（vul_lineno 不在此 switch 中）。
+    """
+    switch_body = None
+    for child in switch_node.children:
+        if child.type == 'compound_statement':
+            switch_body = child
+            break
+
+    if switch_body is None:
+        return None
+
+    for case_node in switch_body.children:
+        if case_node.type != 'case_statement':
+            continue
+
+        case_start = case_node.start_point[0] + 1
+        case_end = case_node.end_point[0] + 1
+
+        if not (case_start <= vul_lineno <= case_end):
+            continue
+
+        # vul_lineno 在此 case 中
+        first_child = case_node.children[0] if case_node.children else None
+        first_text = _node_text(first_child) if first_child else ''
+
+        if first_text == 'default':
+            # default 分支不阻断
+            return False
+
+        # 非 default case: sink 在固定值分支中，阻断
+        case_value = None
+        for cc in case_node.children:
+            if cc.type in ('char_literal', 'number_literal', 'string_literal'):
+                case_value = _get_c_literal_value(cc)
+                break
+
+        logger.info("[AST][C] Branch constraint BLOCKS: switch case (value={}) at line {}".format(
+            case_value, vul_lineno))
+        return True
+
+    return None
 
 
 def _find_assignment_at_line(tree, lineno, var_name, to_line=None):
@@ -980,6 +1411,12 @@ def _trace_variable_in_lines_impl(file_path, var_name, from_line, to_line,
             # code=-1(不可控) 但赋值来源是 safe 函数（如 malloc）时，
             # 变量内容可能被后续写入覆盖，需继续检查 _find_call_with_var_as_arg
             if code in (1, 2):
+                # 分支约束检查：只在可控(code=1)时检查
+                if code == 1 and func_info:
+                    _, _, body_node, _, _ = func_info
+                    if _check_sink_branch_constraints(tree, to_line, var_name, body_node):
+                        logger.info("[AST][C] Branch constraint BLOCKS var {} at line {}".format(var_name, to_line))
+                        return (-1, 0)
                 return result
             if code == -1:
                 rhs_text = _node_text(rhs_node)
@@ -1182,8 +1619,37 @@ def _analyze_rhs_node(rhs_node, var_name, file_path, lineno, to_line,
 
     # conditional_expression (三元运算符 ? :)
     if node_type == "conditional_expression":
+        condition = rhs_node.child_by_field_name("condition")
         consequence = rhs_node.child_by_field_name("consequence")
         alternative = rhs_node.child_by_field_name("alternative")
+
+        # 提取三元条件约束
+        constraints = _extract_constraints_from_c_expr(condition)
+
+        # 收集 true/false 分支中的变量名
+        true_names = set()
+        false_names = set()
+        if consequence:
+            _collect_var_names_recursive(consequence, true_names)
+        if alternative:
+            _collect_var_names_recursive(alternative, false_names)
+
+        # 检查约束是否与分支中的变量匹配
+        for c in constraints:
+            c_name = c.var_name
+            # var_name (追踪变量如 result) 不在条件约束中，但条件约束的变量（如 cmd）在分支中
+            # 所以：约束变量在 true 分支 + op== → 阻断 true 分支
+            #       约束变量在 false 分支 + op!= → 阻断 false 分支
+            if c.op in ('==', 'in') and c_name in true_names and c_name not in false_names:
+                logger.info("[AST][C] Ternary constraint BLOCKS: {} {} {} at line {}".format(
+                    c_name, c.op, c.value, lineno))
+                return (-1, 0)
+            if c.op == '!=' and c_name in false_names and c_name not in true_names:
+                logger.info("[AST][C] Ternary constraint BLOCKS: {} {} {} at line {}".format(
+                    c_name, c.op, c.value, lineno))
+                return (-1, 0)
+
+        # 不受约束，继续追踪两个分支
         for part in (consequence, alternative):
             if part:
                 result = _analyze_rhs_node(
@@ -2154,6 +2620,14 @@ def scan_parser(rule_match, vul_lineno, file_path,
                 # 直接可控源
                 if _is_controllable_source(var_name, controlled_params):
                     logger.debug("[AST][C] Variable {} controllable".format(var_name))
+                    # 分支约束检查
+                    if ast_tree is not None:
+                        func_info = _find_enclosing_function(ast_tree, vul_lineno)
+                        if func_info:
+                            _, _, body_node, _, _ = func_info
+                            if _check_sink_branch_constraints(ast_tree, vul_lineno, var_name, body_node):
+                                logger.info("[AST][C] Branch constraint BLOCKS var {} at line {}".format(var_name, vul_lineno))
+                                continue
                     source_lineno = vul_lineno  # 默认
                     # 尝试找到更精确的 source 行号
                     _, sl = _trace_variable_in_lines(
@@ -2181,6 +2655,14 @@ def scan_parser(rule_match, vul_lineno, file_path,
                     repair_functions, controlled_params
                 )
                 if trace_code == 1:
+                    # 分支约束检查
+                    if ast_tree is not None:
+                        func_info = _find_enclosing_function(ast_tree, vul_lineno)
+                        if func_info:
+                            _, _, body_node, _, _ = func_info
+                            if _check_sink_branch_constraints(ast_tree, vul_lineno, var_name, body_node):
+                                logger.info("[AST][C] Branch constraint BLOCKS var {} at line {}".format(var_name, vul_lineno))
+                                continue
                     results.append({
                         "code": 1,
                         "vul_func": matched_func,

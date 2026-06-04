@@ -19,6 +19,7 @@ import traceback
 from utils.log import logger
 from core.pretreatment import ast_object as _ast_object_singleton
 from core.core_engine.trace_cache import TraceCache
+from core.core_engine.branch_constraint import BranchConstraint
 from core.core_engine.python.builtin_knowledge import lookup as lookup_builtin
 from core.core_engine.python.summary_generator import lookup_summary
 
@@ -344,10 +345,10 @@ def is_controllable(expr_str, controlled_params=None):
     for cp in controlled_params:
         if cp in expr_str:
             return True
-        # 特殊处理：可控源是 func() 形式，表达式是 func(...) 或纯 func 名
+        # 特殊处理：可控源是 func() 形式，匹配显式调用 func(...)
         if cp.endswith('()'):
             func_name = cp[:-2]
-            if expr_str == func_name or expr_str.startswith(func_name + '('):
+            if expr_str.startswith(func_name + '('):
                 return True
 
     return False
@@ -683,6 +684,106 @@ def _trace_in_stmts(param_name, stmts, vul_lineno, file_path,
 
     return -1, None, 0
 
+def _find_sink_branch_py(if_stmt, vul_lineno):
+    """判断 sink 行号位于 Python if/else 的哪个分支。返回 'if', 'else', 'outside'。"""
+    if not vul_lineno:
+        return 'outside'
+    vul_lineno = int(vul_lineno)
+
+    # if 体范围
+    if if_stmt.body and int(if_stmt.body[0].lineno) <= vul_lineno <= int(if_stmt.body[-1].lineno):
+        return 'if'
+
+    # else/elif 体范围
+    if if_stmt.orelse:
+        # elif: orelse 是 [If] 节点
+        if len(if_stmt.orelse) == 1 and isinstance(if_stmt.orelse[0], ast.If):
+            return _find_sink_branch_py(if_stmt.orelse[0], vul_lineno)
+        elif if_stmt.orelse and int(if_stmt.orelse[0].lineno) <= vul_lineno <= int(if_stmt.orelse[-1].lineno):
+            return 'else'
+
+    return 'outside'
+
+
+def extract_constraints_from_py_expr(expr):
+    """
+    从 Python 条件表达式中提取 BranchConstraint 列表。
+
+    使用标准库 ast 模块的节点类型：
+    - isinstance(x, type)    -> 类型约束（暂不提取）
+    - x is None / x is not None -> 等值约束
+    - x == value / x != value   -> 等值约束
+    - x in list              -> 成员约束（简化：提取变量名，op='in'）
+    - hasattr(x, attr)       -> 属性存在约束（暂不提取）
+    - x and y               -> AND：两个约束都要满足
+    - x or y                -> OR：忽略
+    - not expr              -> 取反
+    """
+    if expr is None:
+        return []
+
+    constraints = []
+
+    if isinstance(expr, ast.BoolOp):
+        if isinstance(expr.op, ast.And):
+            for val in expr.values:
+                constraints.extend(extract_constraints_from_py_expr(val))
+        elif isinstance(expr.op, ast.Or):
+            # x == "a" or x == "b" 等价于 x in ["a", "b"]
+            # 提取同一变量的枚举约束
+            or_constraints = []
+            for val in expr.values:
+                or_constraints.extend(extract_constraints_from_py_expr(val))
+            # 收集同一变量的所有 == 值
+            from collections import defaultdict
+            eq_values = defaultdict(list)
+            for c in or_constraints:
+                if c.op == '==' and c.var_name:
+                    eq_values[c.var_name].append(c.value)
+            for var_name, values in eq_values.items():
+                if values:
+                    constraints.append(BranchConstraint(
+                        var_name=var_name, op='in',
+                        value=values if len(values) > 1 else values[0]))
+        return constraints
+
+    if isinstance(expr, ast.UnaryOp) and isinstance(expr.op, ast.Not):
+        inner = extract_constraints_from_py_expr(expr.operand)
+        constraints = [c.negate() for c in inner]
+        return constraints
+
+    if isinstance(expr, ast.Compare):
+        left = _get_name(expr.left)
+        if left:
+            for op, comparator in zip(expr.ops, expr.comparators):
+                if isinstance(op, ast.Eq):
+                    value = _extract_py_literal(comparator)
+                    constraints.append(BranchConstraint(var_name=left, op='==', value=value))
+                elif isinstance(op, ast.NotEq):
+                    value = _extract_py_literal(comparator)
+                    constraints.append(BranchConstraint(var_name=left, op='!=', value=value))
+                elif isinstance(op, ast.Is):
+                    # x is None
+                    constraints.append(BranchConstraint(var_name=left, op='==', value=None))
+                elif isinstance(op, ast.IsNot):
+                    # x is not None
+                    constraints.append(BranchConstraint(var_name=left, op='!=', value=None))
+        return constraints
+
+    if isinstance(expr, ast.Call):
+        # isinstance(x, type) → 暂不提取（类型对可控性无直接影响）
+        # hasattr(x, attr) → 暂不提取
+        pass
+
+    return constraints
+
+
+def _extract_py_literal(node):
+    """从 Python AST 节点提取字面量值。"""
+    if isinstance(node, ast.Constant):
+        return node.value
+    return None
+
 
 def _trace_stmt(param_name, stmt, vul_lineno, file_path,
                  repair_functions, controlled_params,
@@ -733,19 +834,47 @@ def _trace_stmt(param_name, stmt, vul_lineno, file_path,
 
     # --- if 语句 ---
     elif isinstance(stmt, ast.If):
-        # 先搜 if 体
-        result = _trace_in_stmts(param_name, stmt.body, vul_lineno, file_path,
-                                  repair_functions, controlled_params,
-                                  visited_funcs, depth, tree, func_node)
-        if result and result[0] != -1:
-            return result
-        # 再搜 else/elif 体
-        if stmt.orelse:
-            result = _trace_in_stmts(param_name, stmt.orelse, vul_lineno, file_path,
+        # 1. 判断 sink 在哪个分支
+        sink_branch = _find_sink_branch_py(stmt, vul_lineno)
+        logger.debug("[AST][Python] sink_branch={} for param {} lineno {}".format(sink_branch, param_name, vul_lineno))
+
+        # 2. 提取当前分支的条件约束并确定分支体
+        if sink_branch == 'if':
+            constraints = extract_constraints_from_py_expr(stmt.test)
+            body_stmts = stmt.body
+        elif sink_branch == 'else':
+            constraints = [c.negate() for c in extract_constraints_from_py_expr(stmt.test)]
+            body_stmts = stmt.orelse if stmt.orelse else []
+        else:
+            # sink 在 if/else 之外 → 遍历所有分支找变量重赋值
+            result = _trace_in_stmts(param_name, stmt.body, vul_lineno, file_path,
                                       repair_functions, controlled_params,
                                       visited_funcs, depth, tree, func_node)
-            if result and result[0] != -1:
+            if result and result[0] in (1, 2, 3):
                 return result
+            if stmt.orelse:
+                result = _trace_in_stmts(param_name, stmt.orelse, vul_lineno, file_path,
+                                          repair_functions, controlled_params,
+                                          visited_funcs, depth, tree, func_node)
+                if result and result[0] in (1, 2, 3):
+                    return result
+            return None
+
+        # 3. 立即检查约束（仅在 sink 在具体分支内时执行）
+        for c in constraints:
+            if c.var_name == param_name and c.op in ('==', '===', 'in'):
+                logger.info("[AST][Python] Branch constraint BLOCKS param {}: {} {}".format(param_name, c.op, c.value))
+                return -1, None, 0
+
+        # 4. 不等约束不阻断，继续回溯分支体
+        result = _trace_in_stmts(param_name, body_stmts, vul_lineno, file_path,
+                                repair_functions, controlled_params,
+                                visited_funcs, depth, tree, func_node)
+        # 在分支体内找到了明确的追踪结果，返回
+        if result and result[0] in (1, 2, 4, 5):
+            return result
+        # 分支体内未找到赋值来源（code 3/-1），让外层 _trace_in_stmts 继续追踪更早语句
+        return None
 
     # --- for 循环 ---
     elif isinstance(stmt, ast.For):
@@ -762,8 +891,76 @@ def _trace_stmt(param_name, stmt, vul_lineno, file_path,
         if result and result[0] != -1:
             return result
 
+    # --- match/case (Python 3.10+) ---
+    if hasattr(ast, 'Match') and isinstance(stmt, ast.Match):
+        subject_name = _get_name(stmt.subject)
+
+        # 找到 sink 行号所在的 case
+        target_case = None
+        for case in stmt.cases:
+            if case.body and int(case.body[0].lineno) <= vul_lineno <= int(case.body[-1].end_lineno):
+                target_case = case
+                break
+
+        if target_case is not None:
+            pattern = target_case.pattern
+
+            # MatchValue(value=Constant(value=...)) — 固定值匹配
+            if hasattr(ast, 'MatchValue') and isinstance(pattern, ast.MatchValue):
+                if isinstance(pattern.value, ast.Constant) and subject_name == param_name:
+                    logger.info("[AST][Python] match/case MatchValue BLOCKS param {}: {} == {}".format(
+                        param_name, subject_name, pattern.value.value))
+                    return -1, None, 0
+
+            # MatchSingleton(value=True/False/None) — 类似 MatchValue
+            elif hasattr(ast, 'MatchSingleton') and isinstance(pattern, ast.MatchSingleton):
+                if subject_name == param_name:
+                    logger.info("[AST][Python] match/case MatchSingleton BLOCKS param {}: {} == {}".format(
+                        param_name, subject_name, pattern.value))
+                    return -1, None, 0
+
+            # MatchAs(pattern=None) — 通配符 _ → 不阻断
+            elif hasattr(ast, 'MatchAs') and isinstance(pattern, ast.MatchAs) and pattern.pattern is None:
+                pass
+
+            # 其他 pattern 类型 → 不阻断
+            else:
+                pass
+
+            # 继续在 case body 内回溯
+            result = _trace_in_stmts(param_name, target_case.body, vul_lineno, file_path,
+                                      repair_functions, controlled_params,
+                                      visited_funcs, depth, tree, func_node)
+            if result and result[0] in (1, 2, 4, 5):
+                return result
+            return None
+
+        else:
+            # sink 在 match 外或不在任何 case 中 → 遍历所有 case 的 body 搜索赋值
+            for case in stmt.cases:
+                result = _trace_in_stmts(param_name, case.body, vul_lineno, file_path,
+                                          repair_functions, controlled_params,
+                                          visited_funcs, depth, tree, func_node)
+                if result and result[0] in (1, 2, 3):
+                    return result
+            return None
+
     # --- while 循环 ---
     elif isinstance(stmt, ast.While):
+        # 1. 检查 sink 是否在 while 体内
+        sink_in_body = (stmt.body and
+                        int(stmt.body[0].lineno) <= vul_lineno <= int(stmt.body[-1].end_lineno))
+
+        # 2. 如果 sink 在循环体内，提取 while 条件约束并检查等值约束
+        if sink_in_body:
+            constraints = extract_constraints_from_py_expr(stmt.test)
+            for c in constraints:
+                if c.var_name == param_name and c.op in ('==', '===', 'in'):
+                    logger.info("[AST][Python] While constraint BLOCKS param {}: {} {} {}".format(
+                        param_name, c.var_name, c.op, c.value))
+                    return -1, None, 0
+
+        # 3. 继续在循环体内搜索
         result = _trace_in_stmts(param_name, stmt.body, vul_lineno, file_path,
                                   repair_functions, controlled_params,
                                   visited_funcs, depth, tree, func_node)
@@ -900,6 +1097,25 @@ def _trace_expr(param_name, expr, lineno, file_path,
                               visited_funcs, depth, tree)
         if result and result[0] in (1, 2):
             return result
+
+    # 6.5 三元表达式 (IfExp): result if cond else other
+    if isinstance(expr, ast.IfExp):
+        true_names = set()
+        false_names = set()
+        _collect_names(expr.body, true_names, 0)
+        _collect_names(expr.orelse, false_names, 0)
+        constraints = extract_constraints_from_py_expr(expr.test)
+        for c in constraints:
+            if c.op in ('==', '===', 'in'):
+                if c.var_name in true_names and c.var_name not in false_names:
+                    # 约束变量只在 true 分支 → true 路径中 var == fixed → 阻断
+                    logger.info("[AST][Python] Ternary constraint BLOCKS: {} {} {}".format(c.var_name, c.op, c.value))
+                    return -1, None, 0
+                elif c.var_name in false_names and c.var_name not in true_names:
+                    # 约束变量只在 false 分支 → false 路径中 var != fixed → 不阻断，追踪 false 分支
+                    return _trace_expr(param_name, expr.orelse, lineno, file_path,
+                                      repair_functions, controlled_params,
+                                      visited_funcs, depth, tree)
 
     # 7. 如果表达式包含变量名，继续反向追踪这些变量
     names = _collect_names(expr)
@@ -1506,6 +1722,10 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
                         # 继续处理下一个参数
                     elif code == 3:
                         scan_results.append({"code": 3, "chain": chain, "source": cp})
+                    elif code == -1:
+                        # 分支约束阻断：参数不可控
+                        scan_results.append({"code": -1, "chain": chain, "source": cp})
+                        break
                 else:
                     continue
                 break

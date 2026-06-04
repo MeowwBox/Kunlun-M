@@ -125,7 +125,7 @@ def _find_assignments(func_body) -> Dict[str, object]:
                             assignments[name] = rhs_exprs[i]
 
             elif child.type in (
-                "if_statement", "for_statement", "switch_statement",
+                "if_statement", "for_statement", "expression_switch_statement", "type_switch_statement",
                 "select_statement", "block", "statement_list",
             ):
                 _walk(child)
@@ -479,7 +479,7 @@ def _collect_returns(
             )
             result.extend(items)
         elif child.type in (
-            "if_statement", "for_statement", "switch_statement",
+            "if_statement", "for_statement", "expression_switch_statement", "type_switch_statement",
             "select_statement", "block", "statement_list",
             "expression_case", "default_case", "communication_case",
         ):

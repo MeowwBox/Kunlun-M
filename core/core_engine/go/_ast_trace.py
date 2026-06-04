@@ -8,6 +8,7 @@ Go AST 纯追踪引擎 — 基于 tree-sitter 的污点分析
 
 import re
 from utils.log import logger
+from core.core_engine.branch_constraint import BranchConstraint
 from core.core_engine.go.builtin_knowledge import lookup as lookup_builtin
 
 
@@ -19,7 +20,7 @@ ASSIGNMENT_TYPES = ('short_var_declaration', 'assignment_statement', 'var_declar
 # 语句类型
 STATEMENT_TYPES = (
     'short_var_declaration', 'assignment_statement', 'var_declaration',
-    'if_statement', 'for_statement', 'switch_statement', 'select_statement',
+    'if_statement', 'for_statement', 'expression_switch_statement', 'type_switch_statement', 'select_statement',
     'return_statement', 'expression_statement', 'block',
     'defer_statement', 'go_statement', 'send_statement',
     'inc_statement', 'dec_statement',
@@ -208,7 +209,7 @@ def _find_assignment_in_block(block_node, var_name):
             result = _search_in_for(stmt, var_name)
             if result:
                 return result
-        elif stmt.type == 'switch_statement':
+        elif stmt.type in ('expression_switch_statement', 'type_switch_statement'):
             result = _search_in_switch(stmt, var_name)
             if result:
                 return result
@@ -330,7 +331,7 @@ def _search_in_for(for_node, var_name):
 def _search_in_switch(switch_node, var_name):
     """在 switch 语句中搜索赋值"""
     for child in switch_node.children:
-        if child.type == 'expression_case' or child.type == 'type_case':
+        if child.type in ('expression_case', 'type_case', 'default_case'):
             for cc in child.children:
                 if cc.type == 'block':
                     result = _find_assignment_in_block(cc, var_name)
@@ -339,14 +340,204 @@ def _search_in_switch(switch_node, var_name):
     return None
 
 
+def _find_sink_branch_go(if_node, vul_lineno):
+    """判断 sink 在 Go if/else 的哪个分支"""
+    if not vul_lineno:
+        return 'outside'
+    vul_lineno = int(vul_lineno)
+
+    found_else = False
+    for child in if_node.children:
+        if child.type == 'else':
+            found_else = True
+            continue
+        if child.type == 'block':
+            if hasattr(child, 'start_point') and hasattr(child, 'end_point'):
+                if child.start_point[0] <= vul_lineno <= child.end_point[0]:
+                    return 'else' if found_else else 'if'
+        elif child.type == 'if_statement' and found_else:
+            return _find_sink_branch_go(child, vul_lineno)
+
+    return 'outside'
+
+
+def extract_constraints_from_go_expr(expr_node):
+    """
+    从 Go if 条件表达式中提取 BranchConstraint 列表。
+
+    tree-sitter Go AST:
+    - x == value       -> binary_expression(op='==', left=identifier, right=literal/identifier)
+    - x != nil         -> binary_expression(op='!=', left=identifier, right=nil)
+    - x != ""           -> binary_expression(op='!=', left=identifier, right=interpreted_string_literal)
+    - len(x) > 0        -> binary_expression(op='>', left=call_expression, right=int_literal)
+    - x && y            -> binary_expression(op='&&')  注意：tree-sitter Go 把逻辑运算也映射为 binary_expression
+    - x || y            -> binary_expression(op='||')
+    - !expr             -> unary_expression(op='!')
+    """
+    if expr_node is None:
+        return []
+
+    constraints = []
+    node_type = expr_node.type if hasattr(expr_node, 'type') else ''
+
+    # Go tree-sitter 中 && 和 || 是 binary_expression
+    if node_type == 'binary_expression':
+        # 获取操作符
+        op_text = ''
+        for child in expr_node.children:
+            if child.type not in ('identifier', 'literal', 'nil', 'interpreted_string_literal',
+                                  'raw_string_literal', 'int_literal', 'float_literal',
+                                  'call_expression', 'parenthesized_expression',
+                                  'unary_expression', 'selector_expression',
+                                  'composite_literal', 'index_expression',
+                                  'type_assertion', 'slice_expression',
+                                  'qualified_type', 'array_type',
+                                  'binary_expression'):
+                op_text = _get_node_text(child)
+                break
+
+        if op_text == '&&':
+            # AND: 分别提取左右
+            children = expr_node.children
+            left_node = None
+            right_node = None
+            found_op = False
+            for child in children:
+                if _get_node_text(child) == '&&':
+                    found_op = True
+                    continue
+                if not found_op and left_node is None:
+                    left_node = child
+                elif found_op and right_node is None:
+                    right_node = child
+            if left_node:
+                constraints.extend(extract_constraints_from_go_expr(left_node))
+            if right_node:
+                constraints.extend(extract_constraints_from_go_expr(right_node))
+            return constraints
+
+        if op_text == '||':
+            # OR: x == "a" || x == "b" → 收集同一变量的枚举约束
+            children = expr_node.children
+            left_node = None
+            right_node = None
+            found_op = False
+            for child in children:
+                if _get_node_text(child) == '||':
+                    found_op = True
+                    continue
+                if not found_op and left_node is None:
+                    left_node = child
+                elif found_op and right_node is None:
+                    right_node = child
+            or_constraints = []
+            if left_node:
+                or_constraints.extend(extract_constraints_from_go_expr(left_node))
+            if right_node:
+                or_constraints.extend(extract_constraints_from_go_expr(right_node))
+            # 收集同一变量的所有 == 值
+            from collections import defaultdict
+            eq_values = defaultdict(list)
+            for c in or_constraints:
+                if c.op == '==' and c.var_name:
+                    eq_values[c.var_name].append(c.value)
+            for var_name, values in eq_values.items():
+                if values:
+                    constraints.append(BranchConstraint(
+                        var_name=var_name, op='in',
+                        value=values if len(values) > 1 else values[0]))
+            return constraints
+
+        # 比较运算
+        if op_text in ('==', '!=', '>=', '<=', '>', '<'):
+            children = expr_node.children
+            left_node = None
+            right_node = None
+            found_op = False
+            for child in children:
+                if _get_node_text(child) == op_text:
+                    found_op = True
+                    continue
+                if not found_op and left_node is None:
+                    left_node = child
+                elif found_op and right_node is None:
+                    right_node = child
+            var_name = _get_go_var_name(left_node)
+            if var_name:
+                value = _get_go_literal_value(right_node)
+                constraints.append(BranchConstraint(var_name=var_name, op=op_text, value=value))
+        return constraints
+
+    if node_type == 'unary_expression':
+        op_text = _get_node_text(expr_node.children[0]) if expr_node.children else ''
+        if op_text == '!':
+            inner = expr_node.children[1] if len(expr_node.children) > 1 else None
+            if inner:
+                inner_constraints = extract_constraints_from_go_expr(inner)
+                constraints = [c.negate() for c in inner_constraints]
+        return constraints
+
+    return constraints
+
+
+def _get_go_var_name(node):
+    """从 tree-sitter 节点提取变量名（字符串形式）。"""
+    if node is None:
+        return None
+    if hasattr(node, 'type'):
+        if node.type == 'identifier':
+            return _get_node_text(node)
+        if node.type == 'selector_expression':
+            # x.Method 或 pkg.Var
+            obj = node.children[0] if node.children else None
+            sel = node.children[2] if len(node.children) > 2 else None
+            obj_name = _get_go_var_name(obj) if obj else ''
+            sel_name = _get_go_var_name(sel) if sel else ''
+            if obj_name and sel_name:
+                return f"{obj_name}.{sel_name}"
+    return None
+
+
+def _get_go_literal_value(node):
+    """从 tree-sitter 节点提取字面量值。"""
+    if node is None:
+        return None
+    if hasattr(node, 'type'):
+        if node.type == 'nil':
+            return None
+        if node.type in ('int_literal', 'float_literal'):
+            text = _get_node_text(node).strip()
+            try:
+                if '.' in text:
+                    return float(text)
+                return int(text)
+            except (ValueError, TypeError):
+                return text
+        if node.type in ('interpreted_string_literal', 'raw_string_literal'):
+            text = _get_node_text(node)
+            # 去除引号
+            if text.startswith('"') and text.endswith('"'):
+                return text[1:-1]
+            if text.startswith('`') and text.endswith('`'):
+                return text[1:-1]
+            return text
+        if node.type == 'true':
+            return True
+        if node.type == 'false':
+            return False
+        if node.type == 'identifier' and _get_node_text(node) == 'nil':
+            return None
+    return None
+
+
 def trace_go_expr(var_name, expr_node, file_path, lineno, to_line,
                   repair_functions, controlled_params, depth, max_depth,
                   function_back_go_fn, trace_variable_fn):
     """
     追踪 Go 表达式节点的来源（纯 AST 版本）
-    
+
     参考 Python 引擎的 _trace_expr 模式，按节点类型分派。
-    
+
     返回: (code, source_lineno) 元组
         code: 1 (可控), 2 (已修复), 3 (未确认), -1 (不可控)
         source_lineno: source 赋值行号（0 表示无行号）
@@ -608,37 +799,105 @@ def trace_go_stmt(var_name, stmt_node, file_path, vul_lineno, to_line,
     
     # if 语句
     elif stmt_node.type == 'if_statement':
-        # 搜索 if body
+        # 提取 if 条件（Go tree-sitter: 条件是 if_statement 的直接子节点，
+        # 类型可能是 binary_expression / unary_expression / call_expression / parenthesized_expression 等）
+        if_expr_node = None
         for child in stmt_node.children:
-            if child.type == 'block':
-                result = _find_assignment_in_block(child, var_name)
-                if result:
-                    rhs_node, lineno = result
-                    return trace_go_expr(
-                        var_name, rhs_node, file_path, lineno, to_line,
-                        repair_functions, controlled_params, depth, max_depth,
-                        function_back_go_fn, trace_variable_fn
-                    )
-            elif child.type == 'else_clause':
-                for ec_child in child.children:
-                    if ec_child.type == 'block':
-                        result = _find_assignment_in_block(ec_child, var_name)
+            if child.type in ('binary_expression', 'unary_expression', 'call_expression',
+                              'parenthesized_expression', 'identifier', 'expression'):
+                if_expr_node = child
+                break
+        go_constraints = extract_constraints_from_go_expr(if_expr_node)
+
+        sink_branch = _find_sink_branch_go(stmt_node, vul_lineno)
+        logger.debug("[AST][Go] sink_branch={} for var {} lineno {}".format(sink_branch, var_name, vul_lineno))
+
+        if sink_branch == 'if':
+            for c in go_constraints:
+                if c.var_name == var_name and c.op in ('==', '===', 'in'):
+                    logger.info("[AST][Go] Branch constraint BLOCKS var {}: {} {}".format(var_name, c.op, c.value))
+                    return (-1, 0)
+            # 回溯 if 体
+            for child in stmt_node.children:
+                if child.type == 'block':
+                    result = _find_assignment_in_block(child, var_name)
+                    if result:
+                        rhs_node, lineno = result
+                        return trace_go_expr(var_name, rhs_node, file_path, lineno, to_line,
+                                             repair_functions, controlled_params, depth, max_depth,
+                                             function_back_go_fn, trace_variable_fn)
+                    break
+
+        elif sink_branch == 'else':
+            else_constraints = [c.negate() for c in go_constraints]
+            for c in else_constraints:
+                if c.var_name == var_name and c.op in ('==', '===', 'in'):
+                    logger.info("[AST][Go] Branch constraint BLOCKS var {}: {} {}".format(var_name, c.op, c.value))
+                    return (-1, 0)
+            # 回溯 else 体
+            found_else = False
+            for child in stmt_node.children:
+                if child.type == 'else':
+                    found_else = True
+                    continue
+                if found_else:
+                    if child.type == 'block':
+                        result = _find_assignment_in_block(child, var_name)
                         if result:
                             rhs_node, lineno = result
-                            return trace_go_expr(
-                                var_name, rhs_node, file_path, lineno, to_line,
-                                repair_functions, controlled_params, depth, max_depth,
-                                function_back_go_fn, trace_variable_fn
-                            )
-                    elif ec_child.type == 'if_statement':
-                        return trace_go_stmt(
-                            var_name, ec_child, file_path, vul_lineno, to_line,
-                            repair_functions, controlled_params, depth, max_depth,
-                            function_back_go_fn, trace_variable_fn
-                        )
-    
+                            return trace_go_expr(var_name, rhs_node, file_path, lineno, to_line,
+                                                 repair_functions, controlled_params, depth, max_depth,
+                                                 function_back_go_fn, trace_variable_fn)
+                    elif child.type == 'if_statement':
+                        return trace_go_stmt(var_name, child, file_path, vul_lineno, to_line,
+                                            repair_functions, controlled_params, depth, max_depth,
+                                            function_back_go_fn, trace_variable_fn)
+                    break
+
+        else:
+            # outside: 遍历所有分支（if 体 + else 体）
+            for child in stmt_node.children:
+                if child.type == 'block':
+                    result = _find_assignment_in_block(child, var_name)
+                    if result:
+                        rhs_node, lineno = result
+                        return trace_go_expr(var_name, rhs_node, file_path, lineno, to_line,
+                                             repair_functions, controlled_params, depth, max_depth,
+                                             function_back_go_fn, trace_variable_fn)
+                elif child.type == 'if_statement':
+                    return trace_go_stmt(var_name, child, file_path, vul_lineno, to_line,
+                                        repair_functions, controlled_params, depth, max_depth,
+                                        function_back_go_fn, trace_variable_fn)
+
     # for 语句
     elif stmt_node.type == 'for_statement':
+        # 检测是否为 while 形式的 for（有 condition 但没有 init/update）
+        _is_while_form = True
+        _for_condition = None
+        _for_block = None
+        for child in stmt_node.children:
+            if child.type == ';':
+                _is_while_form = False
+            elif child.type == 'range_clause':
+                _is_while_form = False
+            elif child.type == 'block':
+                _for_block = child
+            elif child.type != 'for':
+                if _for_condition is None:
+                    _for_condition = child
+
+        # while 形式的 for 条件等值约束检查：如果条件中 var_name 有 == 约束，且 sink 在 for 体内 → 阻断
+        if _is_while_form and _for_condition and _for_block and vul_lineno:
+            target_line = int(vul_lineno)
+            block_start = _for_block.start_point[0] + 1
+            block_end = _for_block.end_point[0] + 1
+            if block_start <= target_line <= block_end:
+                constraints = extract_constraints_from_go_expr(_for_condition)
+                for c in constraints:
+                    if c.var_name == var_name and c.op in ('==', '===', 'in'):
+                        logger.info("[AST][Go] While constraint BLOCKS var {}: {} {}".format(var_name, c.op, c.value))
+                        return (-1, 0)
+
         for child in stmt_node.children:
             if child.type == 'block':
                 result = _find_assignment_in_block(child, var_name)
@@ -659,9 +918,31 @@ def trace_go_stmt(var_name, stmt_node, file_path, vul_lineno, to_line,
                         repair_functions, controlled_params, depth, max_depth,
                         function_back_go_fn, trace_variable_fn
                     )
-    
-    # switch 语句
-    elif stmt_node.type == 'switch_statement':
+
+    # switch 语句 (expression_switch_statement)
+    elif stmt_node.type == 'expression_switch_statement' or stmt_node.type == 'type_switch_statement':
+        # switch/case 分支约束追踪
+        sink_in_case = False
+        sink_case_is_default = False
+        target_line = int(vul_lineno) if vul_lineno else 0
+
+        for child in stmt_node.children:
+            if child.type in ('expression_case', 'type_case', 'default_case'):
+                case_start = child.start_point[0] + 1
+                case_end = child.end_point[0] + 1
+                if target_line and case_start <= target_line <= case_end:
+                    if child.type == 'default_case':
+                        sink_case_is_default = True
+                    else:
+                        sink_in_case = True
+                    break
+
+        if sink_in_case:
+            # sink 在非 default case 中 → switch expr == case_value → 阻断
+            logger.info("[AST][Go] Switch constraint BLOCKS: sink in non-default case (line {})".format(lineno))
+            return (-1, None, 0)
+
+        # default case 或 sink 不在 switch 中 → 搜索赋值并回溯
         result = _search_in_switch(stmt_node, var_name)
         if result:
             rhs_node, lineno = result

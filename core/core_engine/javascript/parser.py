@@ -18,6 +18,7 @@ from core.pretreatment import ast_object
 
 from core.core_engine.javascript.builtin_knowledge import KNOWLEDGE as JS_BUILTIN_KNOWLEDGE
 from core.core_engine.trace_cache import TraceCache
+from core.core_engine.branch_constraint import BranchConstraint
 from core.core_engine.javascript.builtin_knowledge import lookup as lookup_builtin
 from core.core_engine.javascript.summary_generator import lookup_summary
 
@@ -1050,6 +1051,127 @@ def function_call_back(param, nodes, function_params, file_path=None, isback=Fal
 
     return is_co, cp, expr_lineno
 
+def _find_sink_branch_js(if_node, lineno):
+    """判断 sink 行号位于 JS if/else 的哪个分支。返回 'if', 'else', 'outside'。"""
+    if not lineno:
+        return 'outside'
+    lineno = int(lineno)
+
+    # if 体范围
+    if_body = if_node.consequent
+    if if_body.type == "BlockStatement":
+        if_nodes = if_body.body
+    else:
+        if_nodes = [if_body]
+    if if_nodes and int(if_nodes[0].loc.start.line) <= lineno <= int(if_nodes[-1].loc.end.line):
+        return 'if'
+
+    # else 体范围
+    if if_node.alternate:
+        alt = if_node.alternate
+        if hasattr(alt, "type"):
+            if alt.type == "IfStatement":
+                return _find_sink_branch_js(alt, lineno)
+            elif alt.type == "BlockStatement":
+                else_nodes = alt.body
+            else:
+                else_nodes = [alt]
+            if else_nodes and int(else_nodes[0].loc.start.line) <= lineno <= int(else_nodes[-1].loc.end.line):
+                return 'else'
+
+    return 'outside'
+
+
+def extract_constraints_from_js_expr(expr):
+    """
+    从 JS 条件表达式中提取 BranchConstraint 列表。
+
+    esprima AST 节点是字典格式：
+    - typeof x === "string"  -> BinaryExpression(op='===', left=UnaryExpression, right=Literal)
+    - x === value            -> BinaryExpression(op='===')
+    - x !== null             -> BinaryExpression(op='!==')
+    - Array.isArray(x)       -> CallExpression
+    - !expr                  -> UnaryExpression(op='!')
+    - x && y                 -> LogicalExpression(op='&&')
+    - x || y                 -> LogicalExpression(op='||')
+    """
+    if expr is None or not isinstance(expr, dict):
+        return []
+
+    constraints = []
+    node_type = expr.get('type', '')
+
+    if node_type == 'LogicalExpression' or (node_type == 'BinaryExpression' and expr.get('operator') in ('&&', '||')):
+        op = expr.get('operator', '')
+        if op == '&&':
+            left = extract_constraints_from_js_expr(expr.get('left'))
+            right = extract_constraints_from_js_expr(expr.get('right'))
+            constraints = left + right
+        elif op == '||':
+            # '||' 枚举：a === 'x' || a === 'y' → in 约束
+            left = extract_constraints_from_js_expr(expr.get('left'))
+            right = extract_constraints_from_js_expr(expr.get('right'))
+            # 检查是否为枚举模式（同一变量，不同值）
+            left_var = left[0].var_name if left else None
+            right_var = right[0].var_name if right else None
+            if left_var and right_var and left_var == right_var:
+                values = []
+                for c in left + right:
+                    if c.op in ('==', '==='):
+                        values.append(c.value)
+                if len(values) == len(left + right) and values:
+                    constraints.append(BranchConstraint(var_name=left_var, op='in', value=values))
+            else:
+                constraints = left + right
+
+    if node_type == 'UnaryExpression' and expr.get('operator') == '!':
+        inner = extract_constraints_from_js_expr(expr.get('argument'))
+        constraints = [c.negate() for c in inner]
+        return constraints
+
+    if node_type == 'BinaryExpression':
+        op = expr.get('operator', '')
+        if op in ('==', '===', '!=', '!=='):
+            left = expr.get('left', {})
+            var_name = _extract_js_var_name(left)
+            if var_name:
+                value = _extract_js_literal(expr.get('right', {}))
+                constraints.append(BranchConstraint(var_name=var_name, op=op, value=value))
+        return constraints
+
+    return constraints
+
+
+def _extract_js_var_name(node):
+    """从 JS AST 节点提取变量名（字符串形式）。"""
+    if not isinstance(node, dict):
+        return None
+    node_type = node.get('type', '')
+    if node_type == 'Identifier':
+        return node.get('name')
+    if node_type == 'MemberExpression':
+        # 如 location.hash
+        obj_name = _extract_js_var_name(node.get('object', {}))
+        prop = node.get('property', {})
+        prop_name = prop.get('name') if isinstance(prop, dict) else None
+        if obj_name and prop_name:
+            return f"{obj_name}.{prop_name}"
+    return None
+
+
+def _extract_js_literal(node):
+    """从 JS AST 节点提取字面量值。"""
+    if not isinstance(node, dict):
+        return None
+    node_type = node.get('type', '')
+    if node_type == 'Literal' or node_type == 'StringLiteral':
+        return node.get('value')
+    if node_type == 'Identifier' and node.get('name') == 'null':
+        return None
+    if node_type == 'Identifier' and node.get('name') == 'undefined':
+        return '__undefined__'
+    return None
+
 
 def parameters_back(param, nodes, function_params=None, lineno=0,
                     function_flag=0, vul_function=None, file_path=None,
@@ -1179,7 +1301,7 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
                 # 获取右值
                 param_expr = node.init
                 param_expr_name = get_member_data(param_expr)
-                expr_lineno = node.init.loc.start.line if param_expr else 0
+                expr_lineno = node.init.loc.start.line if param_expr and hasattr(param_expr, 'loc') and param_expr.loc else 0
 
                 # log
                 logger.debug(
@@ -1193,6 +1315,30 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
 
                 if is_co == 1:
                     return is_co, cp, expr_lineno
+
+                # 三元运算符 (ConditionalExpression) 分支约束追踪
+                # 必须在 isback 检查之前执行，否则 isback=True 时会跳过约束分析直接返回
+                if hasattr(param_expr, "type") and param_expr.type == "ConditionalExpression":
+                    true_names = set()
+                    _collect_js_var_names(param_expr.consequent, true_names)
+                    false_names = set()
+                    _collect_js_var_names(param_expr.alternate, false_names)
+                    test_expr = param_expr.test.toDict() if hasattr(param_expr.test, 'toDict') else param_expr.test
+                    constraints = extract_constraints_from_js_expr(test_expr)
+                    for c in constraints:
+                        if c.op in ('==', '===', 'in'):
+                            if c.var_name in true_names and c.var_name not in false_names:
+                                # 约束变量只在 true 分支 → true 路径中 var == fixed → 阻断
+                                logger.info("[AST] Ternary constraint BLOCKS: {} {} {}".format(c.var_name, c.op, c.value))
+                                return -1, param, 0
+                            elif c.var_name in false_names and c.var_name not in true_names:
+                                # 约束变量只在 false 分支 → false 路径中 var != fixed → 不阻断，追踪 false 分支
+                                param = get_member_data(param_expr.alternate)
+                                is_co, cp, expr_lineno = parameters_back(param, nodes[:-1], function_params, lineno,
+                                                                         function_flag=0, vul_function=vul_function,
+                                                                         file_path=file_path,
+                                                                         isback=True, method_name=method_name)
+                                return is_co, cp, expr_lineno
 
                 if isback is True:
                     return is_co, cp, expr_lineno
@@ -1569,11 +1715,11 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
             scan_chain.append(('Function', code, file_path, function_lineno))
 
             for function_node in function_body:
-                if function_node is not None and function_node.loc.end.line <= int(lineno):
+                if function_node is not None and int(function_lineno) <= function_node.loc.start.line <= int(lineno):
                     vul_nodes.append(function_node)
 
             if len(vul_nodes) > 0:
-                is_co, cp, expr_lineno = parameters_back(param, vul_nodes, function_params, function_lineno,
+                is_co, cp, expr_lineno = parameters_back(param, vul_nodes, function_params, lineno,
                                                          function_flag=1, vul_function=vul_function,
                                                          file_path=file_path,
                                                          isback=isback, method_name=method_name)
@@ -1634,34 +1780,137 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
             logger.debug(
                 "[AST] param {} line {} in if/else, start ast in if/else".format(param_name, node.loc.start.line))
 
-            if_condition = node.test
-            if_body = node.consequent
+            # 1. 判断 sink 在哪个分支
+            sink_branch = _find_sink_branch_js(node, lineno)
+            logger.debug("[AST] sink_branch={} for param {} lineno {}".format(sink_branch, param_name, lineno))
 
-            if if_body.type != "BlockStatement":
-                if_body = [if_body]
-
-            is_co, cp, expr_lineno = parameters_back(param, if_body, function_params, lineno,
-                                                     function_flag=function_flag, vul_function=vul_function,
-                                                     file_path=file_path,
-                                                     isback=isback, method_name=method_name)
-
-            if is_co != 1 and node.alternate:
+            # 2. 提取当前分支的条件约束并确定分支体
+            # esprima AST 节点是自定义对象，需转为 dict 供约束提取使用
+            test_expr = node.test.toDict() if hasattr(node.test, 'toDict') else node.test
+            if sink_branch == 'if':
+                constraints = extract_constraints_from_js_expr(test_expr)
+                if_body = node.consequent
+                if if_body.type != "BlockStatement":
+                    if_body = [if_body]
+                body_nodes = if_body
+            elif sink_branch == 'else':
+                constraints = [c.negate() for c in extract_constraints_from_js_expr(test_expr)]
                 else_body = node.alternate
-
                 if hasattr(else_body, "type") and else_body.type == "IfStatement":
                     else_body = [else_body]
-
-                is_co, cp, expr_lineno = parameters_back(param, else_body, function_params, lineno,
+                body_nodes = else_body if else_body else []
+            else:
+                # sink 在 if/else 之外 → 遍历所有分支找变量重赋值
+                if_body = node.consequent
+                if if_body.type != "BlockStatement":
+                    if_body = [if_body]
+                is_co, cp, expr_lineno = parameters_back(param, if_body, function_params, lineno,
                                                          function_flag=function_flag, vul_function=vul_function,
                                                          file_path=file_path,
                                                          isback=isback, method_name=method_name)
+                if is_co != 1 and node.alternate:
+                    else_body = node.alternate
+                    if hasattr(else_body, "type") and else_body.type == "IfStatement":
+                        else_body = [else_body]
+                    is_co, cp, expr_lineno = parameters_back(param, else_body, function_params, lineno,
+                                                             function_flag=function_flag, vul_function=vul_function,
+                                                             file_path=file_path,
+                                                             isback=isback, method_name=method_name)
+
+            # 3. 立即检查约束（仅在 sink 在具体分支内时执行）
+            if sink_branch != 'outside':
+                # param_name 可能是列表形式（如 ['input']），统一转为字符串比较
+                _param_str = param_name[0] if isinstance(param_name, list) else str(param_name)
+                for c in constraints:
+                    if c.var_name == _param_str and c.op in ('==', '===', 'in'):
+                        logger.info("[AST] Branch constraint BLOCKS param {}: {} {}".format(param_name, c.op, c.value))
+                        return -1, param, 0
+
+                # 4. 不等约束不阻断，继续回溯分支体
+                is_co, cp, expr_lineno = parameters_back(param, body_nodes, function_params, lineno,
+                                                         function_flag=function_flag, vul_function=vul_function,
+                                                         file_path=file_path,
+                                                         isback=isback, method_name=method_name)
+
+            if is_co == 1:
+                return is_co, cp, expr_lineno
+
+        elif node.type == "SwitchStatement":
+            logger.debug(
+                "[AST] param {} line {} in Switch, start branch constraint analysis".format(param_name, node.loc.start.line if node.loc else 0))
+
+            # switch/case 分支约束追踪
+            # 判断 sink（lineno）在哪个 case 中
+            sink_in_default = False
+            sink_in_case = False
+            if node.cases and lineno > 0:
+                for i, switch_case in enumerate(node.cases):
+                    if not switch_case.loc:
+                        continue
+                    case_start = switch_case.loc.start.line
+                    case_end = switch_case.loc.end.line
+
+                    if case_start <= lineno <= case_end:
+                        if switch_case.test is None:
+                            sink_in_default = True
+                        else:
+                            sink_in_case = True
+                        break
+
+            if sink_in_case:
+                # sink 在非 default case 中 → switch expr == case_value → 阻断
+                logger.info("[AST] Switch constraint BLOCKS: sink in non-default case (line {})".format(lineno))
+                return -1, param, 0
+
+            # sink 在 default 或不在 switch 中 → 正常回溯每个 case
+            if node.cases:
+                for switch_case in node.cases:
+                    if switch_case.consequent:
+                        is_co, cp, expr_lineno = parameters_back(param, switch_case.consequent, function_params, lineno,
+                                                                 function_flag=1, vul_function=vul_function,
+                                                                 file_path=file_path,
+                                                                 isback=isback, method_name=method_name)
+                        if is_co == 1:
+                            return is_co, cp, expr_lineno
 
         elif node.type == "WhileStatement":
             logger.debug("[AST] Param {} line {} in while, start ast in while".format(param_name, node.loc.start.line))
 
             while_body = node.body.body
 
+            # while 循环条件等值约束检查：如果 while 条件中 param_name 有 == 约束，且 sink 在 while 体内 → 阻断
+            if while_body and lineno:
+                _lineno = int(lineno)
+                body_start = node.body.loc.start.line
+                body_end = node.body.loc.end.line
+                if body_start <= _lineno <= body_end:
+                    test_expr = node.test.toDict() if hasattr(node.test, 'toDict') else node.test
+                    constraints = extract_constraints_from_js_expr(test_expr)
+                    _param_str = param_name[0] if isinstance(param_name, list) else str(param_name)
+                    for c in constraints:
+                        if c.var_name == _param_str and c.op in ('==', '===', 'in'):
+                            logger.info("[AST] While constraint BLOCKS param {}: {} {}".format(param_name, c.op, c.value))
+                            return -1, param, 0
+
             is_co, cp, expr_lineno = parameters_back(param, while_body, function_params, lineno,
+                                                     function_flag=function_flag, vul_function=vul_function,
+                                                     file_path=file_path,
+                                                     isback=isback, method_name=method_name)
+
+        elif node.type == "ForStatement":
+            logger.debug("[AST] Param {} line {} in for loop".format(param_name, node.loc.start.line))
+            for_body = node.body.body if hasattr(node.body, 'body') else []
+
+            is_co, cp, expr_lineno = parameters_back(param, for_body, function_params, lineno,
+                                                     function_flag=function_flag, vul_function=vul_function,
+                                                     file_path=file_path,
+                                                     isback=isback, method_name=method_name)
+
+        elif node.type in ("ForInStatement", "ForOfStatement"):
+            logger.debug("[AST] Param {} line {} in for-in/of loop".format(param_name, node.loc.start.line))
+            for_body = node.body.body if hasattr(node.body, 'body') else []
+
+            is_co, cp, expr_lineno = parameters_back(param, for_body, function_params, lineno,
                                                      function_flag=function_flag, vul_function=vul_function,
                                                      file_path=file_path,
                                                      isback=isback, method_name=method_name)
@@ -1968,9 +2217,14 @@ def set_scan_results(is_co, cp, expr_lineno, sink, param, vul_lineno):
         'sink_lineno': vul_lineno,
         "chain": scan_chain,
     }
-    if result['code'] > 0:  # 查出来漏洞结果添加到结果信息中
+    if result['code'] in (1, 2, 3):
         results.append(result)
         scan_results += results
+    elif result['code'] == -1:
+        # 分支约束阻断：仅在没有其他结果时保留
+        if not scan_results:
+            results.append(result)
+            scan_results += results
 
 
 def _resolve_class_method_calls(nodes, method_param_map):
@@ -2036,6 +2290,15 @@ def analysis(all_nodes, vul_function, back_node, vul_lineno, file_path, function
 
         if node.type == "IfStatement":
             analysis_If(node, vul_function, back_node, vul_lineno, file_path, function_params)
+
+        if node.type == "SwitchStatement":
+            # switch 语句：遍历 case 的 consequent，追加到 back_node
+            if node.cases:
+                for switch_case in node.cases:
+                    if switch_case.consequent:
+                        back_node.append(switch_case)
+                        for stmt in switch_case.consequent:
+                            analysis([stmt], vul_function, back_node, vul_lineno, file_path, function_params)
 
         if node.type == "VariableDeclaration":  # 函数赋值表达式
             for child_node in node.declarations:

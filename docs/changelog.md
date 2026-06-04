@@ -1,4 +1,38 @@
 ## 更新日志
+- 2026-06-04
+  - KunLun-M 2.13.2
+  - **7 语言引擎回溯分析设计文档（docs/design/）**
+    - 新增扫描流水线整体架构设计文档
+    - 新增 PHP/JavaScript/Python/Java/Go/C-C++ 引擎回溯分析设计文档（6 份）
+    - 新增共享模块设计文档（function_summary / branch_constraint / trace_cache / builtin_knowledge）
+    - 包含各引擎从 Sink 到最终判定漏洞成立的完整回溯链路分析
+  - **分支约束追踪补全 — C 三元 / Python match/case / while 循环 / JS ForStatement 修复（6 语言）**
+    - C/C++: 新增三元表达式（conditional_expression）约束追踪
+    - Python: 新增 match/case（Python 3.10+）分支约束追踪，兼容 Python < 3.10
+    - 6 语言新增 while 循环条件等值约束检查（PHP/Python/JS/Java/Go/C）
+    - JS: 修复 `_parameters_back_impl` 缺少 ForStatement/ForInStatement/ForOfStatement 处理的功能性缺陷
+    - 端到端测试扩展至 56 个用例，全部通过（新增 10 个 while + 2 个 Python match + 2 个 C 三元）
+- 2026-06-03
+  - **C/C++ if/else + switch/case 分支约束追踪**
+    - 新增 `_extract_constraints_from_c_expr`：支持 `strcmp(x,"v")==0`、`x == value`、`!` 取反、`&&`/`||` 组合
+    - 新增 `_check_sink_branch_constraints`：在 `scan_parser` 的直接可控源和反向追踪两条路径中检查分支约束
+    - 支持 if/else 分支约束（`==`/`!=`/`in`/`not in`）和 switch/case（非 default 阻断）
+    - 端到端测试 46/46 全通过（含 7 个新增 C 测试用例）
+  - **switch/case 分支约束追踪（PHP/JS/Java/Go 四语言）**
+    - PHP: 修复 phply `Default` 节点无 `expr` 属性导致 `AttributeError` 被静默吞掉的问题
+    - Java: 修复 javalang default case 的 `case` 属性为空列表（非 `None`）的判断
+    - Java: 修复 switch default case 未找到赋值时提前返回 `-1`，改为 fallthrough 继续搜索 switch 前的语句
+    - JS: 新增 `SwitchStatement` 分支约束追踪（sink 在非 default case 时阻断）
+    - Go: 修复 `trace_go_stmt` 中 switch 分支 `UnboundLocalError`（`lineno` 变量未定义），修正 AST 节点类型名称
+    - Go: `_search_in_switch` 增加对 `default_case` 的搜索
+    - 测试套件扩展至 39 个用例，全部通过（新增 8 个三元表达式 + 6 个 switch/case + 2 个 JS switch）
+  - **分支约束端到端测试套件**
+    - 新增 `tests/branch_constraint/` 目录，23 个端到端测试用例覆盖 PHP/Python/JS/Java/Go 5 种语言
+    - 覆盖场景：== 约束阻断（误报消除）、无约束真阳性、else 分支真阳性、!= 约束不阻断、枚举约束
+    - 使用 `run_tests.py` 运行器，通过 subprocess 调用 `ci_scan.py` 避免 Django DB 连接缓存问题
+  - **修复 Python parser 分支约束回溯 bug**
+    - `ast.If` 处理中，分支体内回溯返回 `code 3` (unconfirmed) 时直接 return，导致外层 `_trace_in_stmts` 循环终止
+    - 修复：code 3/-1 时返回 `None`，让外层循环继续追踪 if 语句之前的赋值语句
 - 2026-06-01
   - KunLun-M 2.13.1
   - **内置知识库重构：统一合并 `core/internal_defines/` 旧系统 → `builtin_knowledge.py` 新系统**

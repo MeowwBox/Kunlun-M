@@ -6,6 +6,7 @@ import javalang
 from utils.log import logger
 from core.pretreatment import ast_object as _ast_object_singleton
 from core.core_engine.trace_cache import TraceCache
+from core.core_engine.branch_constraint import BranchConstraint
 from core.core_engine.java.builtin_knowledge import lookup as lookup_builtin
 from core.core_engine.java.summary_generator import lookup_summary
 
@@ -237,6 +238,130 @@ def _walk_for_calls(node, sensitive_func, target_line, results):
             _walk_for_calls(child, sensitive_func, target_line, results)
 
 
+
+def extract_constraints_from_java_expr(expr):
+    """
+    从 Java 条件表达式中提取 BranchConstraint 列表。
+
+    javalang AST 节点类型：
+    - x == value     -> BinaryOperation(operator='==', operandl, operandr)
+    - x != null      -> BinaryOperation(operator='!=', operandl, operandr)
+    - x instanceof T  -> BinaryOperation(operator='instanceof') → 暂不提取
+    - x && y          -> BinaryOperation(operator='&&')
+    - x || y          -> BinaryOperation(operator='||')
+    - !expr           -> UnaryOperation(operator='!', operand)
+    - x.equals(y)    -> MethodInvocation(member='equals') → 简化提取
+    - x != null       -> MemberReference/member + BinaryOperation
+    """
+    if expr is None:
+        return []
+
+    constraints = []
+
+    if isinstance(expr, javalang.tree.BinaryOperation):
+        op = expr.operator
+
+        if op == '&&':
+            left = extract_constraints_from_java_expr(expr.operandl)
+            right = extract_constraints_from_java_expr(expr.operandr)
+            return left + right
+
+        if op == '||':
+            # x.equals("a") || x.equals("b") → 收集同一变量的枚举约束
+            from collections import defaultdict
+            left = extract_constraints_from_java_expr(expr.operandl)
+            right = extract_constraints_from_java_expr(expr.operandr)
+            or_constraints = left + right
+            eq_values = defaultdict(list)
+            for c in or_constraints:
+                if c.op == '==' and c.var_name:
+                    eq_values[c.var_name].append(c.value)
+            result = []
+            for var_name, values in eq_values.items():
+                if values:
+                    result.append(BranchConstraint(
+                        var_name=var_name, op='in',
+                        value=values if len(values) > 1 else values[0]))
+            return result
+
+        # 比较运算
+        if op in ('==', '!=', '>=', '<=', '>', '<'):
+            var_name = _get_java_expr_name(expr.operandl)
+            if var_name:
+                value = _get_java_literal(expr.operandr)
+                constraints.append(BranchConstraint(var_name=var_name, op=op, value=value))
+            return constraints
+
+        # instanceof → 暂不提取
+        return []
+
+    # ljavalang 没有 UnaryOperation，!expr 通过 prefix_operators 处理
+    # 这里暂不处理 !expr 的约束提取
+
+    # x.equals(y) — 方法调用中的相等检查
+    if isinstance(expr, javalang.tree.MethodInvocation):
+        if hasattr(expr, 'member') and expr.member == 'equals' and len(expr.arguments or []) >= 1:
+            obj = _get_java_expr_name(expr.qualifier) if expr.qualifier else None
+            # 当 qualifier 是字面量（如 "test".equals(action)），从 argument 中提取变量名
+            if not obj and expr.qualifier and isinstance(expr.qualifier, javalang.tree.Literal):
+                obj = _get_java_expr_name(expr.arguments[0])
+                value = _get_java_literal(expr.qualifier)
+            else:
+                value = _get_java_literal(expr.arguments[0])
+            if obj:
+                c = BranchConstraint(var_name=obj, op='==', value=value)
+                # ljavalang: !expr 通过 prefix_operators 处理
+                if hasattr(expr, 'prefix_operators') and '!' in expr.prefix_operators:
+                    c = c.negate()
+                constraints.append(c)
+        return constraints
+
+    # x != null → BinaryOperation(operator='!=', operandl=MemberReference, operandr=Literal('null'))
+    return constraints
+
+
+def _get_java_expr_name(expr):
+    """从 Java 表达式提取变量名字符串。"""
+    if expr is None:
+        return None
+    if isinstance(expr, str):
+        return expr
+    if isinstance(expr, javalang.tree.MemberReference):
+        return expr.member
+    if isinstance(expr, javalang.tree.This):
+        return 'this'
+    return None
+
+
+def _get_java_literal(expr):
+    """从 Java 表达式提取字面量值。"""
+    if expr is None:
+        return None
+    if isinstance(expr, javalang.tree.Literal):
+        val = expr.value
+        # javalang 把字面量当字符串存储，尝试解析
+        if val == 'null':
+            return None
+        if val == 'true':
+            return True
+        if val == 'false':
+            return False
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            pass
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            pass
+        # 去除引号
+        if isinstance(val, str) and len(val) >= 2:
+            if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
+                return val[1:-1]
+        return val
+    return None
+
+
 def parameters_back(param_name, stmts, vul_lineno, file_path,
                      repair_functions=None, controlled_params=None, depth=0, max_depth=10):
     """
@@ -300,8 +425,100 @@ def parameters_back(param_name, stmts, vul_lineno, file_path,
                     return result
 
         # 控制流：递归进入
-        if isinstance(stmt, (javalang.tree.IfStatement, javalang.tree.ForStatement,
-                             javalang.tree.WhileStatement, javalang.tree.DoStatement)):
+        if isinstance(stmt, javalang.tree.IfStatement):
+            java_constraints = extract_constraints_from_java_expr(stmt.condition)
+
+            # 判断 sink 在哪个分支
+            sink_branch = _find_sink_branch_java(stmt, vul_lineno)
+            logger.debug("[AST][Java] sink_branch={} for param {} lineno {}".format(sink_branch, param_name, vul_lineno))
+
+            if sink_branch == 'if':
+                then_stmts = _get_block_stmts(stmt.then_statement) if stmt.then_statement else []
+                for c in java_constraints:
+                    if c.var_name == param_name and c.op in ('==', '===', 'in'):
+                        logger.info("[AST][Java] Branch constraint BLOCKS param {}: {} {}".format(param_name, c.op, c.value))
+                        _trace_cache.put(file_path, param_name, vul_lineno, (-1, None, 0))
+                        return (-1, None, 0)
+                if then_stmts:
+                    result = parameters_back(param_name, then_stmts, vul_lineno, file_path,
+                                              repair_functions, controlled_params, depth + 1, max_depth)
+                    if result[0] in (1, 2):
+                        _trace_cache.put(file_path, param_name, vul_lineno, result)
+                        return result
+
+            elif sink_branch == 'else':
+                else_constraints = [c.negate() for c in java_constraints]
+                if stmt.else_statement and isinstance(stmt.else_statement, javalang.tree.IfStatement):
+                    # else if
+                    for c in else_constraints:
+                        if c.var_name == param_name and c.op in ('==', '===', 'in'):
+                            logger.info("[AST][Java] Branch constraint BLOCKS param {}: {} {}".format(param_name, c.op, c.value))
+                            _trace_cache.put(file_path, param_name, vul_lineno, (-1, None, 0))
+                            return (-1, None, 0)
+                    result = parameters_back(param_name, [stmt.else_statement], vul_lineno, file_path,
+                                              repair_functions, controlled_params, depth + 1, max_depth)
+                    if result[0] in (1, 2):
+                        _trace_cache.put(file_path, param_name, vul_lineno, result)
+                        return result
+                else:
+                    else_stmts = _get_block_stmts(stmt.else_statement) if stmt.else_statement else []
+                    for c in else_constraints:
+                        if c.var_name == param_name and c.op in ('==', '===', 'in'):
+                            logger.info("[AST][Java] Branch constraint BLOCKS param {}: {} {}".format(param_name, c.op, c.value))
+                            _trace_cache.put(file_path, param_name, vul_lineno, (-1, None, 0))
+                            return (-1, None, 0)
+                    if else_stmts:
+                        result = parameters_back(param_name, else_stmts, vul_lineno, file_path,
+                                                  repair_functions, controlled_params, depth + 1, max_depth)
+                        if result[0] in (1, 2):
+                            _trace_cache.put(file_path, param_name, vul_lineno, result)
+                            return result
+            else:
+                # outside: 保持遍历所有分支找重赋值
+                then_stmts = _get_block_stmts(stmt.then_statement) if stmt.then_statement else []
+                if then_stmts:
+                    then_result = parameters_back(param_name, then_stmts, vul_lineno, file_path,
+                                                  repair_functions, controlled_params, depth + 1, max_depth)
+                    if then_result[0] in (1, 2, 3):
+                        _trace_cache.put(file_path, param_name, vul_lineno, then_result)
+                        return then_result
+                if stmt.else_statement:
+                    if isinstance(stmt.else_statement, javalang.tree.IfStatement):
+                        else_result = parameters_back(param_name, [stmt.else_statement], vul_lineno, file_path,
+                                                      repair_functions, controlled_params, depth + 1, max_depth)
+                    else:
+                        else_stmts = _get_block_stmts(stmt.else_statement) if stmt.else_statement else []
+                        if else_stmts:
+                            else_result = parameters_back(param_name, else_stmts, vul_lineno, file_path,
+                                                          repair_functions, controlled_params, depth + 1, max_depth)
+                        else:
+                            else_result = (-1, None, 0)
+                    if else_result[0] in (1, 2, 3):
+                        _trace_cache.put(file_path, param_name, vul_lineno, else_result)
+                        return else_result
+
+        elif isinstance(stmt, (javalang.tree.WhileStatement, javalang.tree.DoStatement)):
+            block_stmts = _get_block_stmts(stmt)
+            # while 循环条件等值约束检查：如果 while 条件中 param_name 有 == 约束，且 sink 在 while 体内 → 阻断
+            if block_stmts and vul_lineno:
+                _vul_line = int(vul_lineno)
+                body_start = _get_stmt_line(block_stmts[0])
+                body_end = _get_stmt_line(block_stmts[-1])
+                if body_start and body_end and body_start <= _vul_line <= body_end:
+                    constraints = extract_constraints_from_java_expr(stmt.condition)
+                    for c in constraints:
+                        if c.var_name == param_name and c.op in ('==', '===', 'in'):
+                            logger.info("[AST][Java] While constraint BLOCKS param {}: {} {}".format(param_name, c.op, c.value))
+                            _trace_cache.put(file_path, param_name, vul_lineno, (-1, None, 0))
+                            return (-1, None, 0)
+            if block_stmts:
+                result = parameters_back(param_name, block_stmts, stmt_line, file_path,
+                                          repair_functions, controlled_params, depth + 1, max_depth)
+                if result[0] in (1, 2):
+                    _trace_cache.put(file_path, param_name, vul_lineno, result)
+                    return result
+
+        elif isinstance(stmt, javalang.tree.ForStatement):
             block_stmts = _get_block_stmts(stmt)
             if block_stmts:
                 result = parameters_back(param_name, block_stmts, stmt_line, file_path,
@@ -319,6 +536,53 @@ def parameters_back(param_name, stmts, vul_lineno, file_path,
                     _trace_cache.put(file_path, param_name, vul_lineno, result)
                     return result
 
+        # switch/case 分支约束追踪
+        if isinstance(stmt, javalang.tree.SwitchStatement):
+            switch_line = _get_stmt_line(stmt)
+            # 判断 sink 在哪个 case 中
+            sink_case_is_default = False
+            sink_in_case = False
+            if stmt.cases:
+                for case in stmt.cases:
+                    case_stmts = case.statements or []
+                    if not case_stmts:
+                        continue
+                    first_line = _get_stmt_line(case_stmts[0])
+                    last_line = _get_stmt_line(case_stmts[-1])
+                    if first_line and last_line and first_line <= target_line <= last_line:
+                        if not case.case:  # default case 的 case 属性为空列表
+                            sink_case_is_default = True
+                        else:
+                            sink_in_case = True
+                        break
+
+            if sink_in_case:
+                # sink 在非 default case 中 → switch expr == case_value → 阻断
+                logger.info("[AST][Java] Switch constraint BLOCKS: sink in non-default case (line {})".format(vul_lineno))
+                _trace_cache.put(file_path, param_name, vul_lineno, (-1, None, 0))
+                return (-1, None, 0)
+
+            # default case 或 sink 不在任何 case 中 → 遍历目标 case
+            # 如果目标 case 中未找到赋值，fallthrough 让外层 for 循环继续搜索 switch 之前的 stmts
+            if stmt.cases:
+                for case in stmt.cases:
+                    case_stmts = case.statements or []
+                    if not case_stmts:
+                        continue
+                    # 只处理 sink 所在的 case
+                    first_line = _get_stmt_line(case_stmts[0])
+                    last_line = _get_stmt_line(case_stmts[-1])
+                    if first_line and last_line and first_line <= target_line <= last_line:
+                        result = parameters_back(param_name, case_stmts, vul_lineno, file_path,
+                                                  repair_functions, controlled_params, depth + 1, max_depth)
+                        if result[0] in (1, 2):
+                            _trace_cache.put(file_path, param_name, vul_lineno, result)
+                            return result
+                        # case 内未找到赋值 → 不清除缓存，不写入 -1
+                        # break 出内层 for，让外层 for 循环继续处理 switch 之前的 stmts
+                        break
+
+    # for 循环结束后仍未找到 → 不可控
     _trace_cache.put(file_path, param_name, vul_lineno, (-1, None, 0))
     return (-1, None, 0)
 
@@ -390,8 +654,23 @@ def _trace_expr(expr, stmts, lineno, file_path, repair_functions, controlled_par
                 return result
         return (-1, None, 0)
 
-    # 三元表达式 → 追踪两个分支
+    # 三元表达式 → 分支约束追踪
     if isinstance(expr, javalang.tree.TernaryExpression):
+        true_refs = _collect_member_references(expr.if_true)
+        false_refs = _collect_member_references(expr.if_false)
+        constraints = extract_constraints_from_java_expr(expr.condition)
+        for c in constraints:
+            if c.op in ('==', '===', 'in'):
+                if c.var_name in true_refs and c.var_name not in false_refs:
+                    # 约束变量只在 true 分支 → true 路径中 var == fixed → 阻断
+                    logger.info("[AST][Java] Ternary constraint BLOCKS: {} {} {}".format(c.var_name, c.op, c.value))
+                    return (-1, None, 0)
+                elif c.var_name in false_refs and c.var_name not in true_refs:
+                    # 约束变量只在 false 分支 → false 路径中 var != fixed → 不阻断，追踪 false 分支
+                    return _trace_expr(expr.if_false, stmts, lineno, file_path,
+                                      repair_functions, controlled_params, depth + 1, max_depth)
+
+        # 回退：无明确约束阻断
         true_result = _trace_expr(expr.if_true, stmts, lineno, file_path,
                                    repair_functions, controlled_params, depth + 1, max_depth)
         if true_result[0] == 1:
@@ -605,6 +884,34 @@ def _judge_from_summary_java(summary, call_node, controlled_params):
             continue
 
     return None
+
+
+def _find_sink_branch_java(if_stmt, vul_lineno):
+    """判断 sink 在 Java if/else 的哪个分支"""
+    if not vul_lineno:
+        return 'outside'
+    vul_lineno = int(vul_lineno)
+
+    # then 体范围
+    then_stmts = _get_block_stmts(if_stmt.then_statement) if if_stmt.then_statement else []
+    if then_stmts:
+        then_line = _get_stmt_line(then_stmts[0])
+        then_end = _get_stmt_line(then_stmts[-1])
+        if then_line and then_end and then_line <= vul_lineno <= then_end:
+            return 'if'
+
+    # else 体
+    if if_stmt.else_statement:
+        if isinstance(if_stmt.else_statement, javalang.tree.IfStatement):
+            return _find_sink_branch_java(if_stmt.else_statement, vul_lineno)
+        else_stmts = _get_block_stmts(if_stmt.else_statement) if if_stmt.else_statement else []
+        if else_stmts:
+            else_line = _get_stmt_line(else_stmts[0])
+            else_end = _get_stmt_line(else_stmts[-1])
+            if else_line and else_end and else_line <= vul_lineno <= else_end:
+                return 'else'
+
+    return 'outside'
 
 
 def _get_stmt_line(stmt):
@@ -1746,7 +2053,12 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
                     logger.debug("[AST][Java] parameters_back('{}') => code={}, cp={}".format(
                         arg_name, code, cp))
 
-                    if code == 1:
+                    if code == -1:
+                        # 分支约束阻断：参数不可控
+                        scan_results.append({"code": -1, "chain": scan_chain})
+                        found = True
+                        break
+                    elif code == 1:
                         scan_results.append(_build_result(code, scan_chain, cp, source_lines,
                                          lineno, file_path, controlled_params,
                                          repair_functions, is_config_vuln))
@@ -1788,7 +2100,11 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
                         repair_functions, controlled_params
                     )
 
-                    if code == 1:
+                    if code == -1:
+                        scan_results.append({"code": -1, "chain": scan_chain})
+                        found = True
+                        break
+                    elif code == 1:
                         scan_results.append(_build_result(code, scan_chain, cp, source_lines,
                                          lineno, file_path, controlled_params,
                                          repair_functions, is_config_vuln))

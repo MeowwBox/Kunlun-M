@@ -1937,17 +1937,23 @@ def _trace_variable_in_lines_impl(file_path, var_name, from_line, to_line,
     if not body_block:
         return (-1, 0)
 
-    # 在函数体中查找赋值
-    result_tuple = _find_assignment_in_block(body_block, var_name)
-    if result_tuple:
-        rhs_node, lineno = result_tuple
-        # 用 trace_go_expr 分析 RHS（trace_go_expr 返回 (code, source_lineno)）
-        result = trace_go_expr(
-            var_name, rhs_node, file_path, lineno, to_line,
-            repair_functions, controlled_params, depth, max_depth,
-            function_back_go, _trace_variable_in_lines
-        )
-        return result
+    # 在函数体中查找赋值（使用 trace_go_stmt 以支持分支约束）
+    stmt_list = None
+    for child in body_block.children:
+        if child.type == 'statement_list':
+            stmt_list = child
+            break
+    if stmt_list:
+        # 反向遍历（最近赋值优先）
+        for i in range(len(stmt_list.children) - 1, -1, -1):
+            stmt = stmt_list.children[i]
+            result = trace_go_stmt(
+                var_name, stmt, file_path, to_line, to_line,
+                repair_functions, controlled_params, depth, max_depth,
+                function_back_go, _trace_variable_in_lines
+            )
+            if result is not None:
+                return result
 
     # ---- 未找到赋值来源：检查 var_name 是否是函数形参 ----
     if params_node:
