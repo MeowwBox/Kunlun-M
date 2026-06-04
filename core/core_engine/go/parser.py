@@ -20,6 +20,7 @@ import io
 from utils.log import logger
 from core.pretreatment import ast_object as _ast_object_singleton
 from core.core_engine.trace_cache import TraceCache
+from core.core_engine.branch_constraint import BranchConstraint
 from core.core_engine.go.builtin_knowledge import lookup as lookup_builtin
 from core.core_engine.go.summary_generator import generate_file_summaries, lookup_summary, _summary_registry
 from core.core_engine.function_summary import SummaryCacheManager
@@ -242,6 +243,360 @@ def _init_function_summaries(file_path):
 _ast_cache = {}  # file_path → tree
 _import_cache = {}  # file_path → {别名: [文件路径列表]}
 _package_name_cache = {}  # file_path → package_name
+
+
+# ---------------------------------------------------------------------------
+# 分支约束追踪（if/for）
+# ---------------------------------------------------------------------------
+
+def _extract_constraints_from_go_expr(cond_node):
+    """从 Go 条件表达式中提取 BranchConstraint 列表。
+
+    支持的模式:
+    - x == value         -> BranchConstraint(x, ==, value)
+    - x != value         -> BranchConstraint(x, !=, value)
+    - x && y / x || y    -> 递归拆分
+    - unicode.IsDigit(x)  -> BranchConstraint(x, type_validated, unicode.IsDigit)
+    """
+    if cond_node is None:
+        return []
+
+    constraints = []
+    node_type = cond_node.type
+
+    def _node_text(n):
+        return n.text.decode('utf-8', errors='ignore')
+
+    def _get_go_var_name(n):
+        """从 tree-sitter Go 节点提取变量名。"""
+        if n is None:
+            return None
+        if n.type == 'identifier':
+            return _node_text(n)
+        if n.type == 'selector_expression':
+            # a.b 形式取 a
+            if n.children:
+                return _get_go_var_name(n.children[0])
+        if n.type == 'index_expression':
+            if n.children:
+                return _get_go_var_name(n.children[0])
+        if n.type == 'call_expression':
+            return None
+        if n.type == 'parenthesized_expression':
+            if n.children and len(n.children) >= 2:
+                return _get_go_var_name(n.children[1])
+        return None
+
+    def _get_go_literal_value(n):
+        """从 tree-sitter Go 节点提取字面量值。"""
+        if n is None:
+            return None
+        if n.type in ('int_literal', 'float_literal', 'imaginary_literal'):
+            try:
+                return int(_node_text(n))
+            except ValueError:
+                return _node_text(n)
+        if n.type in ('interpreted_string_literal', 'raw_string_literal', 'rune_literal'):
+            return _node_text(n).strip('"').strip('`').strip("'")
+        if n.type == 'true':
+            return True
+        if n.type == 'false':
+            return False
+        if n.type == 'nil':
+            return None
+        return None
+
+    if node_type == 'binary_expression':
+        children = cond_node.children
+        op_node = None
+        left_node = None
+        right_node = None
+        found_op = False
+        for child in children:
+            if child.type in ('==', '!=', '>=', '<=', '>', '<', '&&', '||'):
+                if not found_op:
+                    op_node = child
+                    found_op = True
+                continue
+            if not found_op and left_node is None:
+                left_node = child
+            elif found_op and right_node is None:
+                right_node = child
+
+        op_text = _node_text(op_node) if op_node else ''
+
+        if op_text == '&&':
+            if left_node:
+                constraints.extend(_extract_constraints_from_go_expr(left_node))
+            if right_node:
+                constraints.extend(_extract_constraints_from_go_expr(right_node))
+            return constraints
+
+        if op_text == '||':
+            or_constraints = []
+            if left_node:
+                or_constraints.extend(_extract_constraints_from_go_expr(left_node))
+            if right_node:
+                or_constraints.extend(_extract_constraints_from_go_expr(right_node))
+            from collections import defaultdict
+            eq_values = defaultdict(list)
+            other = []
+            for c in or_constraints:
+                if c.op == '==' and c.var_name:
+                    eq_values[c.var_name].append(c.value)
+                else:
+                    other.append(c)
+            for vn, values in eq_values.items():
+                constraints.append(BranchConstraint(
+                    var_name=vn, op='in',
+                    value=values if len(values) > 1 else values[0]))
+            constraints.extend(other)
+            return constraints
+
+        if op_text in ('==', '!='):
+            var_name = _get_go_var_name(left_node)
+            if var_name:
+                value = _get_go_literal_value(right_node)
+                constraints.append(BranchConstraint(var_name=var_name, op=op_text, value=value))
+            else:
+                # 尝试右操作数为变量
+                var_name = _get_go_var_name(right_node)
+                if var_name:
+                    value = _get_go_literal_value(left_node)
+                    neg_op = '!=' if op_text == '==' else '=='
+                    constraints.append(BranchConstraint(var_name=var_name, op=neg_op, value=value))
+
+        return constraints
+
+    if node_type == 'unary_expression':
+        if cond_node.children:
+            op_text = _node_text(cond_node.children[0])
+            if op_text == '!' and len(cond_node.children) > 1:
+                inner = cond_node.children[1]
+                inner_constraints = _extract_constraints_from_go_expr(inner)
+                if inner_constraints:
+                    constraints = [c.negate() for c in inner_constraints]
+                    return constraints
+        return constraints
+
+    if node_type == 'call_expression':
+        func_node = None
+        args = []
+        for child in cond_node.children:
+            if child.type in ('identifier', 'selector_expression'):
+                func_node = child
+            elif child.type == 'argument_list':
+                args = [c for c in child.children if c.type not in ('(', ')', ',')]
+
+        if func_node and args:
+            func_name = _node_text(func_node)
+            GO_TYPE_FUNCS = {
+                'unicode.IsDigit', 'unicode.IsLetter', 'unicode.IsNumber',
+                'unicode.IsUpper', 'unicode.IsLower', 'unicode.IsTitle',
+                'unicode.IsPrint', 'unicode.IsPunct', 'unicode.IsSpace',
+                'unicode.IsGraphic', 'unicode.IsControl',
+                'unicode.IsMark', 'unicode.IsSymbol',
+            }
+            if func_name in GO_TYPE_FUNCS and len(args) >= 1:
+                var_name = _get_go_var_name(args[0])
+                if var_name:
+                    constraints.append(BranchConstraint(var_name=var_name, op='type_validated', value=func_name))
+
+        return constraints
+
+    if node_type == 'parenthesized_expression':
+        if cond_node.children and len(cond_node.children) >= 2:
+            return _extract_constraints_from_go_expr(cond_node.children[1])
+
+    return constraints
+
+
+def _find_enclosing_if_for_go(root_node, vul_lineno):
+    """找到包含 vul_lineno 的最近 if 或 for 语句节点。
+
+    返回 (node, type_str) 或 None。type_str 为 'if' 或 'for'。
+    使用深度优先遍历，返回最内层匹配。
+    """
+    best = [None]
+
+    def _search(node):
+        if node.type == 'if_statement':
+            # 检查 if body 和 else body 的行范围
+            for child in node.children:
+                if child.type == 'block' or child.type == 'compound_statement':
+                    start = child.start_point[0] + 1
+                    end = child.end_point[0] + 1
+                    if start <= vul_lineno <= end:
+                        # 如果已有更内层的匹配，保留更内层的
+                        if best[0] is None or (best[0][0].start_point[0] < node.start_point[0]):
+                            best[0] = (node, 'if')
+                        break
+                elif child.type == 'else_clause':
+                    for ec in child.children:
+                        if ec.type == 'block' or ec.type == 'compound_statement':
+                            start = ec.start_point[0] + 1
+                            end = ec.end_point[0] + 1
+                            if start <= vul_lineno <= end:
+                                if best[0] is None or (best[0][0].start_point[0] < node.start_point[0]):
+                                    best[0] = (node, 'if')
+                                break
+                        elif ec.type == 'if_statement':
+                            # else if 嵌套
+                            start = ec.start_point[0] + 1
+                            end = ec.end_point[0] + 1
+                            if start <= vul_lineno <= end:
+                                _search(ec)
+
+        elif node.type == 'for_statement':
+            for child in node.children:
+                if child.type == 'block' or child.type == 'compound_statement':
+                    start = child.start_point[0] + 1
+                    end = child.end_point[0] + 1
+                    if start <= vul_lineno <= end:
+                        if best[0] is None or (best[0][0].start_point[0] < node.start_point[0]):
+                            best[0] = (node, 'for')
+                        break
+
+        for child in node.children:
+            _search(child)
+
+    _search(root_node)
+    return best[0]
+
+
+def _check_go_branch_constraints(file_path, vul_lineno, var_name):
+    """检查 vul_lineno 处的变量使用是否在受约束的分支中。
+
+    返回 True（阻断）或 False（不阻断）。
+    """
+    tree = _parse_go_ast(file_path)
+    if tree is None:
+        return False
+
+    result = _find_enclosing_if_for_go(tree.root_node, vul_lineno)
+    if result is None:
+        return False
+
+    node, node_type = result
+
+    if node_type == 'if':
+        return _check_go_if_constraint(node, vul_lineno, var_name)
+    elif node_type == 'for':
+        return _check_go_for_constraint(node, vul_lineno, var_name)
+
+    return False
+
+
+def _check_go_if_constraint(if_node, vul_lineno, var_name):
+    """检查 Go if/else 分支约束。
+
+    Go if_statement 结构:
+      if_statement
+        ├── "if"
+        ├── expression (或 simple_statement + ";" + expression)  ← 条件
+        ├── block                                                ← if body
+        └── else_clause (可选)
+             ├── "else"
+             ├── block                                           ← else body
+             └── if_statement                                    ← else if
+
+    返回 True（阻断）/ False（不阻断）。
+    """
+    cond_node = None
+    if_body = None
+    else_body = None
+
+    # Go if 可能有 simple_statement; expression 的形式
+    # 简单处理：找 block 和 else_clause
+    saw_cond = False
+    for child in if_node.children:
+        if child.type == 'else_clause':
+            for ec in child.children:
+                if ec.type == 'block':
+                    else_body = ec
+                elif ec.type == 'if_statement':
+                    return _check_go_if_constraint(ec, vul_lineno, var_name)
+        elif child.type == 'block' and if_body is None:
+            if_body = child
+        # 条件节点：block 之前的非关键字节点
+        if child.type not in ('if', 'block', 'else_clause') and if_body is None:
+            cond_node = child
+
+    if cond_node is None:
+        return False
+
+    # 处理带 simple_statement 的 if: if_stmt; expr
+    # cond_node 可能是一个 expression_list 或 expression
+    actual_cond = cond_node
+    if cond_node.type == 'expression_list':
+        # 取最后一个作为条件
+        exprs = [c for c in cond_node.children if c.type != ';']
+        if exprs:
+            actual_cond = exprs[-1]
+
+    if_start = if_body.start_point[0] + 1 if if_body else None
+    if_end = if_body.end_point[0] + 1 if if_body else None
+    else_start = else_body.start_point[0] + 1 if else_body else None
+    else_end = else_body.end_point[0] + 1 if else_body else None
+
+    in_if = if_start is not None and if_end is not None and if_start <= vul_lineno <= if_end
+    in_else = else_start is not None and else_end is not None and else_start <= vul_lineno <= else_end
+
+    if not in_if and not in_else:
+        return False
+
+    constraints = _extract_constraints_from_go_expr(actual_cond)
+
+    for c in constraints:
+        if c.var_name != var_name:
+            continue
+        if in_if and c.op in ('==', 'in', 'type_validated', 'regex_validated'):
+            logger.info("[AST][Go] Branch constraint BLOCKS: if ({} {} {}) at line {}".format(
+                c.var_name, c.op, c.value, vul_lineno))
+            return True
+        if in_else and c.op in ('!=', 'not in'):
+            logger.info("[AST][Go] Branch constraint BLOCKS: else ({} {} {}) at line {}".format(
+                c.var_name, c.op, c.value, vul_lineno))
+            return True
+
+    return False
+
+
+def _check_go_for_constraint(for_node, vul_lineno, var_name):
+    """检查 Go for 循环条件约束。
+
+    返回 True（阻断）/ False（不阻断）。
+    """
+    cond_node = None
+    body_node = None
+
+    for child in for_node.children:
+        if child.type == 'block' and body_node is None:
+            body_node = child
+        elif child.type not in ('for', 'block') and body_node is None:
+            cond_node = child
+
+    if body_node is None:
+        return False
+
+    body_start = body_node.start_point[0] + 1
+    body_end = body_node.end_point[0] + 1
+
+    if not (body_start <= vul_lineno <= body_end):
+        return False
+
+    if cond_node is None:
+        return False
+
+    constraints = _extract_constraints_from_go_expr(cond_node)
+
+    for c in constraints:
+        if c.var_name == var_name and c.op in ('==', 'in', 'type_validated', 'regex_validated'):
+            logger.info("[AST][Go] For constraint BLOCKS: for ({} {} {}) at line {}".format(
+                c.var_name, c.op, c.value, vul_lineno))
+            return True
+
+    return False
 
 
 def _parse_go_ast(file_path):
@@ -2529,6 +2884,10 @@ def analysis_params(param_name, parent_func_names, vul_function, lineno, file_pa
     try:
         lineno = int(lineno)
     except (ValueError, TypeError):
+        return -1, [], 0, []
+
+    # 分支约束检查：如果变量在受约束的分支中使用，直接返回不可控
+    if _check_go_branch_constraints(file_path, lineno, param_name):
         return -1, [], 0, []
 
     # 追踪变量

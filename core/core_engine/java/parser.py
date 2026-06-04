@@ -22,6 +22,48 @@ _file_summaries = {}
 _scan_function_stack = []  # 函数追踪栈，防递归
 
 
+# Java 静态方法验证类 — qualifier.method() 返回 true 时参数被约束为安全类型
+TYPE_VALIDATION_CLASSES = {
+    'StringUtils': {'isNumeric', 'isAlpha', 'isAlphanumeric', 'isAlphaSpace', 'isNumericSpace'},
+    'NumberUtils': {'isDigits', 'isCreatable', 'isParsable'},
+}
+
+
+def _is_strict_regex(pattern, is_fullmatch=True):
+    """判断正则是否为严格全匹配模式（安全）。
+
+    :param pattern: 正则字符串
+    :param is_fullmatch: True 表示默认全匹配（如 Java matches()），不需要 ^...$ 锚定
+    """
+    if not pattern or not isinstance(pattern, str):
+        return False
+
+    if is_fullmatch:
+        body = pattern
+    else:
+        if len(pattern) < 4:
+            return False
+        if not pattern.startswith('^') or not pattern.endswith('$'):
+            return False
+        body = pattern[1:-1]
+
+    # 去掉转义的 \. 后检查是否含未转义的 .
+    stripped = body.replace('\\.', '')
+    if '.' in stripped:
+        return False
+    if '*' in stripped or '?' in stripped:
+        return False
+    return True
+
+
+def _get_java_literal_str(expr):
+    """从 Java 表达式提取字符串字面量值（去除引号）"""
+    val = _get_java_literal(expr)
+    if isinstance(val, str):
+        return val
+    return None
+
+
 def _expr_to_text(expr, source_lines):
     """将 AST 表达式转为源码文本（从源码行读取，fallback 用 str()）"""
     if expr is None:
@@ -314,6 +356,43 @@ def extract_constraints_from_java_expr(expr):
                 if hasattr(expr, 'prefix_operators') and '!' in expr.prefix_operators:
                     c = c.negate()
                 constraints.append(c)
+            return constraints
+
+        # --- 验证函数识别 ---
+
+        # str.matches(pattern) — 正则匹配
+        if hasattr(expr, 'member') and expr.member == 'matches' and len(expr.arguments or []) >= 1:
+            pattern = _get_java_literal_str(expr.arguments[0])
+            if pattern and _is_strict_regex(pattern, is_fullmatch=True):
+                var_name = _get_java_expr_name(expr.qualifier) if expr.qualifier else None
+                if var_name:
+                    constraints.append(BranchConstraint(
+                        var_name=var_name, op='regex_validated', value=pattern))
+                    return constraints
+
+        # Character.isDigit(ch) 等单字符类型检查
+        if hasattr(expr, 'member') and expr.member in ('isDigit', 'isLetter', 'isLetterOrDigit'):
+            qualifier_name = _get_java_expr_name(expr.qualifier) if expr.qualifier else None
+            if qualifier_name == 'Character' and len(expr.arguments or []) >= 1:
+                var_name = _get_java_expr_name(expr.arguments[0])
+                if var_name:
+                    constraints.append(BranchConstraint(
+                        var_name=var_name, op='type_validated', value='Character.' + expr.member))
+                    return constraints
+
+        # StringUtils.isNumeric(x) / NumberUtils.isDigits(x) 等静态方法验证
+        if hasattr(expr, 'member') and hasattr(expr, 'qualifier') and expr.qualifier:
+            qualifier_name = _get_java_expr_name(expr.qualifier)
+            if qualifier_name in TYPE_VALIDATION_CLASSES:
+                if expr.member in TYPE_VALIDATION_CLASSES[qualifier_name]:
+                    if len(expr.arguments or []) >= 1:
+                        var_name = _get_java_expr_name(expr.arguments[0])
+                        if var_name:
+                            constraints.append(BranchConstraint(
+                                var_name=var_name, op='type_validated',
+                                value=qualifier_name + '.' + expr.member))
+                            return constraints
+
         return constraints
 
     # x != null → BinaryOperation(operator='!=', operandl=MemberReference, operandr=Literal('null'))
@@ -435,7 +514,7 @@ def parameters_back(param_name, stmts, vul_lineno, file_path,
             if sink_branch == 'if':
                 then_stmts = _get_block_stmts(stmt.then_statement) if stmt.then_statement else []
                 for c in java_constraints:
-                    if c.var_name == param_name and c.op in ('==', '===', 'in'):
+                    if c.var_name == param_name and c.op in ('==', '===', 'in', 'type_validated', 'regex_validated'):
                         logger.info("[AST][Java] Branch constraint BLOCKS param {}: {} {}".format(param_name, c.op, c.value))
                         _trace_cache.put(file_path, param_name, vul_lineno, (-1, None, 0))
                         return (-1, None, 0)
@@ -451,7 +530,7 @@ def parameters_back(param_name, stmts, vul_lineno, file_path,
                 if stmt.else_statement and isinstance(stmt.else_statement, javalang.tree.IfStatement):
                     # else if
                     for c in else_constraints:
-                        if c.var_name == param_name and c.op in ('==', '===', 'in'):
+                        if c.var_name == param_name and c.op in ('==', '===', 'in', 'type_validated', 'regex_validated'):
                             logger.info("[AST][Java] Branch constraint BLOCKS param {}: {} {}".format(param_name, c.op, c.value))
                             _trace_cache.put(file_path, param_name, vul_lineno, (-1, None, 0))
                             return (-1, None, 0)
@@ -463,7 +542,7 @@ def parameters_back(param_name, stmts, vul_lineno, file_path,
                 else:
                     else_stmts = _get_block_stmts(stmt.else_statement) if stmt.else_statement else []
                     for c in else_constraints:
-                        if c.var_name == param_name and c.op in ('==', '===', 'in'):
+                        if c.var_name == param_name and c.op in ('==', '===', 'in', 'type_validated', 'regex_validated'):
                             logger.info("[AST][Java] Branch constraint BLOCKS param {}: {} {}".format(param_name, c.op, c.value))
                             _trace_cache.put(file_path, param_name, vul_lineno, (-1, None, 0))
                             return (-1, None, 0)
@@ -507,7 +586,7 @@ def parameters_back(param_name, stmts, vul_lineno, file_path,
                 if body_start and body_end and body_start <= _vul_line <= body_end:
                     constraints = extract_constraints_from_java_expr(stmt.condition)
                     for c in constraints:
-                        if c.var_name == param_name and c.op in ('==', '===', 'in'):
+                        if c.var_name == param_name and c.op in ('==', '===', 'in', 'type_validated', 'regex_validated'):
                             logger.info("[AST][Java] While constraint BLOCKS param {}: {} {}".format(param_name, c.op, c.value))
                             _trace_cache.put(file_path, param_name, vul_lineno, (-1, None, 0))
                             return (-1, None, 0)
@@ -660,7 +739,7 @@ def _trace_expr(expr, stmts, lineno, file_path, repair_functions, controlled_par
         false_refs = _collect_member_references(expr.if_false)
         constraints = extract_constraints_from_java_expr(expr.condition)
         for c in constraints:
-            if c.op in ('==', '===', 'in'):
+            if c.op in ('==', '===', 'in', 'type_validated', 'regex_validated'):
                 if c.var_name in true_refs and c.var_name not in false_refs:
                     # 约束变量只在 true 分支 → true 路径中 var == fixed → 阻断
                     logger.info("[AST][Java] Ternary constraint BLOCKS: {} {} {}".format(c.var_name, c.op, c.value))

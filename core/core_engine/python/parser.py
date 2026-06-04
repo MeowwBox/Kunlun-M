@@ -705,12 +705,62 @@ def _find_sink_branch_py(if_stmt, vul_lineno):
     return 'outside'
 
 
+# Python 类型验证方法 — x.isdigit() 等方法调用返回 true 时变量被约束为安全类型
+_TYPE_CHECK_METHODS = frozenset({
+    'isdigit', 'isnumeric', 'isdecimal',
+    'isalpha', 'isalnum',
+})
+
+
+def _is_numeric_type_tuple(node):
+    """检查 AST 节点是否为数值类型元组（如 (int, float)）"""
+    if isinstance(node, ast.Tuple):
+        return all(
+            (isinstance(elt, ast.Name) and elt.id in ('int', 'float', 'complex', 'bool'))
+            for elt in node.elts
+        )
+    # 单个类型：isinstance(x, int)
+    if isinstance(node, ast.Name):
+        return node.id in ('int', 'float', 'complex', 'bool')
+    return False
+
+
+def _is_strict_regex(pattern, is_fullmatch=False):
+    """判断正则是否为严格全匹配模式（安全）。
+
+    :param pattern: 正则字符串
+    :param is_fullmatch: True 表示默认全匹配（如 re.fullmatch），不需要 ^...$ 锚定
+    """
+    if not pattern or not isinstance(pattern, str):
+        return False
+
+    if is_fullmatch:
+        body = pattern
+    else:
+        if len(pattern) < 4:
+            return False
+        if not pattern.startswith('^') or not pattern.endswith('$'):
+            return False
+        body = pattern[1:-1]
+
+    # 去掉转义的 \. 后检查是否含未转义的 .
+    stripped = body.replace('\\.', '')
+    if '.' in stripped:
+        return False
+    # 不含 * 或 ?（任意次数匹配）
+    if '*' in stripped or '?' in stripped:
+        return False
+    return True
+
+
 def extract_constraints_from_py_expr(expr):
     """
     从 Python 条件表达式中提取 BranchConstraint 列表。
 
     使用标准库 ast 模块的节点类型：
-    - isinstance(x, type)    -> 类型约束（暂不提取）
+    - isinstance(x, type)    -> 类型约束（type_validated）
+    - x.isdigit() / x.isalpha() -> 类型约束（type_validated）
+    - re.match/r'^\\d+$', x / re.fullmatch(r'...', x) -> 正则约束（regex_validated）
     - x is None / x is not None -> 等值约束
     - x == value / x != value   -> 等值约束
     - x in list              -> 成员约束（简化：提取变量名，op='in'）
@@ -771,9 +821,31 @@ def extract_constraints_from_py_expr(expr):
         return constraints
 
     if isinstance(expr, ast.Call):
-        # isinstance(x, type) → 暂不提取（类型对可控性无直接影响）
-        # hasattr(x, attr) → 暂不提取
-        pass
+        func_name = _get_call_name(expr)
+
+        # isinstance(x, (int, float)) → x 被约束为数值类型
+        if func_name == 'isinstance' and len(expr.args) >= 2:
+            var_name = _get_name(expr.args[0])
+            if var_name and _is_numeric_type_tuple(expr.args[1]):
+                constraints.append(BranchConstraint(
+                    var_name=var_name, op='type_validated', value='isinstance_numeric'))
+
+        # x.isdigit() / x.isnumeric() 等方法调用
+        elif isinstance(expr.func, ast.Attribute):
+            var_name = _get_name(expr.func.value)
+            method = expr.func.attr
+            if var_name and method in _TYPE_CHECK_METHODS:
+                constraints.append(BranchConstraint(
+                    var_name=var_name, op='type_validated', value=method))
+
+        # re.match(r'^\d+$', x) / re.fullmatch(r'...', x) — 严格正则
+        if func_name in ('re.match', 're.fullmatch') and len(expr.args) >= 2:
+            pattern = _extract_py_literal(expr.args[0])
+            var_name = _get_name(expr.args[1])
+            if var_name and pattern and isinstance(pattern, str):
+                if _is_strict_regex(pattern, func_name == 're.fullmatch'):
+                    constraints.append(BranchConstraint(
+                        var_name=var_name, op='regex_validated', value=pattern))
 
     return constraints
 
@@ -862,7 +934,7 @@ def _trace_stmt(param_name, stmt, vul_lineno, file_path,
 
         # 3. 立即检查约束（仅在 sink 在具体分支内时执行）
         for c in constraints:
-            if c.var_name == param_name and c.op in ('==', '===', 'in'):
+            if c.var_name == param_name and c.op in ('==', '===', 'in', 'type_validated', 'regex_validated'):
                 logger.info("[AST][Python] Branch constraint BLOCKS param {}: {} {}".format(param_name, c.op, c.value))
                 return -1, None, 0
 
@@ -955,7 +1027,7 @@ def _trace_stmt(param_name, stmt, vul_lineno, file_path,
         if sink_in_body:
             constraints = extract_constraints_from_py_expr(stmt.test)
             for c in constraints:
-                if c.var_name == param_name and c.op in ('==', '===', 'in'):
+                if c.var_name == param_name and c.op in ('==', '===', 'in', 'type_validated', 'regex_validated'):
                     logger.info("[AST][Python] While constraint BLOCKS param {}: {} {} {}".format(
                         param_name, c.var_name, c.op, c.value))
                     return -1, None, 0
@@ -1106,7 +1178,7 @@ def _trace_expr(param_name, expr, lineno, file_path,
         _collect_names(expr.orelse, false_names, 0)
         constraints = extract_constraints_from_py_expr(expr.test)
         for c in constraints:
-            if c.op in ('==', '===', 'in'):
+            if c.op in ('==', '===', 'in', 'type_validated', 'regex_validated'):
                 if c.var_name in true_names and c.var_name not in false_names:
                     # 约束变量只在 true 分支 → true 路径中 var == fixed → 阻断
                     logger.info("[AST][Python] Ternary constraint BLOCKS: {} {} {}".format(c.var_name, c.op, c.value))

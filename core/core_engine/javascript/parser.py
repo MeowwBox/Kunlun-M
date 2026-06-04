@@ -1082,6 +1082,28 @@ def _find_sink_branch_js(if_node, lineno):
     return 'outside'
 
 
+def _is_strict_js_regex(regex_str):
+    """判断 JS 正则字符串是否为严格全匹配模式（安全）。
+
+    JS 正则字面量 /^\d+$/ 在 esprima 中 value 是 ^\d+$（无斜杠包裹）。
+    严格条件：以 ^ 开头、以 $ 结尾、中间不含未转义的 . 或 * 或 ?。
+    """
+    if not regex_str or not isinstance(regex_str, str):
+        return False
+    if len(regex_str) < 4:
+        return False
+    if not regex_str.startswith('^') or not regex_str.endswith('$'):
+        return False
+    body = regex_str[1:-1]
+    # 去掉转义的 \. 后检查
+    stripped = body.replace('\\.', '')
+    if '.' in stripped:
+        return False
+    if '*' in stripped or '?' in stripped:
+        return False
+    return True
+
+
 def extract_constraints_from_js_expr(expr):
     """
     从 JS 条件表达式中提取 BranchConstraint 列表。
@@ -1137,6 +1159,69 @@ def extract_constraints_from_js_expr(expr):
             if var_name:
                 value = _extract_js_literal(expr.get('right', {}))
                 constraints.append(BranchConstraint(var_name=var_name, op=op, value=value))
+        return constraints
+
+    if node_type == 'CallExpression':
+        callee = expr.get('callee', {})
+        callee_type = callee.get('type', '') if isinstance(callee, dict) else ''
+
+        if callee_type == 'MemberExpression':
+            prop = callee.get('property', {})
+            prop_name = prop.get('name', '') if isinstance(prop, dict) else ''
+            obj = callee.get('object', {})
+            obj_type = obj.get('type', '') if isinstance(obj, dict) else ''
+
+            # /regex/.test(x) — 正则对象的 test 方法
+            if prop_name == 'test' and obj_type == 'Literal':
+                regex_str = obj.get('regex', {}).get('pattern', '') if isinstance(obj.get('regex'), dict) else ''
+                # esprima 将正则字面量存为 regex.pattern，fallback 也检查 value
+                if not regex_str:
+                    regex_str = obj.get('value', '')
+                if regex_str and isinstance(regex_str, str) and _is_strict_js_regex(regex_str):
+                    args = expr.get('arguments', [])
+                    if args:
+                        var_name = _extract_js_var_name(args[0])
+                        if var_name:
+                            constraints.append(BranchConstraint(
+                                var_name=var_name, op='regex_validated', value=regex_str))
+
+            # x.match(regex) — 变量的 match 方法
+            elif prop_name == 'match':
+                args = expr.get('arguments', [])
+                if args:
+                    arg0 = args[0]
+                    arg0_type = arg0.get('type', '') if isinstance(arg0, dict) else ''
+                    # 参数是正则字面量
+                    regex_str = ''
+                    if arg0_type == 'Literal':
+                        regex_str = arg0.get('regex', {}).get('pattern', '') if isinstance(arg0.get('regex'), dict) else ''
+                        if not regex_str:
+                            regex_str = arg0.get('value', '')
+                    if regex_str and isinstance(regex_str, str) and _is_strict_js_regex(regex_str):
+                        var_name = _extract_js_var_name(obj)
+                        if var_name:
+                            constraints.append(BranchConstraint(
+                                var_name=var_name, op='regex_validated', value=regex_str))
+
+            # Number.isInteger(x) / Number.isFinite(x) 等静态方法
+            if obj_type == 'Identifier' and obj.get('name') == 'Number':
+                if prop_name in ('isInteger', 'isFinite', 'isNaN'):
+                    args = expr.get('arguments', [])
+                    if args:
+                        var_name = _extract_js_var_name(args[0])
+                        if var_name:
+                            constraints.append(BranchConstraint(
+                                var_name=var_name, op='type_validated', value='Number.' + prop_name))
+
+        elif callee_type == 'Identifier' and callee.get('name') == 'isNaN':
+            # isNaN(x) — 当取反时（!isNaN(x)）表示是数字
+            args = expr.get('arguments', [])
+            if args:
+                var_name = _extract_js_var_name(args[0])
+                if var_name:
+                    constraints.append(BranchConstraint(
+                        var_name=var_name, op='type_validated', value='not_nan'))
+
         return constraints
 
     return constraints
@@ -1326,7 +1411,7 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
                     test_expr = param_expr.test.toDict() if hasattr(param_expr.test, 'toDict') else param_expr.test
                     constraints = extract_constraints_from_js_expr(test_expr)
                     for c in constraints:
-                        if c.op in ('==', '===', 'in'):
+                        if c.op in ('==', '===', 'in', 'type_validated', 'regex_validated'):
                             if c.var_name in true_names and c.var_name not in false_names:
                                 # 约束变量只在 true 分支 → true 路径中 var == fixed → 阻断
                                 logger.info("[AST] Ternary constraint BLOCKS: {} {} {}".format(c.var_name, c.op, c.value))
@@ -1822,7 +1907,7 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
                 # param_name 可能是列表形式（如 ['input']），统一转为字符串比较
                 _param_str = param_name[0] if isinstance(param_name, list) else str(param_name)
                 for c in constraints:
-                    if c.var_name == _param_str and c.op in ('==', '===', 'in'):
+                    if c.var_name == _param_str and c.op in ('==', '===', 'in', 'type_validated', 'regex_validated'):
                         logger.info("[AST] Branch constraint BLOCKS param {}: {} {}".format(param_name, c.op, c.value))
                         return -1, param, 0
 
@@ -1888,7 +1973,7 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
                     constraints = extract_constraints_from_js_expr(test_expr)
                     _param_str = param_name[0] if isinstance(param_name, list) else str(param_name)
                     for c in constraints:
-                        if c.var_name == _param_str and c.op in ('==', '===', 'in'):
+                        if c.var_name == _param_str and c.op in ('==', '===', 'in', 'type_validated', 'regex_validated'):
                             logger.info("[AST] While constraint BLOCKS param {}: {} {}".format(param_name, c.op, c.value))
                             return -1, param, 0
 
