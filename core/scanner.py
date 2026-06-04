@@ -21,6 +21,10 @@ from core.rule import Rule
 from core.matcher import VulnerabilityMatcher as Core
 from core.rule_generator import NewCore
 from core.core_engine.php.parser import find_sinks as php_find_sinks
+from core.core_engine.python.parser import find_sinks as python_find_sinks
+from core.core_engine.java.parser import find_sinks as java_find_sinks
+from core.core_engine.javascript.parser import find_sinks as js_find_sinks
+from core.core_engine.go.parser import find_sinks as go_find_sinks
 from Kunlun_M import const
 from Kunlun_M.const import VulnerabilityResult
 from utils.utils import show_context
@@ -416,26 +420,35 @@ class SingleRule(object):
                         # 需要用 file_list_parse 提取实际文件路径列表
                         scan_file_list = file_list_parse(self.files, language=self.lan)
                         if scan_file_list:
-                            indirect_sinks = php_find_sinks(sink_names, scan_file_list)
-                            if indirect_sinks:
-                                for sink_info in indirect_sinks:
-                                    if sink_info['is_indirect']:
-                                        file_path = sink_info['file_path']
-                                        lineno = str(sink_info['lineno'])
-                                        callee = sink_info['callee_name']
-                                        matched_text = '{callee}()'.format(callee=callee)
-                                        indirect_result = {
-                                            'file_path': file_path,
-                                            'lineno': lineno,
-                                            'matched_text': matched_text,
-                                            'node': sink_info['node'],
-                                            'is_indirect': True,
-                                            'sink_info': sink_info,
-                                        }
-                                        if result is None:
-                                            result = []
-                                        if isinstance(result, list):
-                                            result.append(indirect_result)
+                            # 按语言选择对应的 find_sinks
+                            _find_sinks_fn = {
+                                'php': php_find_sinks,
+                                'python': python_find_sinks,
+                                'java': java_find_sinks,
+                                'javascript': js_find_sinks,
+                                'go': go_find_sinks,
+                            }.get(self.lan)
+                            if _find_sinks_fn:
+                                indirect_sinks = _find_sinks_fn(sink_names, scan_file_list)
+                                if indirect_sinks:
+                                    for sink_info in indirect_sinks:
+                                        if sink_info['is_indirect']:
+                                            file_path = sink_info['file_path']
+                                            lineno = str(sink_info['lineno'])
+                                            callee = sink_info['callee_name']
+                                            matched_text = '{callee}()'.format(callee=callee)
+                                            indirect_result = {
+                                                'file_path': file_path,
+                                                'lineno': lineno,
+                                                'matched_text': matched_text,
+                                                'node': sink_info['node'],
+                                                'is_indirect': True,
+                                                'sink_info': sink_info,
+                                            }
+                                            if result is None:
+                                                result = []
+                                            if isinstance(result, list):
+                                                result.append(indirect_result)
             except Exception as e:
                 logger.debug('find_sinks exception ({e})'.format(e=e))
                 logger.debug(traceback.format_exc())

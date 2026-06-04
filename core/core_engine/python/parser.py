@@ -1539,6 +1539,105 @@ def _init_function_summaries(file_path):
         _summaries_initialized = True
 
 
+def find_sinks(sink_names, files):
+    """
+    AST-based sink 查找。遍历所有文件的 AST 节点，查找匹配的函数调用。
+    支持直接调用匹配和间接调用检测。
+
+    :param sink_names: list of SinkName(class_, method) from parse_sink_names()
+    :param files: 文件路径列表
+    :return: list of dict, 每项包含:
+        - 'file_path': 文件路径
+        - 'lineno': 行号
+        - 'node': AST 调用节点
+        - 'is_indirect': bool, 是否为间接调用
+        - 'callee_name': str, 被调用函数名
+        - 'class_name': str or None, 类名/对象名
+        - 'matched_sink': SinkName or None
+    """
+    from core.utils import SinkName
+
+    results = []
+
+    for file_path in files:
+        file_path = _ast_object_singleton.get_path(file_path)
+        if not file_path:
+            continue
+        tree = _ast_object_singleton.get_nodes(file_path)
+        if not tree or not hasattr(tree, 'body'):
+            continue
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+
+            call_name = _get_call_name(node)
+            func = node.func
+
+            # 间接调用检测：func 是 Name 且不是直接匹配的 sink
+            # 如 func_var = os.system; func_var(x)
+            is_indirect = False
+            if isinstance(func, ast.Name):
+                # 检查是否所有 sink 都不匹配这个简单名称
+                if not any(s.class_ is None and s.method == func.id for s in sink_names):
+                    # 如果 func.id 不匹配任何 sink 的 method，可能是间接调用
+                    # 但也可能是普通函数调用，只在 node.func 不是已知 sink 时标记
+                    is_indirect = False
+            elif isinstance(func, ast.Attribute):
+                pass
+            else:
+                # ast.Subscript 等其他类型 → 间接调用
+                # 如 globals()['os.system'](x)
+                is_indirect = True
+
+            if is_indirect:
+                for sink in sink_names:
+                    results.append({
+                        'file_path': file_path,
+                        'lineno': node.lineno if hasattr(node, 'lineno') else 0,
+                        'node': node,
+                        'is_indirect': True,
+                        'callee_name': '<indirect>',
+                        'class_name': None,
+                        'matched_sink': sink,
+                    })
+                    break
+                continue
+
+            if not call_name:
+                continue
+
+            for sink in sink_names:
+                if sink.class_ is None:
+                    # 模糊匹配：call_name == method 或 call_name 以 .method 结尾
+                    if call_name == sink.method or call_name.endswith('.' + sink.method):
+                        results.append({
+                            'file_path': file_path,
+                            'lineno': node.lineno if hasattr(node, 'lineno') else 0,
+                            'node': node,
+                            'is_indirect': False,
+                            'callee_name': call_name,
+                            'class_name': call_name.rsplit('.', 1)[0] if '.' in call_name else None,
+                            'matched_sink': sink,
+                        })
+                        break
+                else:
+                    # 精确匹配：call_name 应该是 class_.method
+                    if call_name == '{}.{}'.format(sink.class_, sink.method):
+                        results.append({
+                            'file_path': file_path,
+                            'lineno': node.lineno if hasattr(node, 'lineno') else 0,
+                            'node': node,
+                            'is_indirect': False,
+                            'callee_name': call_name,
+                            'class_name': sink.class_,
+                            'matched_sink': sink,
+                        })
+                        break
+
+    return results
+
+
 def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], controlled_params=[], svid=None):
     """
     Python AST scan parser - 分析敏感函数参数是否可控

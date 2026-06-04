@@ -2398,6 +2398,110 @@ def scan_parser(rule_match, vul_lineno, file_path,
     return results
 
 
+def find_sinks(sink_names, files):
+    """
+    AST-based sink 查找。遍历所有文件的 tree-sitter AST 节点，查找匹配的函数调用。
+    支持直接调用匹配和间接调用检测。
+
+    :param sink_names: list of SinkName(class_, method) from parse_sink_names()
+    :param files: 文件路径列表
+    :return: list of dict
+    """
+    from core.utils import SinkName
+
+    results = []
+
+    for file_path in files:
+        file_path = _ast_object_singleton.get_path(file_path)
+        if not file_path:
+            continue
+        tree = _parse_go_ast(file_path)
+        if not tree:
+            continue
+
+        def _walk_for_calls(node):
+            if node.type == 'call_expression':
+                func_text = _get_call_func_text(node)
+                if not func_text:
+                    return
+
+                # 提取函数名的短名（如 exec.Command → Command）
+                short_name = func_text.split('.')[-1] if '.' in func_text else func_text
+                # 提取包名/对象名（如 exec.Command → exec）
+                obj_name = func_text.rsplit('.', 1)[0] if '.' in func_text else None
+
+                # 间接调用检测：callee 是纯 identifier（变量调用 func()）
+                # 在 Go 中，如果 func_text 是纯标识符且不以大写字母开头，
+                # 或者 callee 节点是 identifier（不是 selector_expression），可能是变量调用
+                callee_node = node.children[0] if node.children else None
+                is_indirect = False
+                if callee_node and callee_node.type == 'identifier':
+                    # 纯变量调用如 funcVar() — 在 Go 中少见但可能
+                    # 检查是否不匹配任何 sink
+                    matched_any = False
+                    for sink in sink_names:
+                        if sink.class_ is None and func_text == sink.method:
+                            matched_any = True
+                            break
+                        if sink.class_ and func_text == '{}.{}'.format(sink.class_, sink.method):
+                            matched_any = True
+                            break
+                    if not matched_any:
+                        is_indirect = True
+
+                if is_indirect:
+                    lineno = node.start_point[0] + 1
+                    for sink in sink_names:
+                        results.append({
+                            'file_path': file_path,
+                            'lineno': lineno,
+                            'node': node,
+                            'is_indirect': True,
+                            'callee_name': func_text,
+                            'class_name': None,
+                            'matched_sink': sink,
+                        })
+                        break
+                    return
+
+                for sink in sink_names:
+                    if sink.class_ is None:
+                        # 模糊匹配
+                        if func_text == sink.method or short_name == sink.method or func_text.endswith('.' + sink.method):
+                            lineno = node.start_point[0] + 1
+                            results.append({
+                                'file_path': file_path,
+                                'lineno': lineno,
+                                'node': node,
+                                'is_indirect': False,
+                                'callee_name': func_text,
+                                'class_name': obj_name,
+                                'matched_sink': sink,
+                            })
+                            break
+                    else:
+                        # 精确匹配
+                        if func_text == '{}.{}'.format(sink.class_, sink.method):
+                            lineno = node.start_point[0] + 1
+                            results.append({
+                                'file_path': file_path,
+                                'lineno': lineno,
+                                'node': node,
+                                'is_indirect': False,
+                                'callee_name': func_text,
+                                'class_name': sink.class_,
+                                'matched_sink': sink,
+                            })
+                            break
+
+            for child in node.children:
+                _walk_for_calls(child)
+
+        _walk_for_calls(tree.root_node)
+
+    return results
+
+
 def analysis_params(param_name, parent_func_names, vul_function, lineno, file_path,
                     repair_functions=None, controlled_params=None, isexternal=False):
     """

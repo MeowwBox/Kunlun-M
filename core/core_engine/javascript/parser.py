@@ -2393,6 +2393,135 @@ def analysis(all_nodes, vul_function, back_node, vul_lineno, file_path, function
     return scan_results
 
 
+def _walk_ast_nodes(node, callback):
+    """递归遍历 esprima AST 节点，对每个节点调用 callback(node)"""
+    if node is None:
+        return
+    callback(node)
+    # 遍历所有可能的子节点属性
+    for attr in ('body', 'consequent', 'alternate', 'cases', 'block', 'expression',
+                 'declarations', 'init', 'test', 'update', 'argument', 'arguments',
+                 'left', 'right', 'object', 'property', 'callee', 'elements',
+                 'properties', 'key', 'value'):
+        child = getattr(node, attr, None)
+        if child is None:
+            continue
+        if isinstance(child, list):
+            for item in child:
+                if item is not None and hasattr(item, 'type'):
+                    _walk_ast_nodes(item, callback)
+        elif hasattr(child, 'type'):
+            _walk_ast_nodes(child, callback)
+
+
+def _extract_call_name_js(node):
+    """
+    从 CallExpression 节点提取调用名。
+    返回 (callee_name, is_indirect) 元组。
+    """
+    if not hasattr(node, 'type') or node.type != 'CallExpression':
+        return None, False
+
+    callee = node.callee
+    is_indirect = False
+
+    if callee.type == 'Identifier':
+        # 直接函数调用: func()
+        return callee.name, False
+    elif callee.type == 'MemberExpression':
+        # 方法调用: obj.method()
+        name = get_member_data(callee)
+        return name, False
+    else:
+        # 其他类型（如 CallExpression 作为 callee）：间接调用
+        return None, True
+
+
+def find_sinks(sink_names, files):
+    """
+    AST-based sink 查找。遍历所有文件的 AST 节点，查找匹配的函数调用。
+    支持直接调用匹配和间接调用检测。
+
+    :param sink_names: list of SinkName(class_, method) from parse_sink_names()
+    :param files: 文件路径列表
+    :return: list of dict
+    """
+    from core.utils import SinkName
+
+    results = []
+
+    for file_path in files:
+        file_path = ast_object.get_path(file_path)
+        if not file_path:
+            continue
+        _nodes = ast_object.get_nodes(file_path)
+        if not _nodes:
+            continue
+
+        if isinstance(_nodes, list):
+            all_nodes = _nodes
+        else:
+            all_nodes = getattr(_nodes, 'body', []) or []
+
+        def _check_node(node):
+            if not hasattr(node, 'type') or node.type != 'CallExpression':
+                return
+
+            callee_name, is_indirect = _extract_call_name_js(node)
+
+            if is_indirect or callee_name is None:
+                # 间接调用
+                lineno = node.loc.start.line if hasattr(node, 'loc') and node.loc else 0
+                for sink in sink_names:
+                    results.append({
+                        'file_path': file_path,
+                        'lineno': lineno,
+                        'node': node,
+                        'is_indirect': True,
+                        'callee_name': callee_name or '<indirect>',
+                        'class_name': None,
+                        'matched_sink': sink,
+                    })
+                    break
+                return
+
+            for sink in sink_names:
+                if sink.class_ is None:
+                    # 模糊匹配
+                    short_name = callee_name.split('.')[-1] if '.' in callee_name else callee_name
+                    if callee_name == sink.method or short_name == sink.method or callee_name.endswith('.' + sink.method):
+                        lineno = node.loc.start.line if hasattr(node, 'loc') and node.loc else 0
+                        results.append({
+                            'file_path': file_path,
+                            'lineno': lineno,
+                            'node': node,
+                            'is_indirect': False,
+                            'callee_name': callee_name,
+                            'class_name': callee_name.rsplit('.', 1)[0] if '.' in callee_name else None,
+                            'matched_sink': sink,
+                        })
+                        break
+                else:
+                    # 精确匹配
+                    if callee_name == '{}.{}'.format(sink.class_, sink.method):
+                        lineno = node.loc.start.line if hasattr(node, 'loc') and node.loc else 0
+                        results.append({
+                            'file_path': file_path,
+                            'lineno': lineno,
+                            'node': node,
+                            'is_indirect': False,
+                            'callee_name': callee_name,
+                            'class_name': sink.class_,
+                            'matched_sink': sink,
+                        })
+                        break
+
+        for top_node in all_nodes:
+            _walk_ast_nodes(top_node, _check_node)
+
+    return results
+
+
 def _init_function_summaries(file_path):
     """初始化 JS 文件的函数摘要"""
     global _summaries_initialized, _file_summaries

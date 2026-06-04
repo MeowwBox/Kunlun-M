@@ -1959,6 +1959,103 @@ def _build_result(code, scan_chain, cp, source_lines, lineno, file_path,
     }
 
 
+def find_sinks(sink_names, files):
+    """
+    AST-based sink 查找。遍历所有文件的 AST 节点，查找匹配的函数调用。
+    支持直接调用匹配（Java 反射间接调用暂不处理）。
+
+    :param sink_names: list of SinkName(class_, method) from parse_sink_names()
+    :param files: 文件路径列表
+    :return: list of dict
+    """
+    from core.utils import SinkName
+
+    results = []
+
+    for file_path in files:
+        file_path = _ast_object_singleton.get_path(file_path)
+        if not file_path:
+            continue
+        _nodes = _ast_object_singleton.get_nodes(file_path)
+        if not _nodes:
+            continue
+
+        # 使用 javalang 的 filter 遍历 MethodInvocation
+        try:
+            for path, node in _nodes.filter(javalang.tree.MethodInvocation):
+                qualifier = node.qualifier or ''
+                method_name = node.member
+                full_name = '{}.{}'.format(qualifier, method_name) if qualifier else method_name
+
+                for sink in sink_names:
+                    if sink.class_ is None:
+                        # 模糊匹配：method_name 或 full_name 以 .method 结尾
+                        if method_name == sink.method or full_name == sink.method or full_name.endswith('.' + sink.method):
+                            lineno = node.position[0] if hasattr(node, 'position') and node.position else 0
+                            results.append({
+                                'file_path': file_path,
+                                'lineno': lineno,
+                                'node': node,
+                                'is_indirect': False,
+                                'callee_name': full_name,
+                                'class_name': qualifier if qualifier else None,
+                                'matched_sink': sink,
+                            })
+                            break
+                    else:
+                        # 精确匹配：qualifier.method == class_.method
+                        if full_name == '{}.{}'.format(sink.class_, sink.method):
+                            lineno = node.position[0] if hasattr(node, 'position') and node.position else 0
+                            results.append({
+                                'file_path': file_path,
+                                'lineno': lineno,
+                                'node': node,
+                                'is_indirect': False,
+                                'callee_name': full_name,
+                                'class_name': sink.class_,
+                                'matched_sink': sink,
+                            })
+                            break
+
+            # 搜索 ClassCreator（构造函数调用，如 new ProcessBuilder()）
+            for path, node in _nodes.filter(javalang.tree.ClassCreator):
+                type_name = node.type.name if node.type and hasattr(node.type, 'name') else ''
+                if not type_name:
+                    continue
+
+                for sink in sink_names:
+                    if sink.class_ is None:
+                        if type_name == sink.method:
+                            lineno = node.position[0] if hasattr(node, 'position') and node.position else 0
+                            results.append({
+                                'file_path': file_path,
+                                'lineno': lineno,
+                                'node': node,
+                                'is_indirect': False,
+                                'callee_name': type_name,
+                                'class_name': None,
+                                'matched_sink': sink,
+                            })
+                            break
+                    else:
+                        if type_name == sink.class_ and sink.method == sink.class_:
+                            lineno = node.position[0] if hasattr(node, 'position') and node.position else 0
+                            results.append({
+                                'file_path': file_path,
+                                'lineno': lineno,
+                                'node': node,
+                                'is_indirect': False,
+                                'callee_name': type_name,
+                                'class_name': sink.class_,
+                                'matched_sink': sink,
+                            })
+                            break
+        except Exception:
+            continue
+
+    return results
+
+
 def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], controlled_params=[], is_config_vuln=False):
     """
     Java AST scan parser - 反向追踪模式

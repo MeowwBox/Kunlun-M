@@ -34,6 +34,11 @@ def parse_sink_names(match_string):
     if match_string.startswith('(') and match_string.endswith(')'):
         match_string = match_string[1:-1]
 
+    # 去掉正则转义字符（Go 规则的 match 常为 "exec\\.Command|os\\.StartProcess"）
+    # 只保留 \s, \*, \(, \) 等正则元字符的转义，去掉 \. 的转义
+    import re
+    match_string = re.sub(r'\\(.)', lambda m: m.group(1) if m.group(1) not in ('s', '*', '(', ')', '[', ']', '{', '}', '+', '?', '|', '^', '$') else m.group(0), match_string)
+
     raw_names = match_string.split('|')
     result = []
     for name in raw_names:
