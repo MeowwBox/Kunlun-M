@@ -226,9 +226,13 @@ def get_param(param, is_eval=False, is_function_regex=False):
     if type == "Identifier":
         param_list.append(param.name)
 
-    elif type == "Literal":
+    elif type == "Literal" or type in ("StringLiteral", "NumericLiteral", "BooleanLiteral", "RegExpLiteral", "NullLiteral", "TemplateLiteral"):
         if is_eval:
-            param_list.append(param.value)
+            if type == "TemplateLiteral":
+                # TemplateLiteral has quasis (static parts) and expressions
+                param_list.append(param.quasis[0].value.raw if param.quasis else '')
+            else:
+                param_list.append(param.value)
 
     elif type == "BinaryExpression":
         left = get_param(param.left, is_eval)

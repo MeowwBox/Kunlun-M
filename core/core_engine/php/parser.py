@@ -1921,6 +1921,11 @@ def _parameters_back_impl(param, nodes, function_params=None, lineno=0,
             if is_co == 1:  # 目标确定直接返回
                 return is_co, cp, expr_lineno
 
+            # If 处理未得到确定结果，继续外层回溯
+            return parameters_back(param, nodes[:-1], function_params, lineno,
+                                    function_flag=function_flag, vul_function=vul_function,
+                                    file_path=file_path, isback=isback, parent_node=0)
+
         elif isinstance(node, php.While) or isinstance(node, php.DoWhile):
             logger.debug(
                 "[AST] param {} line {} in while, start ast in while".format(param_name, node.lineno))
