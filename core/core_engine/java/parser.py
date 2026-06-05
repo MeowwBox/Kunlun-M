@@ -409,6 +409,9 @@ def _get_java_expr_name(expr):
         return expr.member
     if isinstance(expr, javalang.tree.This):
         return 'this'
+    # MethodInvocation: e.g. port.charAt(0) → 'port'
+    if isinstance(expr, javalang.tree.MethodInvocation) and expr.qualifier:
+        return _get_java_expr_name(expr.qualifier)
     return None
 
 
