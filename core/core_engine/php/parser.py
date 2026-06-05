@@ -26,6 +26,7 @@ from core.core_engine.php.builtin_knowledge import KNOWLEDGE as PHP_BUILTIN_KNOW
 from core.core_engine.trace_cache import TraceCache
 from core.core_engine.branch_constraint import BranchConstraint
 from core.core_engine.php.summary_generator import lookup_summary
+from core.core_engine.php.source_discovery import SourceRegistry, discover_sources, extract_method_object_name, get_simple_name
 
 # lphply >= 2.0.0 新增的等价节点类型（字段与原类型完全一致）
 _METHOD_CALL_TYPES = (php.MethodCall, getattr(php, 'NullsafeMethodCall', php.MethodCall))
@@ -45,6 +46,7 @@ _trace_cache = TraceCache("php")
 _summaries_initialized = False
 _file_summaries = {}
 all_nodes = []
+_source_registry = None  # Source Discovery 注册表，在 scan_parser 首次调用时初始化
 BASE_FUNCTIONCALL_LIST = ['FunctionCall', 'MethodCall', 'StaticMethodCall', 'ObjectProperty', 'NullsafeMethodCall', 'NullsafeProperty']
 SPECIAL_FUNCTIONCALL_LIST = ['Eval', 'Echo', 'Print', 'Return', 'Break', 'Include',
                          'Require', 'Exit', 'Throw', 'Unset', 'Continue', 'Yield', 'Silence']
@@ -704,6 +706,24 @@ def function_back(param, nodes, function_params, vul_function=None, file_path=No
                     return 'deps', deps, getattr(param, 'lineno', 0)
             # 知识库有记录但没有 passthrough 且 safe=False → 不透传不可控
             return -1, param, 0
+
+        # ---- 检查 Source Discovery ----
+        if _source_registry is not None:
+            # 检查框架方法调用: $request->input() 等
+            if isinstance(param, _METHOD_CALL_TYPES) and _source_registry.framework:
+                obj_name = extract_method_object_name(param.node)
+                if obj_name:
+                    method_name = get_simple_name(param.name)
+                    if method_name and _source_registry.is_framework_request_method(obj_name, method_name):
+                        logger.debug("[AST][PHP] Source Discovery: framework method {0}()->{1} is controllable".format(
+                            obj_name, method_name))
+                        return 1, param, getattr(param, 'lineno', 0)
+
+            # 检查用户自定义 source producer 函数 和 框架全局函数
+            func_name_sd = get_simple_name(param.name)
+            if func_name_sd and _source_registry.is_source_producer(func_name_sd):
+                logger.debug("[AST][PHP] Source Discovery: {0} is a source producer".format(func_name_sd))
+                return 1, param, getattr(param, 'lineno', 0)
 
         # ---- 查函数摘要 ----
         callee_summary = lookup_summary(function_name)
@@ -3439,6 +3459,13 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
         is_controlled_params = controlled_params
         _trace_cache.clear()
         all_nodes = ast_object.get_nodes(file_path)
+
+        # Source Discovery: 首次调用时初始化
+        global _source_registry
+        if _source_registry is None:
+            target_dir = ast_object.target_directory if hasattr(ast_object, 'target_directory') else ''
+            if target_dir:
+                _source_registry = discover_sources(target_dir, ast_object)
 
         for func in sensitive_func:  # 循环判断代码中是否存在敏感函数，若存在，递归判断参数是否可控;对文件内容循环判断多次
             back_node = []
