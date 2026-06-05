@@ -1,5 +1,10 @@
 ## 更新日志
 - 2026-06-05
+  - KunLun-M 2.13.3
+  - **修复 PHP 引擎字符串拼接中方法调用参数丢失**
+    - `get_binaryop_deep_params()` 新增 `MethodCall`/`StaticMethodCall`/`ObjectProperty` 三种节点类型处理
+    - 修复 `$obj->method($_GET['x'])` 和 `Class::method($_GET['x'])` 在字符串拼接场景（BinaryOp）中被静默丢弃导致可控参数漏报的问题
+- 2026-06-05
   - **分支约束 benchmark 90 用例：89/90 通过（98.9%）**
     - `BranchConstraint.negate()` 支持 `type_validated`/`regex_validated` 取反（修复 else 分支误阻断）
     - JS: 新增 `typeof x === 'number'` 验证函数检测
