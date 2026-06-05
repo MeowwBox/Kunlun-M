@@ -2708,6 +2708,10 @@ def scan_parser(rule_match, vul_lineno, file_path,
                 # 直接可控源
                 if _is_controllable_source(var_name, controlled_params):
                     logger.debug("[AST][Go] Variable {} controllable".format(var_name))
+                    # 分支约束检查
+                    if _check_go_branch_constraints(file_path, vul_lineno, var_name):
+                        logger.info("[AST][Go] Branch constraint BLOCKS var {} at line {}".format(var_name, vul_lineno))
+                        continue
                     results.append({'code': 1, 'chain': [
                         ('source', var_name, file_path, vul_lineno),
                         ('sink', matched_func, file_path, vul_lineno)
@@ -2720,6 +2724,10 @@ def scan_parser(rule_match, vul_lineno, file_path,
                     repair_functions, controlled_params
                 )
                 if trace_code == 1:
+                    # 分支约束检查
+                    if _check_go_branch_constraints(file_path, vul_lineno, var_name):
+                        logger.info("[AST][Go] Branch constraint BLOCKS var {} at line {}".format(var_name, vul_lineno))
+                        continue
                     results.append({'code': 1, 'chain': [
                         ('source', var_name, file_path, src_lineno if src_lineno else vul_lineno),
                         ('sink', matched_func, file_path, vul_lineno)
