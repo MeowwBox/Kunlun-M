@@ -1116,30 +1116,28 @@ def _get_body_nodes(node):
 
 def _get_max_lineno(nodes):
     """递归获取节点列表中所有节点的最大行号（包括嵌套子节点）"""
+    _ATTRS = frozenset(('nodes', 'expr', 'node', 'elseifs', 'else_',
+                        'params', 'key', 'value', 'arguments',
+                        'iftrue', 'iffalse', 'left', 'right',
+                        'condition', 'consequent', 'alternate'))
     max_lineno = 0
-    for node in nodes:
+
+    def _walk(node):
+        nonlocal max_lineno
         if node is None:
-            continue
+            return
+        if isinstance(node, list):
+            for n in node:
+                _walk(n)
+            return
         if hasattr(node, 'lineno') and node.lineno:
             max_lineno = max(max_lineno, int(node.lineno))
-        # 递归处理子节点列表属性
-        for attr in ('nodes', 'expr', 'node', 'elseifs', 'else_', 'params', 'key', 'value', 'arguments'):
+        for attr in _ATTRS:
             child = getattr(node, attr, None)
-            if child is None:
-                continue
-            if isinstance(child, list):
-                max_lineno = max(max_lineno, _get_max_lineno(child))
-            elif hasattr(child, 'lineno'):
-                max_lineno = max(max_lineno, int(child.lineno))
-                # 再递归一层（处理 Block 节点等情况）
-                for sub_attr in ('nodes', 'node'):
-                    sub_child = getattr(child, sub_attr, None)
-                    if sub_child is None:
-                        continue
-                    if isinstance(sub_child, list):
-                        max_lineno = max(max_lineno, _get_max_lineno(sub_child))
-                    elif hasattr(sub_child, 'lineno'):
-                        max_lineno = max(max_lineno, int(sub_child.lineno))
+            if child is not None:
+                _walk(child)
+
+    _walk(nodes)
     return max_lineno
 
 
@@ -1184,7 +1182,7 @@ def _find_sink_branch(if_node, lineno):
                 body_nodes = []
 
             if body_nodes:
-                end = body_nodes[-1].lineno
+                end = _get_max_lineno(body_nodes)
             else:
                 end = start
 
@@ -1917,6 +1915,10 @@ def _parameters_back_impl(param, nodes, function_params=None, lineno=0,
                 is_co, cp, expr_lineno = parameters_back(param, body_nodes, function_params, lineno,
                                                          function_flag=function_flag, vul_function=vul_function,
                                                          file_path=file_path, isback=isback, parent_node=node)
+
+                # 分支体内发现新追踪变量时，更新 param 以便外层继续追踪
+                if is_co == 3 and cp != param:
+                    param = cp
 
             if is_co == 1:  # 目标确定直接返回
                 return is_co, cp, expr_lineno
