@@ -258,6 +258,16 @@ def get_binaryop_deep_params(node, params, real_back=False):  # 取出right，le
     if isinstance(node, php.FunctionCall):  # node为FunctionCall，递归取出其中变量名
         params = get_all_params(node.params)
 
+    if isinstance(node, _METHOD_CALL_TYPES):  # 方法调用（$obj->method()），递归提取参数
+        params = get_all_params(node.params)
+
+    if isinstance(node, php.StaticMethodCall):  # 静态方法调用（Class::method()），递归提取参数
+        params = get_all_params(node.params)
+
+    if isinstance(node, _OBJECT_PROPERTY_TYPES):  # 对象属性（$obj->prop），提取对象变量名
+        param = get_node_name(node.node)
+        params.append(param)
+
     if isinstance(node, php.Constant):
         params.append(node)
 
