@@ -23,6 +23,7 @@ from core.pretreatment import ast_object as _ast_object_singleton
 from core.core_engine.trace_cache import TraceCache
 from core.core_engine.branch_constraint import BranchConstraint
 from core.core_engine.c.builtin_knowledge import lookup as lookup_builtin, KNOWLEDGE as _BUILTIN_KNOWLEDGE
+from core.core_engine.c.source_discovery import SourceRegistry, SourceInfo, discover_sources
 from core.core_engine.c.summary_generator import lookup_summary, _summary_registry
 from core.core_engine.function_summary import SummaryCacheManager
 
@@ -63,6 +64,8 @@ _ast_cache = {}
 # 函数定义索引: (file_path, func_name) → (param_names, func_body_node, def_lineno, end_lineno)
 _func_def_index = {}
 _func_def_indexed_files = set()
+
+_sd_registry = None  # Source Discovery 注册表
 
 # ---------------------------------------------------------------------------
 # C/C++ 可控输入源
@@ -1165,6 +1168,10 @@ def _is_controllable_source(expr_str, controlled_params=None):
     for src in C_CONTROLLED_SOURCES:
         if src in expr_str:
             return True
+
+    # Source Discovery: 检查用户自定义 source
+    if _sd_registry and _sd_registry.is_source_member(expr_str):
+        return True
 
     return False
 
@@ -2553,6 +2560,14 @@ def scan_parser(rule_match, vul_lineno, file_path,
 
     # ---- tree-sitter 解析 AST ----
     ast_tree = _parse_c_ast(file_path)
+    # ---- Source Discovery 预处理 ----
+    global _sd_registry
+    _sd_registry = discover_sources(os.path.dirname(os.path.abspath(file_path)), ast_tree, file_path,
+                                     extra_sources=C_CONTROLLED_SOURCES)
+    # 注入 user source producers 到 C_CONTROLLED_SOURCES
+    for func_name in _sd_registry.user_source_functions:
+        if func_name not in C_CONTROLLED_SOURCES:
+            C_CONTROLLED_SOURCES.append(func_name)
     call_node = None
     ast_args = []
 
