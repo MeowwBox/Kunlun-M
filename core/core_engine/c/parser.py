@@ -1991,6 +1991,11 @@ def function_back_c(func_name, call_args, vul_lineno, file_path,
             if knowledge.get("safe") and not knowledge.get("passthrough") and not knowledge.get("param_flow"):
                 return (-1, [])
 
+        # 1.2. Source Discovery: 检查是否是用户自定义 source producer
+        if _sd_registry and _sd_registry.is_source_producer(func_name):
+            logger.debug('[AST][C] Source Discovery: {} is a user source producer'.format(func_name))
+            return (1, [])
+
         # 1.5. 查函数摘要
         callee_summary = lookup_summary(func_name)
         if callee_summary and callee_summary.return_flow:

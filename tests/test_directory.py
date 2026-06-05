@@ -28,7 +28,7 @@ def test_file():
     files, file_sum, time_consume = Directory(absolute_path).collect_files()
     files_dict = dict(files)
     assert '.php' in files_dict
-    assert files_dict['.php']['count'] == 2
+    assert files_dict['.php']['count'] == 4
     assert 'v.php' in files_dict['.php']['list']
     assert file_sum >= 2
     assert time_consume < 1
