@@ -21,6 +21,7 @@ from core.core_engine.trace_cache import TraceCache
 from core.core_engine.branch_constraint import BranchConstraint
 from core.core_engine.javascript.builtin_knowledge import lookup as lookup_builtin
 from core.core_engine.javascript.summary_generator import lookup_summary
+from core.core_engine.javascript.source_discovery import SourceRegistry, discover_sources
 
 default_controlled_params = [
     'location.hash',
@@ -106,6 +107,7 @@ is_controlled_params = []
 scan_chain = []  # 回溯链变量
 
 _trace_cache = TraceCache("javascript")
+_source_registry = None
 
 _summaries_initialized = False
 _file_summaries = {}
@@ -533,6 +535,14 @@ def function_back(function_node, function_params, back_nodes=None, file_path=Non
             if deps_formal:
                 return ('deps', deps_formal, function_lineno)
         return -1, "Function()", 0
+
+    # Source Discovery check: user-defined source producer
+    global _source_registry
+    if _source_registry is not None:
+        source_info = _source_registry.is_source_producer(function_name)
+        if source_info:
+            logger.debug('[AST] Source Discovery: {0} is a source producer ({1})'.format(function_name, source_info.origin))
+            return 1, function_node, 0
 
     # 寻找函数体中的 ReturnStatement
     return_node = None
@@ -2748,6 +2758,14 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
         _summaries_initialized = False
         _init_function_summaries(file_path)
         scan_chain = ['start']
+        # Initialize Source Discovery (once per project)
+        global _source_registry
+        if _source_registry is None:
+            project_dir = os.path.dirname(os.path.abspath(file_path))
+            try:
+                _source_registry = discover_sources(project_dir, ast_object)
+            except Exception as e:
+                logger.debug('[AST] Source Discovery init error: {0}'.format(e))
         scan_results = []
         is_repair_functions = repair_functions
         is_controlled_params = controlled_params.copy()
