@@ -491,6 +491,25 @@ def _extract_constraints_from_c_expr(cond_node):
                     return constraints
         return constraints
 
+    if node_type == 'call_expression':
+        func_node = None
+        args = []
+        for child in cond_node.children:
+            if child.type == 'identifier':
+                func_node = child
+            elif child.type == 'argument_list':
+                args = [c for c in child.children if c.type not in (',', '(', ')')]
+
+        if func_node and args:
+            func_name = _node_text(func_node)
+            CTYPE_FUNCS = {'isdigit', 'isalpha', 'isalnum', 'isxdigit', 'isupper', 'islower', 'isprint', 'ispunct', 'isspace'}
+            if func_name in CTYPE_FUNCS and len(args) >= 1:
+                var_name = _get_c_var_name(args[0])
+                if var_name:
+                    constraints.append(BranchConstraint(var_name=var_name, op='type_validated', value=func_name))
+
+        return constraints
+
     if node_type == 'parenthesized_expression':
         if cond_node.children and len(cond_node.children) >= 2:
             return _extract_constraints_from_c_expr(cond_node.children[1])
@@ -684,7 +703,7 @@ def _check_if_branch_constraint(if_node, vul_lineno, var_name):
     for c in constraints:
         if c.var_name != var_name:
             continue
-        if in_if and c.op in ('==', 'in'):
+        if in_if and c.op in ('==', 'in', 'type_validated', 'regex_validated'):
             logger.info("[AST][C] Branch constraint BLOCKS: if ({} {} {}) at line {}".format(
                 c.var_name, c.op, c.value, vul_lineno))
             return True
@@ -749,7 +768,7 @@ def _check_while_constraint(while_node, vul_lineno, var_name):
     constraints = _extract_constraints_from_c_expr(inner_cond)
 
     for c in constraints:
-        if c.var_name == var_name and c.op in ('==', 'in'):
+        if c.var_name == var_name and c.op in ('==', 'in', 'type_validated', 'regex_validated'):
             logger.info("[AST][C] While constraint BLOCKS: while ({} {} {}) at line {}".format(
                 c.var_name, c.op, c.value, vul_lineno))
             return True
@@ -1640,7 +1659,7 @@ def _analyze_rhs_node(rhs_node, var_name, file_path, lineno, to_line,
             # var_name (追踪变量如 result) 不在条件约束中，但条件约束的变量（如 cmd）在分支中
             # 所以：约束变量在 true 分支 + op== → 阻断 true 分支
             #       约束变量在 false 分支 + op!= → 阻断 false 分支
-            if c.op in ('==', 'in') and c_name in true_names and c_name not in false_names:
+            if c.op in ('==', 'in', 'type_validated', 'regex_validated') and c_name in true_names and c_name not in false_names:
                 logger.info("[AST][C] Ternary constraint BLOCKS: {} {} {} at line {}".format(
                     c_name, c.op, c.value, lineno))
                 return (-1, 0)
@@ -2475,6 +2494,7 @@ def scan_parser(rule_match, vul_lineno, file_path,
     code 含义：1=可控, 2=已修复, 3=未确认, 4=NewFunction, -1=不可控
     """
     global scan_results, is_repair_functions, is_controlled_params, scan_chain
+    _trace_cache.clear()
 
     if repair_functions is None:
         repair_functions = []

@@ -11,7 +11,6 @@
     :license:   MIT, see LICENSE for more details.
     :copyright: Copyright (c) 2017 Feei. All rights reserved
 """
-import os
 import re
 import traceback
 
@@ -54,8 +53,6 @@ class CAST(object):
             if self.file_path[-len(language):].lower() == language:
                 self.language = self.languages[language]
 
-        if os.path.isdir(self.target_directory):
-            os.chdir(self.target_directory)
         # Parse rule
         self.regex = {
             'java': {

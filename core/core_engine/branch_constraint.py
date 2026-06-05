@@ -43,6 +43,8 @@ class BranchConstraint:
             '!=': '==', '!==': '===',
             'isset': '!isset', '!isset': 'isset',
             'in': 'not in', 'not in': 'in',
+            'type_validated': 'not_type_validated',
+            'regex_validated': 'not_regex_validated',
         }
         return BranchConstraint(
             var_name=self.var_name,

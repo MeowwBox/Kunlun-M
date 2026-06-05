@@ -705,12 +705,62 @@ def _find_sink_branch_py(if_stmt, vul_lineno):
     return 'outside'
 
 
+# Python 类型验证方法 — x.isdigit() 等方法调用返回 true 时变量被约束为安全类型
+_TYPE_CHECK_METHODS = frozenset({
+    'isdigit', 'isnumeric', 'isdecimal',
+    'isalpha', 'isalnum',
+})
+
+
+def _is_numeric_type_tuple(node):
+    """检查 AST 节点是否为数值类型元组（如 (int, float)）"""
+    if isinstance(node, ast.Tuple):
+        return all(
+            (isinstance(elt, ast.Name) and elt.id in ('int', 'float', 'complex', 'bool'))
+            for elt in node.elts
+        )
+    # 单个类型：isinstance(x, int)
+    if isinstance(node, ast.Name):
+        return node.id in ('int', 'float', 'complex', 'bool')
+    return False
+
+
+def _is_strict_regex(pattern, is_fullmatch=False):
+    """判断正则是否为严格全匹配模式（安全）。
+
+    :param pattern: 正则字符串
+    :param is_fullmatch: True 表示默认全匹配（如 re.fullmatch），不需要 ^...$ 锚定
+    """
+    if not pattern or not isinstance(pattern, str):
+        return False
+
+    if is_fullmatch:
+        body = pattern
+    else:
+        if len(pattern) < 4:
+            return False
+        if not pattern.startswith('^') or not pattern.endswith('$'):
+            return False
+        body = pattern[1:-1]
+
+    # 去掉转义的 \. 后检查是否含未转义的 .
+    stripped = body.replace('\\.', '')
+    if '.' in stripped:
+        return False
+    # 不含 * 或 ?（任意次数匹配）
+    if '*' in stripped or '?' in stripped:
+        return False
+    return True
+
+
 def extract_constraints_from_py_expr(expr):
     """
     从 Python 条件表达式中提取 BranchConstraint 列表。
 
     使用标准库 ast 模块的节点类型：
-    - isinstance(x, type)    -> 类型约束（暂不提取）
+    - isinstance(x, type)    -> 类型约束（type_validated）
+    - x.isdigit() / x.isalpha() -> 类型约束（type_validated）
+    - re.match/r'^\\d+$', x / re.fullmatch(r'...', x) -> 正则约束（regex_validated）
     - x is None / x is not None -> 等值约束
     - x == value / x != value   -> 等值约束
     - x in list              -> 成员约束（简化：提取变量名，op='in'）
@@ -771,9 +821,31 @@ def extract_constraints_from_py_expr(expr):
         return constraints
 
     if isinstance(expr, ast.Call):
-        # isinstance(x, type) → 暂不提取（类型对可控性无直接影响）
-        # hasattr(x, attr) → 暂不提取
-        pass
+        func_name = _get_call_name(expr)
+
+        # isinstance(x, (int, float)) → x 被约束为数值类型
+        if func_name == 'isinstance' and len(expr.args) >= 2:
+            var_name = _get_name(expr.args[0])
+            if var_name and _is_numeric_type_tuple(expr.args[1]):
+                constraints.append(BranchConstraint(
+                    var_name=var_name, op='type_validated', value='isinstance_numeric'))
+
+        # x.isdigit() / x.isnumeric() 等方法调用
+        elif isinstance(expr.func, ast.Attribute):
+            var_name = _get_name(expr.func.value)
+            method = expr.func.attr
+            if var_name and method in _TYPE_CHECK_METHODS:
+                constraints.append(BranchConstraint(
+                    var_name=var_name, op='type_validated', value=method))
+
+        # re.match(r'^\d+$', x) / re.fullmatch(r'...', x) — 严格正则
+        if func_name in ('re.match', 're.fullmatch') and len(expr.args) >= 2:
+            pattern = _extract_py_literal(expr.args[0])
+            var_name = _get_name(expr.args[1])
+            if var_name and pattern and isinstance(pattern, str):
+                if _is_strict_regex(pattern, func_name == 're.fullmatch'):
+                    constraints.append(BranchConstraint(
+                        var_name=var_name, op='regex_validated', value=pattern))
 
     return constraints
 
@@ -862,7 +934,7 @@ def _trace_stmt(param_name, stmt, vul_lineno, file_path,
 
         # 3. 立即检查约束（仅在 sink 在具体分支内时执行）
         for c in constraints:
-            if c.var_name == param_name and c.op in ('==', '===', 'in'):
+            if c.var_name == param_name and c.op in ('==', '===', 'in', 'type_validated', 'regex_validated'):
                 logger.info("[AST][Python] Branch constraint BLOCKS param {}: {} {}".format(param_name, c.op, c.value))
                 return -1, None, 0
 
@@ -955,7 +1027,7 @@ def _trace_stmt(param_name, stmt, vul_lineno, file_path,
         if sink_in_body:
             constraints = extract_constraints_from_py_expr(stmt.test)
             for c in constraints:
-                if c.var_name == param_name and c.op in ('==', '===', 'in'):
+                if c.var_name == param_name and c.op in ('==', '===', 'in', 'type_validated', 'regex_validated'):
                     logger.info("[AST][Python] While constraint BLOCKS param {}: {} {} {}".format(
                         param_name, c.var_name, c.op, c.value))
                     return -1, None, 0
@@ -1106,7 +1178,7 @@ def _trace_expr(param_name, expr, lineno, file_path,
         _collect_names(expr.orelse, false_names, 0)
         constraints = extract_constraints_from_py_expr(expr.test)
         for c in constraints:
-            if c.op in ('==', '===', 'in'):
+            if c.op in ('==', '===', 'in', 'type_validated', 'regex_validated'):
                 if c.var_name in true_names and c.var_name not in false_names:
                     # 约束变量只在 true 分支 → true 路径中 var == fixed → 阻断
                     logger.info("[AST][Python] Ternary constraint BLOCKS: {} {} {}".format(c.var_name, c.op, c.value))
@@ -1537,6 +1609,105 @@ def _init_function_summaries(file_path):
     except Exception as e:
         logger.debug(f"[AST][Python] 摘要初始化失败: {e}")
         _summaries_initialized = True
+
+
+def find_sinks(sink_names, files):
+    """
+    AST-based sink 查找。遍历所有文件的 AST 节点，查找匹配的函数调用。
+    支持直接调用匹配和间接调用检测。
+
+    :param sink_names: list of SinkName(class_, method) from parse_sink_names()
+    :param files: 文件路径列表
+    :return: list of dict, 每项包含:
+        - 'file_path': 文件路径
+        - 'lineno': 行号
+        - 'node': AST 调用节点
+        - 'is_indirect': bool, 是否为间接调用
+        - 'callee_name': str, 被调用函数名
+        - 'class_name': str or None, 类名/对象名
+        - 'matched_sink': SinkName or None
+    """
+    from core.utils import SinkName
+
+    results = []
+
+    for file_path in files:
+        file_path = _ast_object_singleton.get_path(file_path)
+        if not file_path:
+            continue
+        tree = _ast_object_singleton.get_nodes(file_path)
+        if not tree or not hasattr(tree, 'body'):
+            continue
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+
+            call_name = _get_call_name(node)
+            func = node.func
+
+            # 间接调用检测：func 是 Name 且不是直接匹配的 sink
+            # 如 func_var = os.system; func_var(x)
+            is_indirect = False
+            if isinstance(func, ast.Name):
+                # 检查是否所有 sink 都不匹配这个简单名称
+                if not any(s.class_ is None and s.method == func.id for s in sink_names):
+                    # 如果 func.id 不匹配任何 sink 的 method，可能是间接调用
+                    # 但也可能是普通函数调用，只在 node.func 不是已知 sink 时标记
+                    is_indirect = False
+            elif isinstance(func, ast.Attribute):
+                pass
+            else:
+                # ast.Subscript 等其他类型 → 间接调用
+                # 如 globals()['os.system'](x)
+                is_indirect = True
+
+            if is_indirect:
+                for sink in sink_names:
+                    results.append({
+                        'file_path': file_path,
+                        'lineno': node.lineno if hasattr(node, 'lineno') else 0,
+                        'node': node,
+                        'is_indirect': True,
+                        'callee_name': '<indirect>',
+                        'class_name': None,
+                        'matched_sink': sink,
+                    })
+                    break
+                continue
+
+            if not call_name:
+                continue
+
+            for sink in sink_names:
+                if sink.class_ is None:
+                    # 模糊匹配：call_name == method 或 call_name 以 .method 结尾
+                    if call_name == sink.method or call_name.endswith('.' + sink.method):
+                        results.append({
+                            'file_path': file_path,
+                            'lineno': node.lineno if hasattr(node, 'lineno') else 0,
+                            'node': node,
+                            'is_indirect': False,
+                            'callee_name': call_name,
+                            'class_name': call_name.rsplit('.', 1)[0] if '.' in call_name else None,
+                            'matched_sink': sink,
+                        })
+                        break
+                else:
+                    # 精确匹配：call_name 应该是 class_.method
+                    if call_name == '{}.{}'.format(sink.class_, sink.method):
+                        results.append({
+                            'file_path': file_path,
+                            'lineno': node.lineno if hasattr(node, 'lineno') else 0,
+                            'node': node,
+                            'is_indirect': False,
+                            'callee_name': call_name,
+                            'class_name': sink.class_,
+                            'matched_sink': sink,
+                        })
+                        break
+
+    return results
 
 
 def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], controlled_params=[], svid=None):

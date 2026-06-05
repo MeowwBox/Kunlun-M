@@ -22,6 +22,48 @@ _file_summaries = {}
 _scan_function_stack = []  # 函数追踪栈，防递归
 
 
+# Java 静态方法验证类 — qualifier.method() 返回 true 时参数被约束为安全类型
+TYPE_VALIDATION_CLASSES = {
+    'StringUtils': {'isNumeric', 'isAlpha', 'isAlphanumeric', 'isAlphaSpace', 'isNumericSpace'},
+    'NumberUtils': {'isDigits', 'isCreatable', 'isParsable'},
+}
+
+
+def _is_strict_regex(pattern, is_fullmatch=True):
+    """判断正则是否为严格全匹配模式（安全）。
+
+    :param pattern: 正则字符串
+    :param is_fullmatch: True 表示默认全匹配（如 Java matches()），不需要 ^...$ 锚定
+    """
+    if not pattern or not isinstance(pattern, str):
+        return False
+
+    if is_fullmatch:
+        body = pattern
+    else:
+        if len(pattern) < 4:
+            return False
+        if not pattern.startswith('^') or not pattern.endswith('$'):
+            return False
+        body = pattern[1:-1]
+
+    # 去掉转义的 \. 后检查是否含未转义的 .
+    stripped = body.replace('\\.', '')
+    if '.' in stripped:
+        return False
+    if '*' in stripped or '?' in stripped:
+        return False
+    return True
+
+
+def _get_java_literal_str(expr):
+    """从 Java 表达式提取字符串字面量值（去除引号）"""
+    val = _get_java_literal(expr)
+    if isinstance(val, str):
+        return val
+    return None
+
+
 def _expr_to_text(expr, source_lines):
     """将 AST 表达式转为源码文本（从源码行读取，fallback 用 str()）"""
     if expr is None:
@@ -314,6 +356,43 @@ def extract_constraints_from_java_expr(expr):
                 if hasattr(expr, 'prefix_operators') and '!' in expr.prefix_operators:
                     c = c.negate()
                 constraints.append(c)
+            return constraints
+
+        # --- 验证函数识别 ---
+
+        # str.matches(pattern) — 正则匹配
+        if hasattr(expr, 'member') and expr.member == 'matches' and len(expr.arguments or []) >= 1:
+            pattern = _get_java_literal_str(expr.arguments[0])
+            if pattern and _is_strict_regex(pattern, is_fullmatch=True):
+                var_name = _get_java_expr_name(expr.qualifier) if expr.qualifier else None
+                if var_name:
+                    constraints.append(BranchConstraint(
+                        var_name=var_name, op='regex_validated', value=pattern))
+                    return constraints
+
+        # Character.isDigit(ch) 等单字符类型检查
+        if hasattr(expr, 'member') and expr.member in ('isDigit', 'isLetter', 'isLetterOrDigit'):
+            qualifier_name = _get_java_expr_name(expr.qualifier) if expr.qualifier else None
+            if qualifier_name == 'Character' and len(expr.arguments or []) >= 1:
+                var_name = _get_java_expr_name(expr.arguments[0])
+                if var_name:
+                    constraints.append(BranchConstraint(
+                        var_name=var_name, op='type_validated', value='Character.' + expr.member))
+                    return constraints
+
+        # StringUtils.isNumeric(x) / NumberUtils.isDigits(x) 等静态方法验证
+        if hasattr(expr, 'member') and hasattr(expr, 'qualifier') and expr.qualifier:
+            qualifier_name = _get_java_expr_name(expr.qualifier)
+            if qualifier_name in TYPE_VALIDATION_CLASSES:
+                if expr.member in TYPE_VALIDATION_CLASSES[qualifier_name]:
+                    if len(expr.arguments or []) >= 1:
+                        var_name = _get_java_expr_name(expr.arguments[0])
+                        if var_name:
+                            constraints.append(BranchConstraint(
+                                var_name=var_name, op='type_validated',
+                                value=qualifier_name + '.' + expr.member))
+                            return constraints
+
         return constraints
 
     # x != null → BinaryOperation(operator='!=', operandl=MemberReference, operandr=Literal('null'))
@@ -330,6 +409,9 @@ def _get_java_expr_name(expr):
         return expr.member
     if isinstance(expr, javalang.tree.This):
         return 'this'
+    # MethodInvocation: e.g. port.charAt(0) → 'port'
+    if isinstance(expr, javalang.tree.MethodInvocation) and expr.qualifier:
+        return _get_java_expr_name(expr.qualifier)
     return None
 
 
@@ -435,7 +517,7 @@ def parameters_back(param_name, stmts, vul_lineno, file_path,
             if sink_branch == 'if':
                 then_stmts = _get_block_stmts(stmt.then_statement) if stmt.then_statement else []
                 for c in java_constraints:
-                    if c.var_name == param_name and c.op in ('==', '===', 'in'):
+                    if c.var_name == param_name and c.op in ('==', '===', 'in', 'type_validated', 'regex_validated'):
                         logger.info("[AST][Java] Branch constraint BLOCKS param {}: {} {}".format(param_name, c.op, c.value))
                         _trace_cache.put(file_path, param_name, vul_lineno, (-1, None, 0))
                         return (-1, None, 0)
@@ -451,7 +533,7 @@ def parameters_back(param_name, stmts, vul_lineno, file_path,
                 if stmt.else_statement and isinstance(stmt.else_statement, javalang.tree.IfStatement):
                     # else if
                     for c in else_constraints:
-                        if c.var_name == param_name and c.op in ('==', '===', 'in'):
+                        if c.var_name == param_name and c.op in ('==', '===', 'in', 'type_validated', 'regex_validated'):
                             logger.info("[AST][Java] Branch constraint BLOCKS param {}: {} {}".format(param_name, c.op, c.value))
                             _trace_cache.put(file_path, param_name, vul_lineno, (-1, None, 0))
                             return (-1, None, 0)
@@ -463,7 +545,7 @@ def parameters_back(param_name, stmts, vul_lineno, file_path,
                 else:
                     else_stmts = _get_block_stmts(stmt.else_statement) if stmt.else_statement else []
                     for c in else_constraints:
-                        if c.var_name == param_name and c.op in ('==', '===', 'in'):
+                        if c.var_name == param_name and c.op in ('==', '===', 'in', 'type_validated', 'regex_validated'):
                             logger.info("[AST][Java] Branch constraint BLOCKS param {}: {} {}".format(param_name, c.op, c.value))
                             _trace_cache.put(file_path, param_name, vul_lineno, (-1, None, 0))
                             return (-1, None, 0)
@@ -507,7 +589,7 @@ def parameters_back(param_name, stmts, vul_lineno, file_path,
                 if body_start and body_end and body_start <= _vul_line <= body_end:
                     constraints = extract_constraints_from_java_expr(stmt.condition)
                     for c in constraints:
-                        if c.var_name == param_name and c.op in ('==', '===', 'in'):
+                        if c.var_name == param_name and c.op in ('==', '===', 'in', 'type_validated', 'regex_validated'):
                             logger.info("[AST][Java] While constraint BLOCKS param {}: {} {}".format(param_name, c.op, c.value))
                             _trace_cache.put(file_path, param_name, vul_lineno, (-1, None, 0))
                             return (-1, None, 0)
@@ -660,7 +742,7 @@ def _trace_expr(expr, stmts, lineno, file_path, repair_functions, controlled_par
         false_refs = _collect_member_references(expr.if_false)
         constraints = extract_constraints_from_java_expr(expr.condition)
         for c in constraints:
-            if c.op in ('==', '===', 'in'):
+            if c.op in ('==', '===', 'in', 'type_validated', 'regex_validated'):
                 if c.var_name in true_refs and c.var_name not in false_refs:
                     # 约束变量只在 true 分支 → true 路径中 var == fixed → 阻断
                     logger.info("[AST][Java] Ternary constraint BLOCKS: {} {} {}".format(c.var_name, c.op, c.value))
@@ -1957,6 +2039,103 @@ def _build_result(code, scan_chain, cp, source_lines, lineno, file_path,
         "sink_lineno": lineno,
         "chain": scan_chain + [source_desc],
     }
+
+
+def find_sinks(sink_names, files):
+    """
+    AST-based sink 查找。遍历所有文件的 AST 节点，查找匹配的函数调用。
+    支持直接调用匹配（Java 反射间接调用暂不处理）。
+
+    :param sink_names: list of SinkName(class_, method) from parse_sink_names()
+    :param files: 文件路径列表
+    :return: list of dict
+    """
+    from core.utils import SinkName
+
+    results = []
+
+    for file_path in files:
+        file_path = _ast_object_singleton.get_path(file_path)
+        if not file_path:
+            continue
+        _nodes = _ast_object_singleton.get_nodes(file_path)
+        if not _nodes:
+            continue
+
+        # 使用 javalang 的 filter 遍历 MethodInvocation
+        try:
+            for path, node in _nodes.filter(javalang.tree.MethodInvocation):
+                qualifier = node.qualifier or ''
+                method_name = node.member
+                full_name = '{}.{}'.format(qualifier, method_name) if qualifier else method_name
+
+                for sink in sink_names:
+                    if sink.class_ is None:
+                        # 模糊匹配：method_name 或 full_name 以 .method 结尾
+                        if method_name == sink.method or full_name == sink.method or full_name.endswith('.' + sink.method):
+                            lineno = node.position[0] if hasattr(node, 'position') and node.position else 0
+                            results.append({
+                                'file_path': file_path,
+                                'lineno': lineno,
+                                'node': node,
+                                'is_indirect': False,
+                                'callee_name': full_name,
+                                'class_name': qualifier if qualifier else None,
+                                'matched_sink': sink,
+                            })
+                            break
+                    else:
+                        # 精确匹配：qualifier.method == class_.method
+                        if full_name == '{}.{}'.format(sink.class_, sink.method):
+                            lineno = node.position[0] if hasattr(node, 'position') and node.position else 0
+                            results.append({
+                                'file_path': file_path,
+                                'lineno': lineno,
+                                'node': node,
+                                'is_indirect': False,
+                                'callee_name': full_name,
+                                'class_name': sink.class_,
+                                'matched_sink': sink,
+                            })
+                            break
+
+            # 搜索 ClassCreator（构造函数调用，如 new ProcessBuilder()）
+            for path, node in _nodes.filter(javalang.tree.ClassCreator):
+                type_name = node.type.name if node.type and hasattr(node.type, 'name') else ''
+                if not type_name:
+                    continue
+
+                for sink in sink_names:
+                    if sink.class_ is None:
+                        if type_name == sink.method:
+                            lineno = node.position[0] if hasattr(node, 'position') and node.position else 0
+                            results.append({
+                                'file_path': file_path,
+                                'lineno': lineno,
+                                'node': node,
+                                'is_indirect': False,
+                                'callee_name': type_name,
+                                'class_name': None,
+                                'matched_sink': sink,
+                            })
+                            break
+                    else:
+                        if type_name == sink.class_ and sink.method == sink.class_:
+                            lineno = node.position[0] if hasattr(node, 'position') and node.position else 0
+                            results.append({
+                                'file_path': file_path,
+                                'lineno': lineno,
+                                'node': node,
+                                'is_indirect': False,
+                                'callee_name': type_name,
+                                'class_name': sink.class_,
+                                'matched_sink': sink,
+                            })
+                            break
+        except Exception:
+            continue
+
+    return results
 
 
 def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], controlled_params=[], is_config_vuln=False):

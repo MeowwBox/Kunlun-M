@@ -258,6 +258,16 @@ def get_binaryop_deep_params(node, params, real_back=False):  # 取出right，le
     if isinstance(node, php.FunctionCall):  # node为FunctionCall，递归取出其中变量名
         params = get_all_params(node.params)
 
+    if isinstance(node, _METHOD_CALL_TYPES):  # 方法调用（$obj->method()），递归提取参数
+        params = get_all_params(node.params)
+
+    if isinstance(node, php.StaticMethodCall):  # 静态方法调用（Class::method()），递归提取参数
+        params = get_all_params(node.params)
+
+    if isinstance(node, _OBJECT_PROPERTY_TYPES):  # 对象属性（$obj->prop），提取对象变量名
+        param = get_node_name(node.node)
+        params.append(param)
+
     if isinstance(node, php.Constant):
         params.append(node)
 
@@ -1167,6 +1177,44 @@ def _find_sink_branch(if_node, lineno):
 
 
 
+# 类型验证函数 — 条件为 true 时参数被约束为安全类型
+_TYPE_VALIDATION_FUNCS = frozenset({
+    'is_numeric', 'is_int', 'is_integer', 'is_float', 'is_double',
+    'ctype_digit', 'ctype_alnum', 'ctype_alpha', 'ctype_xdigit',
+})
+
+
+def _extract_func_name(name_node):
+    """从 FunctionCall.name 节点提取函数名字符串"""
+    if isinstance(name_node, str):
+        return name_node
+    return None
+
+
+def _extract_regex_pattern(arg_node):
+    """从 preg_match 的第一个参数提取正则模式字符串"""
+    if isinstance(arg_node, php.String):
+        return arg_node.value
+    return None
+
+
+def _is_strict_regex(pattern):
+    """
+    判断正则是否为严格全匹配模式（安全）。
+    条件：以 ^ 开头、以 $ 结尾、中间不含任意字符匹配（. 或 .* 或 .+）。
+    """
+    if not pattern or len(pattern) < 4:
+        return False
+    if not pattern.startswith('^') or not pattern.endswith('$'):
+        return False
+    body = pattern[1:-1]
+    # 不含 .（任意字符匹配），但允许 \.（转义的点）
+    stripped = body.replace('\\.', '')
+    if '.' in stripped:
+        return False
+    return True
+
+
 def extract_constraints_from_php_expr(expr):
     """
     从 PHP 条件表达式中提取 BranchConstraint 列表。
@@ -1179,6 +1227,8 @@ def extract_constraints_from_php_expr(expr):
     - $var === value        -> BinaryOp(op='===')
     - $a && $b              -> BinaryOp(op='&&')
     - $a || $b              -> BinaryOp(op='||')
+    - is_numeric($var)      -> FunctionCall('is_numeric', [...])
+    - preg_match('/^...$/', $var) -> FunctionCall('preg_match', [...])
     """
     if expr is None:
         return []
@@ -1213,6 +1263,27 @@ def extract_constraints_from_php_expr(expr):
             var_name = _extract_var_name(inner.expr)
             if var_name:
                 constraints.append(BranchConstraint(var_name=var_name, op='isset'))
+
+    elif isinstance(expr, php.FunctionCall):
+        func_name = _extract_func_name(expr.name)
+        if func_name in _TYPE_VALIDATION_FUNCS:
+            for arg in (expr.params or []):
+                var_name = _extract_var_name(arg)
+                if var_name:
+                    constraints.append(BranchConstraint(
+                        var_name=var_name, op='type_validated',
+                        value=func_name
+                    ))
+        elif func_name == 'preg_match':
+            if expr.params and len(expr.params) >= 2:
+                pattern = _extract_regex_pattern(expr.params[0])
+                if pattern and _is_strict_regex(pattern):
+                    var_name = _extract_var_name(expr.params[1])
+                    if var_name:
+                        constraints.append(BranchConstraint(
+                            var_name=var_name, op='regex_validated',
+                            value=pattern
+                        ))
 
     elif isinstance(expr, php.BinaryOp):
         if expr.op == '&&':
@@ -1250,11 +1321,14 @@ def extract_constraints_from_php_expr(expr):
 def _extract_var_name(node):
     """
     从 AST 节点中提取变量名（字符串形式）。
-    支持 Variable, ArrayOffset 等常见形式。
+    支持 Variable, Parameter, ArrayOffset 等常见形式。
     返回 None 表示无法提取。
     """
     if node is None:
         return None
+    if isinstance(node, php.Parameter):
+        # phply 函数参数被包装为 Parameter 节点，实际参数在 .node 中
+        node = node.node
     if isinstance(node, php.Variable):
         name = node.name
         if isinstance(name, str):
@@ -1430,7 +1504,7 @@ def _parameters_back_impl(param, nodes, function_params=None, lineno=0,
                 true_names = _collect_var_names(terna1)
                 false_names = _collect_var_names(terna2)
                 for c in constraints:
-                    if c.op in ('==', '===', 'in'):
+                    if c.op in ('==', '===', 'in', 'type_validated', 'regex_validated'):
                         if c.var_name in true_names and c.var_name not in false_names:
                             # 约束变量只在 true 分支 → true 路径中 var == fixed → 阻断
                             logger.info("[AST] Ternary constraint BLOCKS: {} {} {}".format(c.var_name, c.op, c.value))
@@ -1814,7 +1888,7 @@ def _parameters_back_impl(param, nodes, function_params=None, lineno=0,
             # 3. 立即检查约束（仅在 sink 在具体分支内时执行，即 sink_branch != 'outside'）
             if sink_branch != 'outside':
                 for c in constraints:
-                    if c.var_name == param_name and c.op in ('==', '===', 'in'):
+                    if c.var_name == param_name and c.op in ('==', '===', 'in', 'type_validated', 'regex_validated'):
                         # 等值约束：变量被限定为固定值，不可控
                         logger.info("[AST] Branch constraint BLOCKS param {}: {} {}".format(param_name, c.op, c.value))
                         return -1, param, 0
@@ -1846,7 +1920,7 @@ def _parameters_back_impl(param, nodes, function_params=None, lineno=0,
                 if body_start and body_end and body_start <= _lineno <= body_end:
                     constraints = extract_constraints_from_php_expr(node.expr)
                     for c in constraints:
-                        if c.var_name == param_name and c.op in ('==', '===', 'in'):
+                        if c.var_name == param_name and c.op in ('==', '===', 'in', 'type_validated', 'regex_validated'):
                             logger.info("[AST] While constraint BLOCKS param {}: {} {}".format(param_name, c.op, c.value))
                             return -1, param, 0
 
@@ -3192,6 +3266,154 @@ def _init_function_summaries(file_path):
     except Exception as e:
         logger.debug(f"[AST][PHP] 摘要初始化失败: {e}")
         _summaries_initialized = True
+
+
+def find_sinks(sink_names, files):
+    """
+    AST-based sink 查找。遍历所有文件的 AST 节点，查找匹配的函数调用。
+    支持直接调用匹配和间接调用检测。
+
+    :param sink_names: list of SinkName(class_, method) from parse_sink_names()
+    :param files: 文件路径列表
+    :return: list of dict, 每项包含:
+        - 'file_path': 文件路径
+        - 'lineno': 行号
+        - 'node': AST 调用节点
+        - 'is_indirect': bool, 是否为间接调用
+        - 'callee_name': str, 被调用函数名/方法名
+        - 'class_name': str or None, 类名/对象名
+        - 'matched_sink': SinkName or None, 匹配到的 sink 定义
+        - 'callback_callee': Variable or None, 回调参数中的 callee
+    """
+    results = []
+
+    for file_path in files:
+        # 将文件路径规范化为 pretreatment 中使用的完整路径
+        file_path = ast_object.get_path(file_path)
+        if not file_path:
+            continue
+        all_nodes = ast_object.get_nodes(file_path)
+        if not all_nodes:
+            continue
+
+        call_count = 0
+        for node in all_nodes:
+            if not isinstance(node, _FUNCTION_CALL_TYPES):
+                continue
+
+            matched = _match_call_node(node, sink_names)
+            if matched:
+                results.append({
+                    'file_path': file_path,
+                    'lineno': node.lineno,
+                    'node': node,
+                    'is_indirect': matched['is_indirect'],
+                    'callee_name': matched['callee_name'],
+                    'class_name': matched['class_name'],
+                    'matched_sink': matched['matched_sink'],
+                    'callback_callee': matched['callback_callee'],
+                })
+
+    return results
+
+
+def _match_call_node(node, sink_names):
+    """
+    匹配单个调用节点与 sink_names 列表。
+
+    :param node: FunctionCall / MethodCall / StaticMethodCall 节点
+    :param sink_names: list of SinkName
+    :return: dict with match info, or None if no match
+    """
+    is_indirect = False
+    callee_name = None
+    class_name = None
+    callback_callee = None
+
+    if isinstance(node, php.FunctionCall):
+        if isinstance(node.name, str):
+            callee_name = node.name
+        elif isinstance(node.name, php.Variable):
+            is_indirect = True
+            callee_name = node.name.name
+
+    elif isinstance(node, php.MethodCall):
+        if isinstance(node.name, str):
+            callee_name = node.name
+        elif isinstance(node.name, php.Variable):
+            is_indirect = True
+            callee_name = node.name.name
+
+        obj = node.node
+        if isinstance(obj, php.Variable):
+            class_name = obj.name
+        elif hasattr(obj, 'name'):
+            class_name = obj.name
+
+    elif isinstance(node, php.StaticMethodCall):
+        callee_name = node.name
+        class_name = node.class_
+
+    else:
+        return None
+
+    if not callee_name:
+        return None
+
+    # 回调间接调用检测 (call_user_func($func, $arg) 等)
+    if not is_indirect and isinstance(node, php.FunctionCall) and isinstance(node.name, str):
+        callback_funcs = {'call_user_func', 'call_user_func_array', 'array_map',
+                          'usort', 'uasort', 'uksort', 'array_filter',
+                          'array_walk', 'array_walk_recursive',
+                          'register_shutdown_function', 'register_tick_function'}
+        if node.name in callback_funcs and node.params:
+            first_param = node.params[0]
+            param_expr = first_param.node if hasattr(first_param, 'node') else first_param
+            if isinstance(param_expr, php.Variable):
+                is_indirect = True
+                callback_callee = param_expr
+
+    # 匹配 sink_names
+    for sink in sink_names:
+        if is_indirect and not callback_callee:
+            # 纯间接调用 $func() 或 $obj->$method()
+            return {
+                'is_indirect': True,
+                'callee_name': callee_name,
+                'class_name': class_name,
+                'matched_sink': sink,
+                'callback_callee': None,
+            }
+
+        if callback_callee:
+            return {
+                'is_indirect': True,
+                'callee_name': callee_name,
+                'class_name': class_name,
+                'matched_sink': sink,
+                'callback_callee': callback_callee,
+            }
+
+        if callee_name == sink.method:
+            if sink.class_ is None:
+                return {
+                    'is_indirect': False,
+                    'callee_name': callee_name,
+                    'class_name': class_name,
+                    'matched_sink': sink,
+                    'callback_callee': None,
+                }
+            else:
+                if class_name and class_name == sink.class_:
+                    return {
+                        'is_indirect': False,
+                        'callee_name': callee_name,
+                        'class_name': class_name,
+                        'matched_sink': sink,
+                        'callback_callee': None,
+                    }
+
+    return None
 
 
 def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], controlled_params=[], svid=0):

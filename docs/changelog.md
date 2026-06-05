@@ -1,4 +1,19 @@
 ## 更新日志
+- 2026-06-05
+  - KunLun-M 2.13.3
+  - **修复 PHP 引擎字符串拼接中方法调用参数丢失**
+    - `get_binaryop_deep_params()` 新增 `MethodCall`/`StaticMethodCall`/`ObjectProperty` 三种节点类型处理
+    - 修复 `$obj->method($_GET['x'])` 和 `Class::method($_GET['x'])` 在字符串拼接场景（BinaryOp）中被静默丢弃导致可控参数漏报的问题
+- 2026-06-05
+  - **分支约束 benchmark 90 用例：89/90 通过（98.9%）**
+    - `BranchConstraint.negate()` 支持 `type_validated`/`regex_validated` 取反（修复 else 分支误阻断）
+    - JS: 新增 `typeof x === 'number'` 验证函数检测
+    - JS: 修复 `RegExpLiteral.test()` 检测（esprima 将正则字面量解析为 `RegExpLiteral` 而非 `Literal`）
+    - Java: `_get_java_expr_name()` 支持 `MethodInvocation`（修复 `Character.isDigit(port.charAt(0))` 参数提取）
+    - C: 修复 `_extract_constraints_from_c_expr` 中 `argument_list` children 过滤未排除括号（ctype 验证函数失效）
+    - Go: `scan_parser()` 添加 `_check_go_branch_constraints` 调用（与 `analysis_params` 一致）
+    - 端到端测试扩展至 90 个用例，覆盖 6 语言全分支类型 + 验证函数
+    - 剩余 1 个失败：PHP preg_match 非严格正则测试（PHP 引擎 echo/mysql_query 参数追踪局限，非分支约束问题）
 - 2026-06-04
   - KunLun-M 2.13.2
   - **7 语言引擎回溯分析设计文档（docs/design/）**

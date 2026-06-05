@@ -1082,6 +1082,28 @@ def _find_sink_branch_js(if_node, lineno):
     return 'outside'
 
 
+def _is_strict_js_regex(regex_str):
+    """判断 JS 正则字符串是否为严格全匹配模式（安全）。
+
+    JS 正则字面量 /^\d+$/ 在 esprima 中 value 是 ^\d+$（无斜杠包裹）。
+    严格条件：以 ^ 开头、以 $ 结尾、中间不含未转义的 . 或 * 或 ?。
+    """
+    if not regex_str or not isinstance(regex_str, str):
+        return False
+    if len(regex_str) < 4:
+        return False
+    if not regex_str.startswith('^') or not regex_str.endswith('$'):
+        return False
+    body = regex_str[1:-1]
+    # 去掉转义的 \. 后检查
+    stripped = body.replace('\\.', '')
+    if '.' in stripped:
+        return False
+    if '*' in stripped or '?' in stripped:
+        return False
+    return True
+
+
 def extract_constraints_from_js_expr(expr):
     """
     从 JS 条件表达式中提取 BranchConstraint 列表。
@@ -1132,11 +1154,89 @@ def extract_constraints_from_js_expr(expr):
     if node_type == 'BinaryExpression':
         op = expr.get('operator', '')
         if op in ('==', '===', '!=', '!=='):
-            left = expr.get('left', {})
-            var_name = _extract_js_var_name(left)
+            left_expr = expr.get('left', {})
+            # typeof x === 'number' -> type_validated
+            if left_expr.get('type') == 'UnaryExpression' and left_expr.get('operator') == 'typeof':
+                inner = left_expr.get('argument', {})
+                var_name = _extract_js_var_name(inner)
+                if var_name:
+                    value = _extract_js_literal(expr.get('right', {}))
+                    if value is not None:
+                        constraints.append(BranchConstraint(var_name=var_name, op='type_validated', value='typeof.' + str(value)))
+                        return constraints
+            var_name = _extract_js_var_name(left_expr)
             if var_name:
                 value = _extract_js_literal(expr.get('right', {}))
                 constraints.append(BranchConstraint(var_name=var_name, op=op, value=value))
+        return constraints
+
+    if node_type == 'CallExpression':
+        callee = expr.get('callee', {})
+        callee_type = callee.get('type', '') if isinstance(callee, dict) else ''
+
+        if callee_type == 'MemberExpression':
+            prop = callee.get('property', {})
+            prop_name = prop.get('name', '') if isinstance(prop, dict) else ''
+            obj = callee.get('object', {})
+            obj_type = obj.get('type', '') if isinstance(obj, dict) else ''
+
+            # /regex/.test(x) — 正则对象的 test 方法
+            if prop_name == 'test' and obj_type in ('Literal', 'RegExpLiteral'):
+                regex_str = ''
+                if obj_type == 'RegExpLiteral':
+                    pattern = obj.get('pattern', '')
+                    flags = obj.get('flags', '')
+                    regex_str = pattern
+                else:
+                    regex_str = obj.get('regex', {}).get('pattern', '') if isinstance(obj.get('regex'), dict) else ''
+                    # esprima 将正则字面量存为 regex.pattern，fallback 也检查 value
+                    if not regex_str:
+                        regex_str = obj.get('value', '')
+                if regex_str and isinstance(regex_str, str) and _is_strict_js_regex(regex_str):
+                    args = expr.get('arguments', [])
+                    if args:
+                        var_name = _extract_js_var_name(args[0])
+                        if var_name:
+                            constraints.append(BranchConstraint(
+                                var_name=var_name, op='regex_validated', value=regex_str))
+
+            # x.match(regex) — 变量的 match 方法
+            elif prop_name == 'match':
+                args = expr.get('arguments', [])
+                if args:
+                    arg0 = args[0]
+                    arg0_type = arg0.get('type', '') if isinstance(arg0, dict) else ''
+                    # 参数是正则字面量
+                    regex_str = ''
+                    if arg0_type == 'Literal':
+                        regex_str = arg0.get('regex', {}).get('pattern', '') if isinstance(arg0.get('regex'), dict) else ''
+                        if not regex_str:
+                            regex_str = arg0.get('value', '')
+                    if regex_str and isinstance(regex_str, str) and _is_strict_js_regex(regex_str):
+                        var_name = _extract_js_var_name(obj)
+                        if var_name:
+                            constraints.append(BranchConstraint(
+                                var_name=var_name, op='regex_validated', value=regex_str))
+
+            # Number.isInteger(x) / Number.isFinite(x) 等静态方法
+            if obj_type == 'Identifier' and obj.get('name') == 'Number':
+                if prop_name in ('isInteger', 'isFinite', 'isNaN'):
+                    args = expr.get('arguments', [])
+                    if args:
+                        var_name = _extract_js_var_name(args[0])
+                        if var_name:
+                            constraints.append(BranchConstraint(
+                                var_name=var_name, op='type_validated', value='Number.' + prop_name))
+
+        elif callee_type == 'Identifier' and callee.get('name') == 'isNaN':
+            # isNaN(x) — 当取反时（!isNaN(x)）表示是数字
+            args = expr.get('arguments', [])
+            if args:
+                var_name = _extract_js_var_name(args[0])
+                if var_name:
+                    constraints.append(BranchConstraint(
+                        var_name=var_name, op='type_validated', value='not_nan'))
+
         return constraints
 
     return constraints
@@ -1326,7 +1426,7 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
                     test_expr = param_expr.test.toDict() if hasattr(param_expr.test, 'toDict') else param_expr.test
                     constraints = extract_constraints_from_js_expr(test_expr)
                     for c in constraints:
-                        if c.op in ('==', '===', 'in'):
+                        if c.op in ('==', '===', 'in', 'type_validated', 'regex_validated'):
                             if c.var_name in true_names and c.var_name not in false_names:
                                 # 约束变量只在 true 分支 → true 路径中 var == fixed → 阻断
                                 logger.info("[AST] Ternary constraint BLOCKS: {} {} {}".format(c.var_name, c.op, c.value))
@@ -1822,7 +1922,7 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
                 # param_name 可能是列表形式（如 ['input']），统一转为字符串比较
                 _param_str = param_name[0] if isinstance(param_name, list) else str(param_name)
                 for c in constraints:
-                    if c.var_name == _param_str and c.op in ('==', '===', 'in'):
+                    if c.var_name == _param_str and c.op in ('==', '===', 'in', 'type_validated', 'regex_validated'):
                         logger.info("[AST] Branch constraint BLOCKS param {}: {} {}".format(param_name, c.op, c.value))
                         return -1, param, 0
 
@@ -1888,7 +1988,7 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
                     constraints = extract_constraints_from_js_expr(test_expr)
                     _param_str = param_name[0] if isinstance(param_name, list) else str(param_name)
                     for c in constraints:
-                        if c.var_name == _param_str and c.op in ('==', '===', 'in'):
+                        if c.var_name == _param_str and c.op in ('==', '===', 'in', 'type_validated', 'regex_validated'):
                             logger.info("[AST] While constraint BLOCKS param {}: {} {}".format(param_name, c.op, c.value))
                             return -1, param, 0
 
@@ -2391,6 +2491,135 @@ def analysis(all_nodes, vul_function, back_node, vul_lineno, file_path, function
             analysis_while(node, vul_function, back_node, vul_lineno, file_path, function_params)
 
     return scan_results
+
+
+def _walk_ast_nodes(node, callback):
+    """递归遍历 esprima AST 节点，对每个节点调用 callback(node)"""
+    if node is None:
+        return
+    callback(node)
+    # 遍历所有可能的子节点属性
+    for attr in ('body', 'consequent', 'alternate', 'cases', 'block', 'expression',
+                 'declarations', 'init', 'test', 'update', 'argument', 'arguments',
+                 'left', 'right', 'object', 'property', 'callee', 'elements',
+                 'properties', 'key', 'value'):
+        child = getattr(node, attr, None)
+        if child is None:
+            continue
+        if isinstance(child, list):
+            for item in child:
+                if item is not None and hasattr(item, 'type'):
+                    _walk_ast_nodes(item, callback)
+        elif hasattr(child, 'type'):
+            _walk_ast_nodes(child, callback)
+
+
+def _extract_call_name_js(node):
+    """
+    从 CallExpression 节点提取调用名。
+    返回 (callee_name, is_indirect) 元组。
+    """
+    if not hasattr(node, 'type') or node.type != 'CallExpression':
+        return None, False
+
+    callee = node.callee
+    is_indirect = False
+
+    if callee.type == 'Identifier':
+        # 直接函数调用: func()
+        return callee.name, False
+    elif callee.type == 'MemberExpression':
+        # 方法调用: obj.method()
+        name = get_member_data(callee)
+        return name, False
+    else:
+        # 其他类型（如 CallExpression 作为 callee）：间接调用
+        return None, True
+
+
+def find_sinks(sink_names, files):
+    """
+    AST-based sink 查找。遍历所有文件的 AST 节点，查找匹配的函数调用。
+    支持直接调用匹配和间接调用检测。
+
+    :param sink_names: list of SinkName(class_, method) from parse_sink_names()
+    :param files: 文件路径列表
+    :return: list of dict
+    """
+    from core.utils import SinkName
+
+    results = []
+
+    for file_path in files:
+        file_path = ast_object.get_path(file_path)
+        if not file_path:
+            continue
+        _nodes = ast_object.get_nodes(file_path)
+        if not _nodes:
+            continue
+
+        if isinstance(_nodes, list):
+            all_nodes = _nodes
+        else:
+            all_nodes = getattr(_nodes, 'body', []) or []
+
+        def _check_node(node):
+            if not hasattr(node, 'type') or node.type != 'CallExpression':
+                return
+
+            callee_name, is_indirect = _extract_call_name_js(node)
+
+            if is_indirect or callee_name is None:
+                # 间接调用
+                lineno = node.loc.start.line if hasattr(node, 'loc') and node.loc else 0
+                for sink in sink_names:
+                    results.append({
+                        'file_path': file_path,
+                        'lineno': lineno,
+                        'node': node,
+                        'is_indirect': True,
+                        'callee_name': callee_name or '<indirect>',
+                        'class_name': None,
+                        'matched_sink': sink,
+                    })
+                    break
+                return
+
+            for sink in sink_names:
+                if sink.class_ is None:
+                    # 模糊匹配
+                    short_name = callee_name.split('.')[-1] if '.' in callee_name else callee_name
+                    if callee_name == sink.method or short_name == sink.method or callee_name.endswith('.' + sink.method):
+                        lineno = node.loc.start.line if hasattr(node, 'loc') and node.loc else 0
+                        results.append({
+                            'file_path': file_path,
+                            'lineno': lineno,
+                            'node': node,
+                            'is_indirect': False,
+                            'callee_name': callee_name,
+                            'class_name': callee_name.rsplit('.', 1)[0] if '.' in callee_name else None,
+                            'matched_sink': sink,
+                        })
+                        break
+                else:
+                    # 精确匹配
+                    if callee_name == '{}.{}'.format(sink.class_, sink.method):
+                        lineno = node.loc.start.line if hasattr(node, 'loc') and node.loc else 0
+                        results.append({
+                            'file_path': file_path,
+                            'lineno': lineno,
+                            'node': node,
+                            'is_indirect': False,
+                            'callee_name': callee_name,
+                            'class_name': sink.class_,
+                            'matched_sink': sink,
+                        })
+                        break
+
+        for top_node in all_nodes:
+            _walk_ast_nodes(top_node, _check_node)
+
+    return results
 
 
 def _init_function_summaries(file_path):

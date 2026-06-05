@@ -236,7 +236,7 @@ class VulnerabilityMatcher(object):
                 return False, 'Function-param-controllable but fixed', r['chain']
 
             else:  # 函数参数不可控
-                return False, 'Function-param-uncon', r['chain']
+                return False, 'Function-param-uncontrollable', r['chain']
 
         logger.debug('[AST] [CODE] {code}'.format(code=result_code_list))
         return None
