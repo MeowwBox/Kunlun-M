@@ -498,7 +498,7 @@ def _extract_constraints_from_c_expr(cond_node):
             if child.type == 'identifier':
                 func_node = child
             elif child.type == 'argument_list':
-                args = [c for c in child.children if c.type != ',']
+                args = [c for c in child.children if c.type not in (',', '(', ')')]
 
         if func_node and args:
             func_name = _node_text(func_node)
