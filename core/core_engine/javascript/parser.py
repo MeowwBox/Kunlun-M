@@ -120,6 +120,450 @@ _this_prop_map = {}
 _class_method_param_map = {}
 
 
+def _resolve_js_module_path(module_path_str, base_dir):
+    """解析 JS 模块路径字符串为实际文件路径
+
+    支持相对路径 (./utils, ../helper) 的解析，不追踪 node_modules。
+    返回 os.path.normpath(路径) 或 None。
+    """
+    # 不追踪 node_modules / @scope/pkg / 纯包名
+    if not module_path_str.startswith('.') and not module_path_str.startswith('/'):
+        return None
+
+    full_path = os.path.join(base_dir, module_path_str)
+
+    # 已有 .js 后缀直接用
+    if full_path.endswith('.js'):
+        if os.path.isfile(full_path):
+            return os.path.normpath(full_path)
+        return None
+
+    # 尝试 .js 后缀
+    candidate = full_path + '.js'
+    if os.path.isfile(candidate):
+        return os.path.normpath(candidate)
+
+    # 尝试 /index.js
+    candidate = os.path.join(full_path, 'index.js')
+    if os.path.isfile(candidate):
+        return os.path.normpath(candidate)
+
+    return None
+
+
+def _parse_js_imports(all_nodes, file_path):
+    """解析 esprima AST 中的 require/import 语句
+
+    参数:
+        all_nodes: esprima 解析后的 AST 根节点（Program 节点）
+        file_path: 当前文件路径
+
+    返回:
+        { imported_name: module_file_path } 映射
+    """
+    import_map = {}
+    base_dir = os.path.dirname(file_path)
+
+    def _collect(node):
+        node_type = getattr(node, 'type', None)
+
+        # ESM: import { run } from './utils'
+        if node_type == 'ImportDeclaration':
+            source = getattr(node, 'source', None)
+            if source and getattr(source, 'type', None) in ('Literal', 'StringLiteral') and isinstance(source.value, str):
+                module_path = _resolve_js_module_path(source.value, base_dir)
+                if module_path:
+                    for spec in (node.specifiers or []):
+                        spec_type = getattr(spec, 'type', None)
+                        if spec_type in ('ImportSpecifier', 'ImportDefaultSpecifier', 'ImportNamespaceSpecifier'):
+                            local_name = getattr(spec.local, 'name', None)
+                            if local_name:
+                                import_map[local_name] = module_path
+            return
+
+        # CommonJS: const/let/var x = require('./utils')
+        if node_type == 'VariableDeclaration':
+            for declarator in (node.declarations or []):
+                if getattr(declarator, 'type', None) != 'VariableDeclarator':
+                    continue
+                init = getattr(declarator, 'init', None)
+                if init is None:
+                    continue
+
+                # 提取 require() 的字符串参数
+                require_arg = None
+                init_type = getattr(init, 'type', None)
+
+                if init_type == 'CallExpression':
+                    callee = getattr(init, 'callee', None)
+                    if (getattr(callee, 'type', None) == 'Identifier' and
+                            getattr(callee, 'name', None) == 'require'):
+                        args = getattr(init, 'arguments', [])
+                        if (args and getattr(args[0], 'type', None) in ('Literal', 'StringLiteral') and
+                                isinstance(args[0].value, str)):
+                            require_arg = args[0].value
+
+                elif init_type == 'MemberExpression':
+                    # const fn = require('./utils').run
+                    obj = getattr(init, 'object', None)
+                    if obj and getattr(obj, 'type', None) == 'CallExpression':
+                        callee = getattr(obj, 'callee', None)
+                        if (getattr(callee, 'type', None) == 'Identifier' and
+                                getattr(callee, 'name', None) == 'require'):
+                            args = getattr(obj, 'arguments', [])
+                            if (args and getattr(args[0], 'type', None) in ('Literal', 'StringLiteral') and
+                                    isinstance(args[0].value, str)):
+                                require_arg = args[0].value
+
+                if require_arg is None:
+                    continue
+
+                module_path = _resolve_js_module_path(require_arg, base_dir)
+                if module_path is None:
+                    continue
+
+                # 提取变量名
+                var_id = declarator.id
+                var_id_type = getattr(var_id, 'type', None)
+
+                if var_id_type == 'Identifier':
+                    import_map[var_id.name] = module_path
+                elif var_id_type == 'ObjectPattern':
+                    for prop in (getattr(var_id, 'properties', None) or []):
+                        key = getattr(prop, 'key', None)
+                        if key and getattr(key, 'type', None) == 'Identifier':
+                            import_map[key.name] = module_path
+
+    _walk_ast_nodes(all_nodes, _collect)
+    return import_map
+
+
+def _build_js_func_index(all_nodes, file_path):
+    """构建单个文件的函数索引
+
+    参数:
+        all_nodes: esprima AST 根节点（Program 节点或 body 列表）
+        file_path: 当前文件路径
+
+    返回:
+        {func_name: [func_node]} 字典
+    """
+    func_index = {}
+
+    def _add_func(name, node):
+        if name:
+            func_index.setdefault(name, []).append(node)
+
+    # 获取顶层节点列表
+    if hasattr(all_nodes, 'type') and all_nodes.type == 'Program':
+        top_nodes = all_nodes.body or []
+    elif isinstance(all_nodes, list):
+        top_nodes = all_nodes
+    else:
+        return func_index
+
+    for node in top_nodes:
+        if not hasattr(node, 'type'):
+            continue
+        node_type = node.type
+
+        # a) FunctionDeclaration
+        if node_type == 'FunctionDeclaration':
+            if hasattr(node, 'id') and node.id:
+                func_name = get_member_data(node.id)
+                _add_func(func_name, node)
+            continue
+
+        # b) VariableDeclarator + FunctionExpression/ArrowFunctionExpression
+        if node_type == 'VariableDeclaration':
+            for declarator in (node.declarations or []):
+                if getattr(declarator, 'type', None) != 'VariableDeclarator':
+                    continue
+                init = getattr(declarator, 'init', None)
+                if init is None:
+                    continue
+                init_type = getattr(init, 'type', None)
+                if init_type not in ('FunctionExpression', 'ArrowFunctionExpression'):
+                    continue
+                var_id = getattr(declarator, 'id', None)
+                if var_id and getattr(var_id, 'type', None) == 'Identifier':
+                    _add_func(var_id.name, declarator)
+            continue
+
+        # c) ExpressionStatement 层级的处理
+        if node_type == 'ExpressionStatement':
+            expr = getattr(node, 'expression', None)
+            if expr is None or getattr(expr, 'type', None) != 'AssignmentExpression':
+                continue
+
+            left = expr.left
+            right = expr.right
+            left_type = getattr(left, 'type', None)
+            right_type = getattr(right, 'type', None)
+
+            is_func = right_type in ('FunctionExpression', 'ArrowFunctionExpression')
+
+            # c) 简单赋值: run = function() { ... }
+            if is_func and left_type == 'Identifier':
+                _add_func(left.name, expr)
+
+            # d) module.exports.run / exports.run
+            elif is_func and left_type == 'MemberExpression':
+                full_name = get_member_data(left)
+                # 提取最后一段作为函数名
+                short_name = full_name.rsplit('.', 1)[-1] if '.' in full_name else full_name
+                _add_func(short_name, expr)
+                _add_func(full_name, expr)
+
+            # e) module.exports = { run(cmd) { ... } } ObjectExpression
+            elif getattr(right, 'type', None) == 'ObjectExpression':
+                for prop in (getattr(right, 'properties', None) or []):
+                    prop_type = getattr(prop, 'type', None)
+                    is_method = False
+
+                    if prop_type == 'ObjectMethod':
+                        is_method = True
+                    elif prop_type in ('Property',):
+                        prop_val = getattr(prop, 'value', None)
+                        if prop_val and getattr(prop_val, 'type', None) in (
+                                'FunctionExpression', 'ArrowFunctionExpression'):
+                            is_method = True
+
+                    if is_method:
+                        prop_key = getattr(prop, 'key', None)
+                        if prop_key:
+                            method_name = get_member_data(prop_key)
+                            _add_func(method_name, prop)
+
+    return func_index
+
+
+def _find_js_func_def(func_name, import_map, ast_object_global):
+    """在跨文件场景中查找被 import 模块的函数定义
+
+    参数:
+        func_name: 要查找的函数名字符串
+        import_map: _parse_js_imports() 返回的 {name: file_path} 映射
+        ast_object_global: 全局 ast_object（用于 ast_object.get_nodes()）
+
+    返回:
+        找到的 func_node 或 None
+    """
+    if not func_name or not import_map:
+        return None
+
+    # 尝试从 import_map 中找到对应的模块文件
+    imported_path = None
+    local_func_name = func_name
+
+    # 1. 直接匹配 func_name
+    if func_name in import_map:
+        imported_path = import_map[func_name]
+    else:
+        # 2. 尝试匹配前缀：例如 utils.run → 查找 utils 对应的模块
+        #    然后在模块中查找 run 函数
+        parts = func_name.rsplit('.', 1)
+        if len(parts) == 2:
+            obj_name, method_name = parts
+            if obj_name in import_map:
+                imported_path = import_map[obj_name]
+                local_func_name = method_name
+
+    if imported_path is None:
+        return None
+
+    # 获取被 import 文件的 AST
+    try:
+        result = ast_object_global.get_nodes(imported_path, lan='javascript')
+    except Exception:
+        return None
+
+    if result is None:
+        return None
+
+    # 获取 AST body
+    if hasattr(result, 'body'):
+        all_nodes = result
+    else:
+        return None
+
+    # 构建函数索引并查找
+    func_index = _build_js_func_index(all_nodes, imported_path)
+
+    # 查找函数：尝试多种名字
+    for name in (local_func_name, func_name):
+        if name in func_index:
+            return func_index[name][0]
+
+    return None
+
+
+def _try_cross_file_trace_js(all_nodes, vul_lineno, sensitive_func, file_path,
+                             import_map, controlled_params=None):
+    """跨文件追踪：当单文件扫描未找到漏洞时，检查目标行调用的函数是否来自其他文件的 import，
+    如果是，在被 import 文件中查找函数定义，检查内部是否调用了敏感 sink，并判断调用处实参是否可控。
+
+    参数:
+        all_nodes: 当前文件的 AST 节点列表（esprima Program.body）
+        vul_lineno: 漏洞行号
+        sensitive_func: 规则敏感函数列表（函数名字符串列表）
+        file_path: 当前文件路径
+        import_map: _parse_js_imports() 返回的 {name: file_path} 映射
+        controlled_params: 可控参数列表（默认 None）
+
+    返回:
+        [{...}] — 找到漏洞，与 scan_results 格式一致
+        None — 无法跨文件追踪
+    """
+    # 读取源文件行内容
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            source_lines = f.readlines()
+    except Exception:
+        source_lines = []
+
+    # 第1步：找到目标行的所有 CallExpression
+    target_calls = []
+    def _collect_calls(node):
+        if hasattr(node, 'type') and node.type == 'CallExpression':
+            if hasattr(node, 'loc') and node.loc and node.loc.start.line == vul_lineno:
+                callee_name, _ = _extract_call_name_js(node)
+                if callee_name:
+                    target_calls.append((callee_name, node))
+    for n in all_nodes:
+        _walk_ast_nodes(n, _collect_calls)
+
+    if not target_calls:
+        return None
+
+    # 第2步：对每个调用检查是否来自 import_map
+    for callee_name, call_node in target_calls:
+        imported_path = None
+        local_func_name = callee_name
+
+        # 直接匹配
+        if callee_name in import_map:
+            imported_path = import_map[callee_name]
+        else:
+            # 前缀匹配：callee_name.split('.')[0] in import_map
+            parts = callee_name.split('.', 1)
+            if len(parts) == 2 and parts[0] in import_map:
+                imported_path = import_map[parts[0]]
+                local_func_name = parts[1]
+
+        if not imported_path:
+            continue
+
+        # 第3步：在被 import 文件中查找函数定义
+        try:
+            module_nodes = ast_object.get_nodes(imported_path, lan='javascript')
+        except Exception:
+            continue
+        if module_nodes is None or not hasattr(module_nodes, 'body'):
+            continue
+
+        func_index = _build_js_func_index(module_nodes, imported_path)
+        func_def = None
+        for name in (local_func_name, callee_name):
+            if name in func_index:
+                func_def = func_index[name][0]
+                break
+        if not func_def:
+            return None
+
+        # 第4步：检查函数内部是否有敏感 sink
+        func_body_nodes = []
+        func_type = getattr(func_def, 'type', None)
+        if func_type in ('FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression'):
+            func_body = getattr(func_def, 'body', None)
+            if func_body:
+                if hasattr(func_body, 'body'):
+                    func_body_nodes = func_body.body
+                elif isinstance(func_body, list):
+                    func_body_nodes = func_body
+        elif func_type in ('ObjectMethod', 'Property'):
+            func_value = getattr(func_def, 'value', None)
+            if func_value:
+                func_value_body = getattr(func_value, 'body', None)
+                if func_value_body:
+                    if hasattr(func_value_body, 'body'):
+                        func_body_nodes = func_value_body.body
+                    elif isinstance(func_value_body, list):
+                        func_body_nodes = func_value_body
+
+        if not func_body_nodes:
+            return None
+
+        inner_sink_found = False
+        def _check_inner_sink(node):
+            nonlocal inner_sink_found
+            if inner_sink_found:
+                return
+            if not hasattr(node, 'type') or node.type != 'CallExpression':
+                return
+            inner_name, _ = _extract_call_name_js(node)
+            if not inner_name:
+                return
+            for sf in sensitive_func:
+                if inner_name == sf or inner_name.endswith('.' + sf):
+                    inner_sink_found = True
+                    return
+            knowledge = lookup_builtin(inner_name)
+            if knowledge and not knowledge.get("safe") and knowledge.get("passthrough"):
+                inner_sink_found = True
+                return
+
+        for body_node in func_body_nodes:
+            _walk_ast_nodes(body_node, _check_inner_sink)
+
+        if not inner_sink_found:
+            return None
+
+        # 第5步：检查调用处实参是否可控
+        call_args = getattr(call_node, 'arguments', []) or []
+        for arg in call_args:
+            # 直接检查可控性
+            is_co, cp = is_controllable(arg)
+            if is_co == 1:
+                source_line_content = source_lines[vul_lineno - 1].strip() if vul_lineno <= len(source_lines) else callee_name
+                return [{
+                    "code": 1,
+                    "chain": ["{}:{}".format(vul_lineno, source_line_content)],
+                    "source": cp
+                }]
+
+            # Identifier 类型，调用 parameters_back 反向追踪
+            if hasattr(arg, 'type') and arg.type == 'Identifier':
+                is_co2, cp2, expr_lineno2 = parameters_back(
+                    arg, all_nodes, function_params=None, lineno=vul_lineno,
+                    function_flag=0, vul_function=None, file_path=file_path)
+                if is_co2 == 1:
+                    source_line_num = expr_lineno2 if expr_lineno2 else vul_lineno
+                    source_line_content = source_lines[source_line_num - 1].strip() if source_line_num <= len(source_lines) else callee_name
+                    return [{
+                        "code": 1,
+                        "chain": ["{}:{}".format(source_line_num, source_line_content)],
+                        "source": cp2
+                    }]
+
+            # CallExpression 嵌套调用，尝试用摘要判断
+            if hasattr(arg, 'type') and arg.type == 'CallExpression':
+                inner_callee, _ = _extract_call_name_js(arg)
+                if inner_callee:
+                    callee_summary = lookup_summary(inner_callee)
+                    if callee_summary and callee_summary.return_flow:
+                        summary_result = _judge_from_summary_js(callee_summary, getattr(arg, 'arguments', []) or [])
+                        if summary_result is not None and summary_result[0] == 1:
+                            source_line_content = source_lines[vul_lineno - 1].strip() if vul_lineno <= len(source_lines) else callee_name
+                            return [{
+                                "code": 1,
+                                "chain": ["{}:{}".format(vul_lineno, source_line_content)],
+                                "source": summary_result[1]
+                            }]
+
+    return None
+
+
 def get_member_data(node, check=False, isparam=False, isclean_prototype=False, isreverse=False):
     if hasattr(node, "type"):
         type = node.type
@@ -1702,7 +2146,7 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
                 callee_name = get_member_data(expression.callee)
                 expr_lineno = expression.loc.start.line
 
-                if callee_name and callee_name == vul_function or callee_name == "this." + vul_function.split(".")[-1]:
+                if callee_name and vul_function and (callee_name == vul_function or callee_name == "this." + vul_function.split(".")[-1]):
                     callee_params = expression.arguments
                     param_name = get_member_data(callee_params)
 
@@ -1842,15 +2286,6 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
             if is_co == 3:  # 出现新的敏感函数，重新生成新的漏洞结构，进入新的遍历结构
                 for function_param in function_params:
                     if function_param == cp:
-                        # 如果原始 vul_lineno 在当前函数体内，说明引擎是从函数内部直接分析的，
-                        # 此时形参不可确认（is_co=3），不应生成 NewFunction（is_co=4），
-                        # 否则会导致函数内 exec(形参) 被误报为 Config-vulnerability-confirmed
-                        if int(lineno) >= function_lineno:
-                            logger.debug(
-                                "[AST] param {} in function_params, but vul_lineno {} >= func_lineno {}, skip NewFunction".format(
-                                    param_name, lineno, function_lineno))
-                            return is_co, cp, expr_lineno
-
                         logger.debug(
                             "[AST] param {} line {} in function_params, start new rule for function {}".format(
                                 param_name, function_lineno, function_name))
@@ -2331,7 +2766,7 @@ def set_scan_results(is_co, cp, expr_lineno, sink, param, vul_lineno):
         'sink_lineno': vul_lineno,
         "chain": scan_chain,
     }
-    if result['code'] in (1, 2, 3):
+    if result['code'] > 0:  # 1/2/3/4（含 NewFunction 信号）
         results.append(result)
         scan_results += results
     elif result['code'] == -1:
@@ -2389,6 +2824,15 @@ def analysis(all_nodes, vul_function, back_node, vul_lineno, file_path, function
 
         if node.type == "ExpressionStatement":  # 函数调用
             analysis_expression(node, vul_function, back_node, vul_lineno, file_path, function_params)
+
+        if node.type == "ReturnStatement":  # return 中的函数调用（如 return eval(expr)）
+            if hasattr(node, 'argument') and node.argument:
+                if node.argument.type == "CallExpression":
+                    analysis_callexpression(node.argument, vul_function, back_node, vul_lineno, file_path, function_params)
+                elif node.argument.type == "AwaitExpression":
+                    await_arg = node.argument.argument
+                    if hasattr(await_arg, "type") and await_arg.type == "CallExpression":
+                        analysis_callexpression(await_arg, vul_function, back_node, vul_lineno, file_path, function_params)
 
         if node.type == "FunctionDeclaration":  # 函数声明
             # analysis_functiondec(node, vul_function, back_node, vul_lineno, file_path, function_params)
@@ -2779,6 +3223,11 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
         else:
             all_nodes = getattr(_nodes, 'body', []) or []
 
+        # 初始化 import map（跨文件追踪用）
+        import_map = {}
+        if all_nodes:
+            import_map = _parse_js_imports(_nodes, file_path)
+
         for func in sensitive_func:  # 循环判断代码中是否存在敏感函数，若存在，递归判断参数是否可控;对文件内容循环判断多次
             back_node = []
             analysis(all_nodes, func, back_node, int(vul_lineno), file_path, function_params=None)
@@ -2787,6 +3236,15 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
             if len(scan_results) > 0:
                 logger.debug("[AST] Scan parser end for {}".format(str(scan_results)))
                 break
+
+            # 单文件扫描未找到，尝试跨文件追踪
+            if not scan_results and import_map:
+                cross_result = _try_cross_file_trace_js(
+                    all_nodes, int(vul_lineno), sensitive_func, file_path,
+                    import_map, controlled_params)
+                if cross_result:
+                    scan_results = cross_result
+                    break
 
     except SyntaxError as e:
         logger.warning('[AST] [ERROR]:{e}'.format(e=traceback.format_exc()))

@@ -3112,7 +3112,7 @@ def set_scan_results(is_co, cp, expr_lineno, sink, param, vul_lineno):
         'sink_lineno': vul_lineno,
         "chain": scan_chain,
     }
-    if result['code'] in (1, 2, 3):
+    if result['code'] > 0:  # 1/2/3/4（含 NewFunction 信号）
         results.append(result)
         scan_results += results
     elif result['code'] == -1:

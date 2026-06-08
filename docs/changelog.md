@@ -1,4 +1,23 @@
 ## 更新日志
+- 2026-06-08
+  - KunLun-M 2.13.5
+  - **JS/PHP 跨文件分析能力（NewFunction → NewCore 链路）**
+    - JS 引擎新增 `_parse_js_imports()`、`_build_js_func_index()`、`_try_cross_file_trace_js()` 三个核心函数
+    - 支持 CommonJS `require()` 对象属性访问（`utils.func()`）和解构导入（`{ func } = require()`）
+    - ESM `import/export` 在 esprima script 模式下可解析但不追踪（已知限制）
+    - PHP 引擎同步支持跨文件 `function_back`（include/require 内联模型）
+  - **修复 NewFunction → NewCore 完整链路的 6 层 bug**
+    - `matcher.py`：code=4 链路中 chain>1 被误判为配置型漏洞
+    - `scanner.py`：`newcore_function_list` 可变默认值导致多实例共享同一 dict
+    - `rule_generator.py`：`FileParseAll` 缺少 `language` 参数导致 JS 文件被过滤
+    - `engine.py`：`init_match_rule` 正则模板修复，支持 `FunctionDeclaration` AST 节点
+    - `scanner.py`：`scan_single` 的 `files` 参数扩展名映射修正（`.javascript` → `.js`）
+    - `scanner.py`：`newcore_function_list` 默认值从 `list/dict` 改为 `None` + `or {}`
+  - **跨文件 Benchmark 测试（12 JS + 2 PHP，117 passed）**
+    - 6 组 JS benchmark：CommonJS 对象属性 / 解构导入 / ESM import / 安全封装(负面) / exports 赋值 / setTimeout 封装
+    - 信号测试：code=4 NewFunction 信号生成（13a/17a/18a）
+    - 端到端测试：`scan_single` 完整链路验证（13/14/16/17/18 + PHP）
+    - ESM 跨文件预期不检出（esprima script 模式限制）
 - 2026-06-06
   - KunLun-M 2.13.4
   - **Source Discovery 预处理模块全语言完成**

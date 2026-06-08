@@ -146,7 +146,7 @@ def score2level(score):
 
 
 def scan_single(target_directory, single_rule, files=None, language=None, tamper_name=None, is_unconfirm=False,
-                newcore_function_list=[]):
+                newcore_function_list=None):
     try:
         return SingleRule(target_directory, single_rule, files, language, tamper_name, is_unconfirm,
                           newcore_function_list).process()
@@ -269,7 +269,7 @@ def scan(target_directory, a_sid=None, s_sid=None, special_rules=None, language=
 
 class SingleRule(object):
     def __init__(self, target_directory, single_rule, files, language=None, tamper_name=None, is_unconfirm=False,
-                 newcore_function_list=[]):
+                 newcore_function_list=None):
         self.target_directory = target_directory
         self.sr = single_rule
         self.files = files
@@ -286,7 +286,7 @@ class SingleRule(object):
         self.rule_vulnerabilities = []
 
         # new core function list
-        self.newcore_function_list = newcore_function_list
+        self.newcore_function_list = newcore_function_list or {}
 
         logger.info("[!] Start scan [CVI-{sr_id}]".format(sr_id=self.sr.svid))
 
