@@ -693,7 +693,9 @@ class SingleRule(object):
                                                            is_unconfirm=self.is_unconfirm,
                                                            newcore_function_list=self.newcore_function_list)
 
-                        if len(new_rule_vulnerabilities) > 0:
+                        if not new_rule_vulnerabilities:
+                            pass
+                        elif len(new_rule_vulnerabilities) > 0:
                             self.rule_vulnerabilities.extend(new_rule_vulnerabilities)
 
                     else:
