@@ -146,7 +146,7 @@ def score2level(score):
 
 
 def scan_single(target_directory, single_rule, files=None, language=None, tamper_name=None, is_unconfirm=False,
-                newcore_function_list=[]):
+                newcore_function_list={}):
     try:
         return SingleRule(target_directory, single_rule, files, language, tamper_name, is_unconfirm,
                           newcore_function_list).process()

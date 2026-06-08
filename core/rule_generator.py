@@ -42,7 +42,7 @@ def init_match_rule(data, lan='php'):
 
 
 def NewCore(old_single_rule, target_directory, new_rules, files, count=0, languages=None, tamper_name=None,
-            is_unconfirm=False, newcore_function_list=[]):
+            is_unconfirm=False, newcore_function_list={}):
     """
     处理新的规则生成
     :param languages:
@@ -107,7 +107,7 @@ def NewCore(old_single_rule, target_directory, new_rules, files, count=0, langua
 
     try:
         if match:
-            f = FileParseAll(files, target_directory)
+            f = FileParseAll(files, target_directory, language=language)
             result = f.grep(match)
         else:
             result = {}

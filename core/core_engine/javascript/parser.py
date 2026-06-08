@@ -170,7 +170,7 @@ def _parse_js_imports(all_nodes, file_path):
         # ESM: import { run } from './utils'
         if node_type == 'ImportDeclaration':
             source = getattr(node, 'source', None)
-            if source and getattr(source, 'type', None) == 'Literal' and isinstance(source.value, str):
+            if source and getattr(source, 'type', None) in ('Literal', 'StringLiteral') and isinstance(source.value, str):
                 module_path = _resolve_js_module_path(source.value, base_dir)
                 if module_path:
                     for spec in (node.specifiers or []):
@@ -199,7 +199,7 @@ def _parse_js_imports(all_nodes, file_path):
                     if (getattr(callee, 'type', None) == 'Identifier' and
                             getattr(callee, 'name', None) == 'require'):
                         args = getattr(init, 'arguments', [])
-                        if (args and getattr(args[0], 'type', None) == 'Literal' and
+                        if (args and getattr(args[0], 'type', None) in ('Literal', 'StringLiteral') and
                                 isinstance(args[0].value, str)):
                             require_arg = args[0].value
 
@@ -211,7 +211,7 @@ def _parse_js_imports(all_nodes, file_path):
                         if (getattr(callee, 'type', None) == 'Identifier' and
                                 getattr(callee, 'name', None) == 'require'):
                             args = getattr(obj, 'arguments', [])
-                            if (args and getattr(args[0], 'type', None) == 'Literal' and
+                            if (args and getattr(args[0], 'type', None) in ('Literal', 'StringLiteral') and
                                     isinstance(args[0].value, str)):
                                 require_arg = args[0].value
 
@@ -455,7 +455,19 @@ def _try_cross_file_trace_js(all_nodes, vul_lineno, sensitive_func, file_path,
             continue
 
         # 第3步：在被 import 文件中查找函数定义
-        func_def = _find_js_func_def(local_func_name, import_map, ast_object)
+        try:
+            module_nodes = ast_object.get_nodes(imported_path, lan='javascript')
+        except Exception:
+            continue
+        if module_nodes is None or not hasattr(module_nodes, 'body'):
+            continue
+
+        func_index = _build_js_func_index(module_nodes, imported_path)
+        func_def = None
+        for name in (local_func_name, callee_name):
+            if name in func_index:
+                func_def = func_index[name][0]
+                break
         if not func_def:
             return None
 
@@ -2134,7 +2146,7 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
                 callee_name = get_member_data(expression.callee)
                 expr_lineno = expression.loc.start.line
 
-                if callee_name and callee_name == vul_function or callee_name == "this." + vul_function.split(".")[-1]:
+                if callee_name and vul_function and (callee_name == vul_function or callee_name == "this." + vul_function.split(".")[-1]):
                     callee_params = expression.arguments
                     param_name = get_member_data(callee_params)
 
@@ -2274,15 +2286,6 @@ def parameters_back(param, nodes, function_params=None, lineno=0,
             if is_co == 3:  # 出现新的敏感函数，重新生成新的漏洞结构，进入新的遍历结构
                 for function_param in function_params:
                     if function_param == cp:
-                        # 如果原始 vul_lineno 在当前函数体内，说明引擎是从函数内部直接分析的，
-                        # 此时形参不可确认（is_co=3），不应生成 NewFunction（is_co=4），
-                        # 否则会导致函数内 exec(形参) 被误报为 Config-vulnerability-confirmed
-                        if int(lineno) >= function_lineno:
-                            logger.debug(
-                                "[AST] param {} in function_params, but vul_lineno {} >= func_lineno {}, skip NewFunction".format(
-                                    param_name, lineno, function_lineno))
-                            return is_co, cp, expr_lineno
-
                         logger.debug(
                             "[AST] param {} line {} in function_params, start new rule for function {}".format(
                                 param_name, function_lineno, function_name))
@@ -2763,7 +2766,7 @@ def set_scan_results(is_co, cp, expr_lineno, sink, param, vul_lineno):
         'sink_lineno': vul_lineno,
         "chain": scan_chain,
     }
-    if result['code'] in (1, 2, 3):
+    if result['code'] > 0:  # 1/2/3/4（含 NewFunction 信号）
         results.append(result)
         scan_results += results
     elif result['code'] == -1:
@@ -2821,6 +2824,15 @@ def analysis(all_nodes, vul_function, back_node, vul_lineno, file_path, function
 
         if node.type == "ExpressionStatement":  # 函数调用
             analysis_expression(node, vul_function, back_node, vul_lineno, file_path, function_params)
+
+        if node.type == "ReturnStatement":  # return 中的函数调用（如 return eval(expr)）
+            if hasattr(node, 'argument') and node.argument:
+                if node.argument.type == "CallExpression":
+                    analysis_callexpression(node.argument, vul_function, back_node, vul_lineno, file_path, function_params)
+                elif node.argument.type == "AwaitExpression":
+                    await_arg = node.argument.argument
+                    if hasattr(await_arg, "type") and await_arg.type == "CallExpression":
+                        analysis_callexpression(await_arg, vul_function, back_node, vul_lineno, file_path, function_params)
 
         if node.type == "FunctionDeclaration":  # 函数声明
             # analysis_functiondec(node, vul_function, back_node, vul_lineno, file_path, function_params)

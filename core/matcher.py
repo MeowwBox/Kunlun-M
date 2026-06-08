@@ -219,10 +219,14 @@ class VulnerabilityMatcher(object):
 
         for r in result:
             if r['code'] == 4:  # 配置型漏洞 / 新规则生成
-                # 区分：如果有 chain 且包含 sink 名，视为配置型漏洞（code 1 等价）
-                # 否则视为新规则生成信号
-                if r.get('chain') and len(r['chain']) > 1:
-                    return True, 'Config-vulnerability-confirmed', r['chain']
+                # 区分：chain 中有 NewFunction 标记 → NewCore 二次扫描
+                # chain 中无 NewFunction → 配置型漏洞（code 1 等价）
+                chain = r.get('chain', [])
+                has_new_function = any(isinstance(c, tuple) and len(c) >= 1 and c[0] == 'NewFunction' for c in chain)
+                if has_new_function:
+                    return False, 'New Core', r['source']
+                if chain and len(chain) > 1:
+                    return True, 'Config-vulnerability-confirmed', chain
                 return False, 'New Core', r['source']
 
         for r in result:

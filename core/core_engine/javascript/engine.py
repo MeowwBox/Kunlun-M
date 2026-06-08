@@ -89,10 +89,11 @@ def init_match_rule(data):
 
             # js除了函数调用以外，还存在对象传递
             # var check=timeMsg
-            match = r"({}\s*{}\s*(({})|\b))".format(match_header, function_name, match)
+            # 同时匹配 funcName(...) 和 obj.funcName(...)
+            match = r"({}\s*(?:\w+\.)?{}\s*(({})|\b))".format(match_header, function_name, match)
 
-            # 去除定义函数
-            match2 = r"function\s+" + function_name
+            # 去除定义函数和 exports 赋值
+            match2 = r"(?:function\s+" + function_name + r"|\w+:\s*" + function_name + r"\s*=)"
             vul_function = function_name
 
         elif hasattr(object, "type") and object.type == "Identifier":
@@ -105,10 +106,11 @@ def init_match_rule(data):
 
             # js除了函数调用以外，还存在对象传递
             # var check=timeMsg
-            match = r"({}\s*{}\s*(({})|\b))".format(match_header, function_name, match)
+            # 同时匹配 funcName(...) 和 obj.funcName(...)
+            match = r"({}\s*(?:\w+\.)?{}\s*(({})|\b))".format(match_header, function_name, match)
 
-            # 去除定义函数
-            match2 = r"function\s+" + function_name
+            # 去除定义函数和 exports 赋值
+            match2 = r"(?:function\s+" + function_name + r"|\w+:\s*" + function_name + r"\s*=)"
             vul_function = function_name
 
         else:
