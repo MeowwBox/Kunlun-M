@@ -16,22 +16,27 @@ import re
 from utils.log import logger
 
 
-class NewFunction:
+def init_match_rule(data):
     """
-    C/C++ NewFunction 正则生成引擎
+    处理 C/C++ 新生成规则初始化正则匹配
+
+    :param data: NewFunction chain 中的 source tuple (func_name, param_name, vul_function)
+    :return: (match, match2, vul_function, index, origin_func_name)
     """
+    obj = data[0]
 
-    def __init__(self):
-        self.scan_results = []
-        self.is_repair_functions = []
-        self.is_controlled_params = []
-        self.scan_chain = []
+    if isinstance(obj, str):
+        # NewCore 二次扫描：data = (func_name, param_name, vul_function)
+        function_name = obj
+        origin_func_name = function_name
+        # strip namespace prefix: ns::Func → Func
+        if '::' in function_name:
+            function_name = function_name.split('::')[-1]
 
-    def run(self, newfunction_result):
-        """
-        生成 NewFunction 的正则匹配模式
+        match = r"(?:^|[\s=,])" + re.escape(function_name) + r"\s*\([^)]*\)"
+        match2 = r"\b" + re.escape(function_name) + r"\s*\("
+        logger.debug("[New Rule] C match: {}".format(match))
+        return match, match2, function_name, 0, origin_func_name
 
-        :param newfunction_result: NewFunction 结果
-        :return: 正则匹配模式列表
-        """
-        return []
+    logger.debug("[New Rule] C auto rule generation: unsupported data type")
+    return None, None, None, 0, "None"

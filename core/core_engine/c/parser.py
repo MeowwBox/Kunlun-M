@@ -1391,35 +1391,9 @@ def _trace_variable_in_lines_impl(file_path, var_name, from_line, to_line,
 
     # ---- 检查 var_name 是否是函数形参 ----
     if var_name in param_names:
-        logger.debug("[AST][C] Variable {} is a parameter of function {}".format(
+        logger.debug("[AST][C] Variable {} is a parameter of function {}, return code=5".format(
             var_name, func_name))
-        # 搜索调用点
-        call_result = _trace_param_at_call_sites(
-            func_name, var_name, file_path, tree,
-            repair_functions, controlled_params, depth, max_depth, visited
-        )
-        if call_result is not None:
-            return call_result
-
-        # 跨文件搜索
-        pt = _ast_object_singleton
-        if pt and hasattr(pt, "pre_result"):
-            for other_fp, other_data in pt.pre_result.items():
-                if other_fp == file_path:
-                    continue
-                if other_data.get("language") not in ("c", "cpp", "c++"):
-                    continue
-                other_tree = _parse_c_ast(other_fp)
-                if not other_tree:
-                    continue
-                call_result = _trace_param_at_call_sites(
-                    func_name, var_name, other_fp, other_tree,
-                    repair_functions, controlled_params, depth, max_depth, visited
-                )
-                if call_result is not None:
-                    return call_result
-
-        return (-1, 0)
+        return (5, func_name)
 
     # ---- 在函数体内查找 var_name 的赋值 ----
     assign_result = _find_assignment_at_line(tree, to_line, var_name, to_line)
@@ -1739,29 +1713,9 @@ def _handle_call_expression_rhs(call_node, var_name, file_path, lineno, to_line,
         logger.debug("[AST][C] RHS call {} is controlled source".format(func_text))
         return (1, lineno)
 
-    # 未知函数 → 跨函数追踪 (deps 机制)
-    args_str = ", ".join(_node_text(a) for a in args)
-    fb_result = function_back_c(
-        func_text, args_str, lineno, file_path,
-        repair_functions, controlled_params
-    )
-    if isinstance(fb_result, tuple) and len(fb_result) == 2:
-        code, caller_deps = fb_result
-        if code == "deps" and caller_deps:
-            for dep_var in caller_deps:
-                if dep_var == var_name:
-                    continue
-                r = _trace_variable_in_lines(
-                    file_path, dep_var, lineno, to_line,
-                    repair_functions, controlled_params, depth + 1, max_depth, visited
-                )
-                if r[0] in (1, 2):
-                    return r
-            return (3, lineno)
-        elif code in (1, 2):
-            return (code, lineno)
-        elif code == 3:
-            return (3, lineno)
+    # 未知函数 → 返回 code=5，交给 NewCore 二次扫描
+    logger.debug("[AST][C] RHS call {} is unknown, return code=5".format(func_text))
+    return (5, func_text)
 
     return None
 
@@ -1886,440 +1840,6 @@ def _text_trace_variable(file_path, var_name, vul_lineno,
 # ---------------------------------------------------------------------------
 # 跨函数追踪
 # ---------------------------------------------------------------------------
-
-def _trace_param_at_call_sites(func_name, param_name, file_path, tree,
-                               repair_functions, controlled_params,
-                               depth, max_depth, visited=None):
-    """用 AST 搜索函数调用点，追踪实参来源。
-
-    返回 (code, source_lineno) 或 None。
-    """
-    call_sites = []
-
-    def _find_calls(node):
-        if node.type == "call_expression":
-            call_func = _get_call_func_name(node)
-            if call_func and func_name in call_func:
-                call_sites.append(node)
-        for child in node.children:
-            _find_calls(child)
-
-    _find_calls(tree.root_node)
-
-    for call_node in call_sites:
-        args = _get_call_args_from_ast(call_node)
-        call_lineno = call_node.start_point[0] + 1
-
-        # 获取函数定义的形参列表
-        func_def = _find_function_def_in_ast(tree, func_name)
-        if not func_def:
-            # 用索引
-            for (idx_fp, idx_name), idx_val in _func_def_index.items():
-                if idx_name == func_name:
-                    formal_params = idx_val[0]
-                    _trace_from_index = True
-                    break
-            else:
-                continue
-        else:
-            formal_params = func_def[1]
-            _trace_from_index = False
-
-        # 找到 param_name 在形参中的位置
-        param_idx = -1
-        for i, fp in enumerate(formal_params):
-            if fp == param_name:
-                param_idx = i
-                break
-
-        if param_idx < 0 or param_idx >= len(args):
-            continue
-
-        # 获取对应的实参
-        actual_arg = args[param_idx]
-        actual_arg_text = _node_text(actual_arg)
-
-        # 追踪实参
-        if actual_arg.type == "identifier":
-            result = _trace_variable_in_lines(
-                file_path, actual_arg_text, call_lineno, call_lineno,
-                repair_functions, controlled_params, depth + 1, max_depth, visited
-            )
-        else:
-            result = _analyze_rhs_node(
-                actual_arg, param_name, file_path, call_lineno, call_lineno,
-                repair_functions, controlled_params, depth + 1, max_depth, visited
-            )
-        if isinstance(result, tuple) and result[0] in (1, 2):
-            return result
-
-    return None
-
-
-def function_back_c(func_name, call_args, vul_lineno, file_path,
-                    repair_functions=None, controlled_params=None):
-    """回溯用户自定义函数定义，分析返回值与参数的依赖关系。
-
-    仿照 Go 引擎的 function_back_go() 模式。
-
-    返回:
-        (code, caller_var_names)
-        code: 'deps' — 返回值依赖调用者变量，需继续追踪
-              1 — 返回值直接可控
-              2 — 返回值经过修复函数
-              3 — 未确认
-              -1 — 不可控/未找到函数
-    """
-    global _scan_function_stack
-
-    if func_name in _scan_function_stack:
-        logger.debug("[AST][C] Recursive function trace detected: {} -> skip".format(
-            " -> ".join(_scan_function_stack + [func_name])))
-        return (-1, [])
-
-    _scan_function_stack.append(func_name)
-
-    try:
-        if repair_functions is None:
-            repair_functions = is_repair_functions
-        if controlled_params is None:
-            controlled_params = is_controlled_params
-
-        # 1. 检查内置知识库
-        knowledge = lookup_builtin(func_name)
-        if knowledge:
-            if knowledge.get("safe") and not knowledge.get("passthrough") and not knowledge.get("param_flow"):
-                return (-1, [])
-
-        # 1.2. Source Discovery: 检查是否是用户自定义 source producer
-        if _sd_registry and _sd_registry.is_source_producer(func_name):
-            logger.debug('[AST][C] Source Discovery: {} is a user source producer'.format(func_name))
-            return (1, [])
-
-        # 1.5. 查函数摘要
-        callee_summary = lookup_summary(func_name)
-        if callee_summary and callee_summary.return_flow:
-            return _judge_from_summary(callee_summary, call_args, controlled_params)
-
-        # 2. 查函数定义索引
-        result = _func_def_index.get((file_path, func_name))
-        callee_fp = file_path
-
-        # 3. 索引未命中，实时搜索
-        if result is None:
-            tree = _parse_c_ast(file_path)
-            if tree:
-                result = _find_function_def_in_ast(tree, func_name)
-                if result:
-                    callee_fp = file_path
-                    param_names, body_node, def_lineno, end_lineno = result
-                    result = (param_names, body_node, def_lineno, end_lineno)
-
-        # 4. 跨文件搜索
-        if result is None:
-            pt = _ast_object_singleton
-            if pt and hasattr(pt, "pre_result"):
-                short_name = func_name.split("::")[-1] if "::" in func_name else func_name
-                for other_fp, other_data in pt.pre_result.items():
-                    if other_fp == file_path:
-                        continue
-                    if other_data.get("language") not in ("c", "cpp", "c++"):
-                        continue
-                    result = _func_def_index.get((other_fp, short_name))
-                    if result is not None:
-                        callee_fp = other_fp
-                        break
-                    other_tree = _parse_c_ast(other_fp)
-                    if other_tree:
-                        found = _find_function_def_in_ast(other_tree, short_name)
-                        if found:
-                            callee_fp = other_fp
-                            result = found
-                            break
-
-        if result is None:
-            return (-1, [])
-
-        if len(result) == 4:
-            param_names, body_node, def_lineno, end_lineno = result
-        else:
-            return (-1, [])
-
-        # 4.5. 进入 callee 函数体检查 sink 调用
-        sink_result = _trace_callee_body_for_sinks(
-            callee_fp, func_name, param_names, call_args,
-            file_path, repair_functions, controlled_params
-        )
-        if sink_result is not None:
-            return sink_result
-
-        # 5. fallback: 分析返回值依赖
-        return _analyze_return_deps_c(
-            param_names, body_node, call_args,
-            file_path, repair_functions, controlled_params
-        )
-
-    finally:
-        if _scan_function_stack and _scan_function_stack[-1] == func_name:
-            _scan_function_stack.pop()
-        else:
-            try:
-                _scan_function_stack.remove(func_name)
-            except ValueError:
-                pass
-
-
-def _judge_from_summary(summary, call_args_str, controlled_params):
-    """根据函数摘要判定返回值可控性。
-
-    返回: (code, caller_var_names)
-    """
-    if controlled_params is None:
-        controlled_params = is_controlled_params
-
-    for rf in summary.return_flow:
-        if rf.origin_type == "param":
-            actual_args = _split_args_respecting_parens(call_args_str) if call_args_str else []
-            for param_idx in rf.dep_params:
-                if param_idx < len(actual_args):
-                    actual_expr = actual_args[param_idx].strip()
-                    if _is_controllable_source(actual_expr, controlled_params):
-                        return (1, [])
-
-            actual_args = _split_args_respecting_parens(call_args_str) if call_args_str else []
-            deps = set()
-            for param_idx in rf.dep_params:
-                if param_idx < len(actual_args):
-                    actual_expr = actual_args[param_idx].strip()
-                    names = _collect_identifiers_from_ast_str(actual_expr)
-                    if names:
-                        deps.update(names)
-            if deps:
-                return ("deps", list(deps))
-
-        elif rf.origin_type == "call":
-            knowledge = lookup_builtin(rf.origin)
-            if knowledge:
-                if knowledge.get("safe") and not knowledge.get("passthrough") and not knowledge.get("param_flow"):
-                    continue
-                if knowledge.get("passthrough") or knowledge.get("param_flow"):
-                    for param_idx in rf.dep_params:
-                        if param_idx < len(summary.params):
-                            actual_args = _split_args_respecting_parens(call_args_str) if call_args_str else []
-                            if param_idx < len(actual_args):
-                                if _is_controllable_source(actual_args[param_idx], controlled_params):
-                                    return (1, [])
-            else:
-                if _is_controllable_source(rf.origin, controlled_params):
-                    return (1, [])
-
-        elif rf.origin_type == "global":
-            if _is_controllable_source(rf.origin, controlled_params):
-                return (1, [])
-
-        elif rf.origin_type == "literal":
-            continue
-
-    return (-1, [])
-
-
-def _collect_identifiers_from_ast_str(expr_str):
-    """从表达式字符串中提取标识符（回退方案）。"""
-    if not expr_str:
-        return []
-    return re.findall(r'[a-zA-Z_]\w*', expr_str)
-
-
-def _trace_callee_body_for_sinks(callee_file_path, callee_func_name, formal_params,
-                                  call_args_str, caller_file_path,
-                                  repair_functions=None, controlled_params=None):
-    """进入 callee 函数体，搜索 sink 调用，追踪参数数据流。
-
-    返回: (code, caller_var_names) 或 None。
-    """
-    if repair_functions is None:
-        repair_functions = is_repair_functions
-    if controlled_params is None:
-        controlled_params = is_controlled_params
-
-    tree = _parse_c_ast(callee_file_path)
-    if not tree:
-        return None
-
-    lookup_name = callee_func_name.split("::")[-1] if "::" in callee_func_name else callee_func_name
-    func_def = _find_function_def_in_ast(tree, lookup_name)
-    if not func_def:
-        return None
-
-    _, _, body_node, _, _ = func_def
-    if not body_node:
-        return None
-
-    # Walk 函数体，找所有已知 sink 的 call_expression
-    sink_calls = []
-
-    def _walk_for_sinks(node):
-        if node.type == "call_expression":
-            func_text = _get_call_func_text(node)
-            if func_text:
-                knowledge = lookup_builtin(func_text)
-                if knowledge and not knowledge.get("safe", True):
-                    sink_calls.append((func_text, node))
-        for child in node.children:
-            _walk_for_sinks(child)
-
-    _walk_for_sinks(body_node)
-    if not sink_calls:
-        return None
-
-    # 建立形参→实参映射
-    actual_args = _split_args_respecting_parens(call_args_str) if call_args_str else []
-    arg_map = {}
-    for idx, fp_name in enumerate(formal_params):
-        if idx < len(actual_args):
-            arg_map[fp_name] = actual_args[idx].strip()
-
-    for sink_func, sink_node in sink_calls:
-        args = _get_call_args_from_ast(sink_node)
-        for arg_node in args:
-            if _is_literal_node(arg_node):
-                continue
-
-            arg_identifiers = _collect_identifiers_from_ast(arg_node)
-            for ident in arg_identifiers:
-                if ident not in arg_map:
-                    continue
-
-                actual_expr = arg_map[ident]
-
-                if _is_controllable_source(actual_expr, controlled_params):
-                    logger.debug("[AST][C] Sink {} in callee body uses controllable param: {} -> {}".format(
-                        sink_func, ident, actual_expr))
-                    return (1, [])
-
-                caller_var_names = set()
-                names = _collect_identifiers_from_ast_str(actual_expr)
-                if names:
-                    caller_var_names.update(names)
-                else:
-                    simple = re.match(r'^([a-zA-Z_]\w*)$', actual_expr)
-                    if simple:
-                        caller_var_names.add(simple.group(1))
-
-                if caller_var_names:
-                    logger.debug("[AST][C] Sink {} in callee body depends on caller vars: {}".format(
-                        sink_func, caller_var_names))
-                    return ("deps", list(caller_var_names))
-
-    return None
-
-
-def _analyze_return_deps_c(formal_params, body_node, call_args_str,
-                           file_path, repair_functions, controlled_params):
-    """分析函数返回值与形参的依赖关系（C 版本）。
-
-    使用 tree-sitter AST 进行分析。
-
-    返回: (code, caller_var_names)
-    """
-    if repair_functions is None:
-        repair_functions = is_repair_functions
-    if controlled_params is None:
-        controlled_params = is_controlled_params
-
-    actual_args = _split_args_respecting_parens(call_args_str) if call_args_str else []
-
-    # 收集实参变量名（用于 fallback deps）
-    caller_var_names = set()
-    for arg in actual_args:
-        arg = arg.strip()
-        if not arg:
-            continue
-        if (arg.startswith('"') and arg.endswith('"')) or \
-           (arg.startswith("'") and arg.endswith("'")):
-            continue
-        if re.match(r'^\d+(\.\d+)?$', arg):
-            continue
-        names = _collect_identifiers_from_ast_str(arg)
-        if names:
-            caller_var_names.update(names)
-        else:
-            simple = re.match(r'^([a-zA-Z_]\w*)$', arg)
-            if simple:
-                caller_var_names.add(simple.group(1))
-
-    # 建立形参→实参映射
-    arg_map = {}
-    controllable_formal = set()
-    for idx, fp_name in enumerate(formal_params):
-        if idx < len(actual_args):
-            actual_expr = actual_args[idx].strip()
-            arg_map[fp_name] = actual_expr
-            if _is_controllable_source(actual_expr, controlled_params):
-                controllable_formal.add(fp_name)
-
-    # 赋值链传播（AST 遍历函数体）
-    controllable_local = set(controllable_formal)
-    if body_node:
-        for _ in range(3):
-            changed = _propagate_controllable_in_body(body_node, controllable_local)
-            if not changed:
-                break
-
-    # 分析 return 语句
-    if body_node:
-        return_items = _collect_return_values(body_node)
-        for ret_expr_text, ret_node in return_items:
-            # 返回值本身是可控源
-            if _is_controllable_source(ret_expr_text, controlled_params):
-                logger.debug("[AST][C] Function returns controllable source: {}".format(
-                    ret_expr_text[:80]))
-                return (1, [])
-
-            # 返回值是修复函数
-            if _is_repair_function(ret_expr_text, repair_functions):
-                return (2, [])
-
-            # 检查返回值变量是否在 controllable_local 中
-            if ret_node:
-                ret_idents = _collect_identifiers_from_ast(ret_node)
-            else:
-                ret_idents = _collect_identifiers_from_ast_str(ret_expr_text)
-
-            matched = set(ret_idents) & controllable_local
-            if matched:
-                deps = set()
-                for var in matched:
-                    if var in arg_map:
-                        actual_expr = arg_map[var]
-                        if _is_controllable_source(actual_expr, controlled_params):
-                            return (1, [])
-                        actual_names = _collect_identifiers_from_ast_str(actual_expr)
-                        if actual_names:
-                            deps.update(actual_names)
-                        else:
-                            simple = re.match(r'^([a-zA-Z_]\w*)$', actual_expr)
-                            if simple:
-                                deps.add(simple.group(1))
-                    else:
-                        deps.update(ret_idents)
-                if deps:
-                    logger.debug("[AST][C] Function return depends on caller vars: {}".format(deps))
-                    return ("deps", list(deps))
-
-            # fallback: 文本匹配形参名
-            for fp_name, actual_expr in arg_map.items():
-                if _is_controllable_source(actual_expr, controlled_params):
-                    if fp_name in ret_expr_text:
-                        logger.debug("[AST][C] Function returns controllable param {} (text match)".format(
-                            fp_name))
-                        return (1, [])
-
-    if caller_var_names:
-        return ("deps", list(caller_var_names))
-
-    return (3, [])
-
 
 def _propagate_controllable_in_body(body_node, controllable_local):
     """在函数体 AST 中传播可控变量标记。
@@ -2610,48 +2130,21 @@ def scan_parser(rule_match, vul_lineno, file_path,
                 logger.debug("[AST][C] Arg[{}] is literal: {}".format(arg_idx, arg_text))
                 continue
 
-            # Function call as argument: trace return value controllability
+            # Function call as argument → 封装 sink，走 NewCore
             if arg_node.type == "call_expression":
                 inner_func = _get_call_func_name(arg_node)
                 if inner_func:
-                    inner_args = _get_call_args_from_ast(arg_node)
-                    inner_args_str = ", ".join(_node_text(a) for a in inner_args)
-                    fb_result = function_back_c(
-                        inner_func, inner_args_str, vul_lineno, file_path,
-                        repair_functions, controlled_params
-                    )
-                    if isinstance(fb_result, tuple):
-                        code, deps = fb_result
-                        if code == 1:
-                            logger.debug("[AST][C] Return value of {} is controllable".format(inner_func))
-                            results.append({
-                                "code": 1,
-                                "vul_func": matched_func,
-                                "param": inner_func,
-                                "language": "c",
-                                "source_file": file_path,
-                                "source_lineno": vul_lineno,
-                                "chain": [],
-                            })
-                            scan_results = results
-                            return results
-                        elif code == "deps" and isinstance(deps, list):
-                            # Function return depends on internal controllable vars
-                            # If no call args (or deps aren't params), means internal controllable data
-                            if not inner_args or True:  # deps already validated as controllable inside
-                                logger.debug("[AST][C] Return value of {} depends on controllable internal vars: {}".format(
-                                    inner_func, deps))
-                                results.append({
-                                    "code": 1,
-                                    "vul_func": matched_func,
-                                    "param": inner_func,
-                                    "language": "c",
-                                    "source_file": file_path,
-                                    "source_lineno": vul_lineno,
-                                    "chain": [],
-                                })
-                                scan_results = results
-                                return results
+                    logger.debug("[AST][C] Arg func {} is unknown wrapper, return code=5".format(inner_func))
+                    results.append({
+                        'code': 5,
+                        'source': (inner_func, arg_text, matched_func),
+                        'chain': [
+                            ('NewFunction', inner_func, file_path, 0),
+                            ('sink', matched_func, file_path, vul_lineno)
+                        ]
+                    })
+                    scan_results = results
+                    return results
 
             # 提取参数中的所有标识符
             var_names = _collect_identifiers_from_ast(arg_node)
@@ -2735,6 +2228,26 @@ def scan_parser(rule_match, vul_lineno, file_path,
                         "source_file": file_path,
                         "source_lineno": src_lineno if src_lineno else vul_lineno,
                     "chain": [],
+                    })
+                    scan_results = results
+                    return results
+                elif trace_code == 5:
+                    wrapper_func = src_lineno
+                    wrapper_file = file_path
+                    wrapper_lineno = 0
+                    lookup_name = wrapper_func.split("::")[-1] if "::" in wrapper_func else wrapper_func
+                    for (fp, fname), val in _func_def_index.items():
+                        if fname == lookup_name:
+                            wrapper_file = fp
+                            wrapper_lineno = val[2] if len(val) > 2 else 0
+                            break
+                    results.append({
+                        'code': 5,
+                        'source': (wrapper_func, var_name, matched_func),
+                        'chain': [
+                            ('NewFunction', wrapper_func, wrapper_file, wrapper_lineno),
+                            ('sink', matched_func, file_path, vul_lineno)
+                        ]
                     })
                     scan_results = results
                     return results
@@ -2927,6 +2440,19 @@ def analysis_params(param_name, parent_func_names, vul_function, lineno, file_pa
     elif trace_code == 3:
         return 3, controlled_params, lineno, [
             ("unconfirmed", param_name, file_path, src_lineno if src_lineno else lineno)
+        ]
+    elif trace_code == 5:
+        wrapper_func = src_lineno
+        wrapper_file = file_path
+        wrapper_lineno = 0
+        lookup_name = wrapper_func.split("::")[-1] if "::" in wrapper_func else wrapper_func
+        for (fp, fname), val in _func_def_index.items():
+            if fname == lookup_name:
+                wrapper_file = fp
+                wrapper_lineno = val[2] if len(val) > 2 else 0
+                break
+        return 5, controlled_params, wrapper_lineno, [
+            ('NewFunction', wrapper_func, wrapper_file, wrapper_lineno)
         ]
     else:
         return -1, [], 0, []

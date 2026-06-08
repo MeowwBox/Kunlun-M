@@ -382,7 +382,7 @@ class CAST(object):
                         return True, _is_co, _cp, chain
                     elif _is_co == 3:
                         pass
-                    elif _is_co == 4:
+                    elif _is_co in (4, 5):
                         if hasattr(_cp[0], "name"):
                             logger.info("[AST] New vul function {}()".format(_cp[0].name))
                         else:
