@@ -176,6 +176,90 @@ def test_scan_parser_integration():
         print("[integration] ❌ scan_parser 未检出")
 
 
+def _scan_single_e2e(lang, file_list, vul_dir, svid=1):
+    """端到端 scan_single 测试辅助函数
+
+    构造一个 function-param-regex 规则，match 为 eval|setTimeout，
+    走完整的 grep → scan_parser → NewFunction → NewCore 链路。
+    """
+    from core.scanner import scan_single
+    from core.pretreatment import ast_object as ao
+
+    # 清理全局状态（之前测试可能污染了 ast_object）
+    ao.pre_result = {}
+    ao.define_dict = {}
+
+    # files 参数格式：扩展名必须与 ext_dict 一致
+    ext_map = {'javascript': '.js', 'php': '.php', 'python': '.py',
+               'java': '.java', 'go': '.go', 'c': '.c', 'solidity': '.sol'}
+    ext = ext_map.get(lang, f'.{lang}')
+
+    runtime_files = [(ext, {'list': file_list})]
+    ao.init_pre(vul_dir, runtime_files)
+    ao.pre_ast_all([lang])
+
+    # 构造规则对象（function-param-regex 模式，match 是函数名列表）
+    from types import SimpleNamespace
+    rule = SimpleNamespace(
+        svid=svid,
+        language=lang,
+        author='test',
+        vulnerability='RCE',
+        description='test rule',
+        level=5,
+        status=True,
+        match_mode='function-param-regex',
+        match='eval|setTimeout',
+        match_name=None,
+        black_list=None,
+        unmatch=None,
+        vul_function=None,
+        keyword=None,
+        main=lambda regex_string: True,
+    )
+
+    file_list_parsed = [(ext, {'list': file_list})]
+    return scan_single(vul_dir, rule, file_list_parsed, language=lang)
+
+
+def test_js_e2e_newfunction_cross_file():
+    """端到端测试：JS NewFunction 跨文件 - 13a/13b eval 封装"""
+    file_list = ['13a_cross_file_eval_utils.js', '13b_cross_file_eval_main.js']
+    results = _scan_single_e2e('javascript', file_list, TEST_DIR)
+    print(f"[e2e-13] results = {results}")
+    assert results is not None, "scan_single 应返回结果"
+    assert len(results) > 0, "13a/13b 应检出至少 1 个漏洞"
+    print(f"[e2e-13] ✅ 端到端检出 {len(results)} 个漏洞")
+
+
+def test_js_e2e_exports_cross_file():
+    """端到端测试：JS NewFunction 跨文件 - 17a/17b exports eval"""
+    file_list = ['17a_cross_file_exports_utils.js', '17b_cross_file_exports_main.js']
+    results = _scan_single_e2e('javascript', file_list, TEST_DIR)
+    print(f"[e2e-17] results = {results}")
+    assert results is not None and len(results) > 0, "17a/17b 应检出至少 1 个漏洞"
+    print(f"[e2e-17] ✅ 端到端检出 {len(results)} 个漏洞")
+
+
+def test_js_e2e_safe_no_false_positive():
+    """端到端测试：JS 安全封装不应检出"""
+    file_list = ['16a_cross_file_safe_utils.js', '16b_cross_file_safe_main.js']
+    results = _scan_single_e2e('javascript', file_list, TEST_DIR)
+    print(f"[e2e-16] results = {results}")
+    assert not results, f"16a/16b 安全封装不应检出: {results}"
+    print("[e2e-16] ✅ 安全封装正确未检出")
+
+
+def test_php_e2e_newfunction():
+    """端到端测试：PHP NewFunction - newfunction_utils/main eval 封装"""
+    php_dir = PROJECT_DIRECTORY + '/tests/php/'
+    file_list = ['newfunction_utils.php', 'newfunction_main.php']
+    results = _scan_single_e2e('php', file_list, php_dir)
+    print(f"[e2e-php] results = {results}")
+    assert results is not None and len(results) > 0, "PHP newfunction 应检出至少 1 个漏洞"
+    print(f"[e2e-php] ✅ 端到端检出 {len(results)} 个漏洞")
+
+
 def main():
     print("=" * 60)
     print("JS 跨文件追踪 Benchmark")
@@ -190,6 +274,10 @@ def main():
         ("NewFunction setTimeout", test_cross_file_newfunction_settimeout),
         ("负面用例 安全封装", test_cross_file_safe_negative),
         ("scan_parser 集成", test_scan_parser_integration),
+        ("端到端 JS 13a/13b", test_js_e2e_newfunction_cross_file),
+        ("端到端 JS 17a/17b", test_js_e2e_exports_cross_file),
+        ("端到端 JS 安全封装", test_js_e2e_safe_no_false_positive),
+        ("端到端 PHP newfunction", test_php_e2e_newfunction),
     ]
 
     passed = 0

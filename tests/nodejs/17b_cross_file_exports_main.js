@@ -4,8 +4,5 @@
  */
 var utils = require('./17a_cross_file_exports_utils');
 
-app.get('/process', function(req, res) {
-    var data = req.query.data;
-    utils.processInput(data);
-    res.send('done');
-});
+var data = process.argv[2];
+utils.processInput(data);

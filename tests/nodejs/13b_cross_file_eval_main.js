@@ -4,8 +4,6 @@
  */
 var utils = require('./13a_cross_file_eval_utils');
 
-app.get('/eval', function(req, res) {
-    var expr = req.query.expr;
-    var result = utils.evaluateExpression(expr);
-    res.send(result);
-});
+var expr = process.argv[2];
+var result = utils.evaluateExpression(expr);
+console.log(result);
