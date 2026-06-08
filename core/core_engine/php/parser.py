@@ -26,6 +26,7 @@ from core.core_engine.php.builtin_knowledge import KNOWLEDGE as PHP_BUILTIN_KNOW
 from core.core_engine.trace_cache import TraceCache
 from core.core_engine.branch_constraint import BranchConstraint
 from core.core_engine.php.summary_generator import lookup_summary
+from core.core_engine.php.source_discovery import SourceRegistry, discover_sources, extract_method_object_name, get_simple_name
 
 # lphply >= 2.0.0 新增的等价节点类型（字段与原类型完全一致）
 _METHOD_CALL_TYPES = (php.MethodCall, getattr(php, 'NullsafeMethodCall', php.MethodCall))
@@ -45,6 +46,7 @@ _trace_cache = TraceCache("php")
 _summaries_initialized = False
 _file_summaries = {}
 all_nodes = []
+_source_registry = None  # Source Discovery 注册表，在 scan_parser 首次调用时初始化
 BASE_FUNCTIONCALL_LIST = ['FunctionCall', 'MethodCall', 'StaticMethodCall', 'ObjectProperty', 'NullsafeMethodCall', 'NullsafeProperty']
 SPECIAL_FUNCTIONCALL_LIST = ['Eval', 'Echo', 'Print', 'Return', 'Break', 'Include',
                          'Require', 'Exit', 'Throw', 'Unset', 'Continue', 'Yield', 'Silence']
@@ -705,6 +707,24 @@ def function_back(param, nodes, function_params, vul_function=None, file_path=No
             # 知识库有记录但没有 passthrough 且 safe=False → 不透传不可控
             return -1, param, 0
 
+        # ---- 检查 Source Discovery ----
+        if _source_registry is not None:
+            # 检查框架方法调用: $request->input() 等
+            if isinstance(param, _METHOD_CALL_TYPES) and _source_registry.framework:
+                obj_name = extract_method_object_name(param.node)
+                if obj_name:
+                    method_name = get_simple_name(param.name)
+                    if method_name and _source_registry.is_framework_request_method(obj_name, method_name):
+                        logger.debug("[AST][PHP] Source Discovery: framework method {0}()->{1} is controllable".format(
+                            obj_name, method_name))
+                        return 1, param, getattr(param, 'lineno', 0)
+
+            # 检查用户自定义 source producer 函数 和 框架全局函数
+            func_name_sd = get_simple_name(param.name)
+            if func_name_sd and _source_registry.is_source_producer(func_name_sd):
+                logger.debug("[AST][PHP] Source Discovery: {0} is a source producer".format(func_name_sd))
+                return 1, param, getattr(param, 'lineno', 0)
+
         # ---- 查函数摘要 ----
         callee_summary = lookup_summary(function_name)
         if callee_summary and callee_summary.return_flow:
@@ -1096,30 +1116,28 @@ def _get_body_nodes(node):
 
 def _get_max_lineno(nodes):
     """递归获取节点列表中所有节点的最大行号（包括嵌套子节点）"""
+    _ATTRS = frozenset(('nodes', 'expr', 'node', 'elseifs', 'else_',
+                        'params', 'key', 'value', 'arguments',
+                        'iftrue', 'iffalse', 'left', 'right',
+                        'condition', 'consequent', 'alternate'))
     max_lineno = 0
-    for node in nodes:
+
+    def _walk(node):
+        nonlocal max_lineno
         if node is None:
-            continue
+            return
+        if isinstance(node, list):
+            for n in node:
+                _walk(n)
+            return
         if hasattr(node, 'lineno') and node.lineno:
             max_lineno = max(max_lineno, int(node.lineno))
-        # 递归处理子节点列表属性
-        for attr in ('nodes', 'expr', 'node', 'elseifs', 'else_', 'params', 'key', 'value', 'arguments'):
+        for attr in _ATTRS:
             child = getattr(node, attr, None)
-            if child is None:
-                continue
-            if isinstance(child, list):
-                max_lineno = max(max_lineno, _get_max_lineno(child))
-            elif hasattr(child, 'lineno'):
-                max_lineno = max(max_lineno, int(child.lineno))
-                # 再递归一层（处理 Block 节点等情况）
-                for sub_attr in ('nodes', 'node'):
-                    sub_child = getattr(child, sub_attr, None)
-                    if sub_child is None:
-                        continue
-                    if isinstance(sub_child, list):
-                        max_lineno = max(max_lineno, _get_max_lineno(sub_child))
-                    elif hasattr(sub_child, 'lineno'):
-                        max_lineno = max(max_lineno, int(sub_child.lineno))
+            if child is not None:
+                _walk(child)
+
+    _walk(nodes)
     return max_lineno
 
 
@@ -1164,7 +1182,7 @@ def _find_sink_branch(if_node, lineno):
                 body_nodes = []
 
             if body_nodes:
-                end = body_nodes[-1].lineno
+                end = _get_max_lineno(body_nodes)
             else:
                 end = start
 
@@ -1898,8 +1916,17 @@ def _parameters_back_impl(param, nodes, function_params=None, lineno=0,
                                                          function_flag=function_flag, vul_function=vul_function,
                                                          file_path=file_path, isback=isback, parent_node=node)
 
+                # 分支体内发现新追踪变量时，更新 param 以便外层继续追踪
+                if is_co == 3 and cp != param:
+                    param = cp
+
             if is_co == 1:  # 目标确定直接返回
                 return is_co, cp, expr_lineno
+
+            # If 处理未得到确定结果，继续外层回溯
+            return parameters_back(param, nodes[:-1], function_params, lineno,
+                                    function_flag=function_flag, vul_function=vul_function,
+                                    file_path=file_path, isback=isback, parent_node=0)
 
         elif isinstance(node, php.While) or isinstance(node, php.DoWhile):
             logger.debug(
@@ -3439,6 +3466,13 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
         is_controlled_params = controlled_params
         _trace_cache.clear()
         all_nodes = ast_object.get_nodes(file_path)
+
+        # Source Discovery: 首次调用时初始化
+        global _source_registry
+        if _source_registry is None:
+            target_dir = ast_object.target_directory if hasattr(ast_object, 'target_directory') else ''
+            if target_dir:
+                _source_registry = discover_sources(target_dir, ast_object)
 
         for func in sensitive_func:  # 循环判断代码中是否存在敏感函数，若存在，递归判断参数是否可控;对文件内容循环判断多次
             back_node = []

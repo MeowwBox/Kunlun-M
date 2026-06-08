@@ -22,6 +22,7 @@ from core.core_engine.trace_cache import TraceCache
 from core.core_engine.branch_constraint import BranchConstraint
 from core.core_engine.python.builtin_knowledge import lookup as lookup_builtin
 from core.core_engine.python.summary_generator import lookup_summary
+from core.core_engine.python.source_discovery import SourceRegistry, discover_sources
 
 # 全局状态（与 PHP/Java parser 保持一致的模式）
 scan_results = []
@@ -56,6 +57,7 @@ _trace_visited = set()
 
 # 追踪缓存 + 内置知识库
 _trace_cache = TraceCache("python")
+_source_registry = None
 
 def _parse_imports(tree, file_path):
     """解析 AST 中的 import 语句，返回 {imported_name: module_file_path} 映射
@@ -1339,6 +1341,15 @@ def _trace_function_return(func_def, call_node, lineno, file_path,
     func_args = func_def.args.args
     call_args = call_node.args or []
 
+    # Source Discovery check: user-defined source producer (before param loop)
+    _is_source_producer = False
+    if _source_registry is not None:
+        source_info = _source_registry.is_source_producer(func_name)
+        if source_info:
+            _is_source_producer = True
+            logger.debug('[AST][Python] Source Discovery: {} is a source producer ({})'.format(
+                func_name, source_info.origin))
+
     # 收集哪些形参对应的实参是可控的
     # 注意：这里只用 is_controllable 直接检查，不调 parameters_back
     # 因为 parameters_back 从 lineno 开始追踪会和当前赋值行冲突
@@ -1348,6 +1359,9 @@ def _trace_function_return(func_def, call_node, lineno, file_path,
         if i < len(call_args):
             arg_str = _expr_to_str(call_args[i])
             arg_map[param.arg] = arg_str
+            if _is_source_producer:
+                # source producer → 所有形参都被视为可控
+                controllable_param_names.add(param.arg)
             if is_controllable(arg_str, controlled_params):
                 controllable_param_names.add(param.arg)
             else:
@@ -1368,6 +1382,16 @@ def _trace_function_return(func_def, call_node, lineno, file_path,
                             controllable_local.add(tname)
 
     # 在函数体中查找 return 语句
+    # Source Discovery: 如果函数本身是 source producer，返回值直接可控
+    if _is_source_producer:
+        for node in ast.walk(func_def):
+            if isinstance(node, ast.Return) and node.value:
+                return_str = _expr_to_str(node.value)
+                logger.debug("[AST][Python] Source producer {} returns: {}".format(func_name, return_str))
+                return 1, return_str, lineno
+        # 无 return 语句但仍是 source producer → 仍然视为可控
+        return 1, func_name, lineno
+
     for node in ast.walk(func_def):
         if isinstance(node, ast.Return) and node.value:
             # 先检查返回值表达式本身是否是可控源
@@ -1731,6 +1755,9 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
     _summaries_initialized = False
     _init_function_summaries(file_path)
 
+    # Initialize Source Discovery (once per project)
+    global _source_registry
+
     try:
         scan_chain = ["start"]
         scan_results = []
@@ -1745,6 +1772,20 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
         if not tree or not hasattr(tree, 'body'):
             logger.debug("[AST][Python] No AST nodes for {}".format(file_path))
             return scan_results
+
+        # Initialize Source Discovery (once per project, after tree is available)
+        if _source_registry is None:
+            project_dir = os.path.dirname(os.path.abspath(file_path))
+            try:
+                _source_registry = discover_sources(project_dir, tree, file_path)
+                # Inject discovered source members into controlled_params
+                if _source_registry.source_members:
+                    extra_sources = _source_registry.get_all_source_names()
+                    controlled_params = list(controlled_params) + extra_sources
+                    is_controlled_params = controlled_params
+                    logger.debug('[AST][Python] Source Discovery injected {} source members'.format(len(extra_sources)))
+            except Exception as e:
+                logger.debug('[AST][Python] Source Discovery init error: {}'.format(e))
 
         target_line = int(vul_lineno)
 
@@ -1832,6 +1873,25 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
                     chain = ["{}:{}".format(source_ln, source_lines[source_ln - 1].strip() if source_ln <= len(source_lines) else arg_str)]
                     scan_results.append({"code": 1, "chain": chain, "source": arg_str})
                     break
+
+                # 如果参数是函数调用，直接走 _trace_expr 追踪（Source Discovery 支持）
+                if isinstance(arg, ast.Call):
+                    call_name = _get_call_name(arg)
+                    func_def = _find_function_def(tree, call_name) if call_name else None
+                    if func_def:
+                        result = _trace_function_return(func_def, arg, target_line, file_path,
+                                                     repair_functions, extended_controlled,
+                                                     set(), 0, tree)
+                        if result and result[0] == 1:
+                            source_ln = result[2] if result[2] else target_line
+                            chain = ["{}:{}".format(source_ln, source_lines[source_ln - 1].strip() if source_ln <= len(source_lines) else arg_str)]
+                            scan_results.append({"code": 1, "chain": chain, "source": result[1]})
+                            break
+                        elif result and result[0] == 2:
+                            source_ln = result[2] if result[2] else target_line
+                            chain = ["{}:{}".format(source_ln, source_lines[source_ln - 1].strip() if source_ln <= len(source_lines) else arg_str)]
+                            scan_results.append({"code": 2, "chain": chain, "source": result[1]})
+                            break
 
                 # 收集参数中的变量名，反向追踪
                 arg_names = _collect_names(arg)

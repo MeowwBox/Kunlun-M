@@ -50,7 +50,7 @@ def test_extract_first_property_path_for_nested_calls_should_strip_method_later(
 def test_build_trigger_code_should_support_implicit_magic_methods():
     plugin = object.__new__(PhpUnSerChain)
 
-    assert plugin.build_trigger_code('__toString') == "$trigger_result = (string)$root;"
-    assert plugin.build_trigger_code('__call') == "$root->undefinedMethod('PAYLOAD_CALL');"
-    assert plugin.build_trigger_code('__invoke') == "$root();"
-    assert "@unserialize" in plugin.build_trigger_code('__wakeup')
+    assert plugin.build_trigger_code('__toString') == "// Trigger hint: (string)$root;"
+    assert plugin.build_trigger_code('__call') == "// Trigger hint: $root->undefinedMethod('PAYLOAD_CALL');"
+    assert plugin.build_trigger_code('__invoke') == "// Trigger hint: $root();"
+    assert "unserialize" in plugin.build_trigger_code('__wakeup')

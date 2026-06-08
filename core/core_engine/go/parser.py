@@ -24,6 +24,9 @@ from core.core_engine.branch_constraint import BranchConstraint
 from core.core_engine.go.builtin_knowledge import lookup as lookup_builtin
 from core.core_engine.go.summary_generator import generate_file_summaries, lookup_summary, _summary_registry
 from core.core_engine.function_summary import SummaryCacheManager
+from core.core_engine.go.source_discovery import (
+    SourceRegistry, SourceInfo, discover_sources
+)
 
 # tree-sitter Go AST 解析
 import tree_sitter_go as _tsgo
@@ -47,6 +50,9 @@ _scan_function_stack = []
 # 函数摘要状态
 _summaries_initialized = False
 _file_summaries = {}
+
+# Source Discovery registry
+_sd_registry = None
 
 # Go 特有的可控输入源
 GO_CONTROLLED_SOURCES = [
@@ -1139,6 +1145,10 @@ def _is_controllable_source(expr_str, controlled_params=None):
         if src in expr_str:
             return True
 
+    # Source Discovery: 检查用户自定义 source
+    if _sd_registry and _sd_registry.is_source_member(expr_str):
+        return True
+
     return False
 
 
@@ -1482,6 +1492,10 @@ def function_back_go(func_name, call_args, vul_lineno, file_path,
     _scan_function_stack.append(func_name)
 
     try:
+        # ---- Source Discovery: user source producer 快速判定 ----
+        if _sd_registry and func_name in _sd_registry.user_source_functions:
+            return (1, caller_var_names)
+
         # 1. 检查内置知识库
         knowledge = lookup_builtin(func_name)
         if knowledge:
@@ -2675,6 +2689,15 @@ def scan_parser(rule_match, vul_lineno, file_path,
 
     # ---- tree-sitter 解析整个文件，获取 AST ----
     ast_tree = _parse_go_ast(file_path)
+
+    # ---- Source Discovery 预处理 ----
+    global _sd_registry
+    _sd_registry = discover_sources(file_path, ast_tree, file_path, extra_sources=GO_CONTROLLED_SOURCES)
+    # 注入 user source producers 到 GO_CONTROLLED_SOURCES
+    for func_name in _sd_registry.user_source_functions:
+        if func_name not in GO_CONTROLLED_SOURCES:
+            GO_CONTROLLED_SOURCES.append(func_name)
+
     call_node = None
     ast_args = []  # AST 节点列表
 

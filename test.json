@@ -98,7 +98,7 @@
     "meta": {
       "target": "https://github.com/test/test.git",
       "sid": "abcdefg",
-      "exported_at": "2026-05-26T10:36:32Z",
+      "exported_at": "2026-06-05T09:37:07Z",
       "schema_version": "1.0",
       "generator": "Kunlun-M CLI Exporter",
       "target_directory": "/tmp/core/git/shadowsocks/shadowsocks/",

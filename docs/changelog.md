@@ -1,4 +1,17 @@
 ## 更新日志
+- 2026-06-06
+  - KunLun-M 2.13.4
+  - **Source Discovery 预处理模块全语言完成**
+    - 新增 `core/core_engine/{php,javascript,python,go,java,c}/source_discovery.py`（6 个语言引擎）
+    - 功能：框架检测（Spring/Gin/CGI 等）、内置 source 识别、AST 遍历自动发现用户自定义 source producer
+    - 各引擎 `scan_parser()` 集成 Source Discovery，在函数回溯中检查 source producer 标记
+  - **Source Discovery benchmark 测试（10 用例）**
+    - 新增 `tests/test_source_discovery.py`，覆盖 PHP/JS/Go/C 4 语言
+    - 测试场景：自定义 source producer 检出、安全函数 vs 不安全函数区分
+    - 新增 benchmark 文件 8 个（PHP 2 + JS 2 + Go 1 + C 2 + discrimination 复用）
+  - **C 引擎修复**
+    - `function_back_c()` 增加 Source Discovery source producer 检查，使 `system(read_user_input())` 能正确检出
+  - 回归测试 118/118 全通过（含 10 个新 Source Discovery 测试）
 - 2026-06-05
   - KunLun-M 2.13.3
   - **修复 PHP 引擎字符串拼接中方法调用参数丢失**

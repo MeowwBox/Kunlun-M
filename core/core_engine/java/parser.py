@@ -5,6 +5,8 @@ import traceback
 import javalang
 from utils.log import logger
 from core.pretreatment import ast_object as _ast_object_singleton
+import os
+from core.core_engine.java.source_discovery import SourceRegistry, discover_sources
 from core.core_engine.trace_cache import TraceCache
 from core.core_engine.branch_constraint import BranchConstraint
 from core.core_engine.java.builtin_knowledge import lookup as lookup_builtin
@@ -20,6 +22,7 @@ _trace_cache = TraceCache("java")
 _summaries_initialized = False
 _file_summaries = {}
 _scan_function_stack = []  # 函数追踪栈，防递归
+_source_registry = None  # Source Discovery 注册表
 
 
 # Java 静态方法验证类 — qualifier.method() 返回 true 时参数被约束为安全类型
@@ -820,6 +823,15 @@ def function_back_java(call_node, stmts, vul_lineno, file_path,
         # 返回值直接来自请求参数
         arg_str = _expr_to_str_java(call_node.arguments[0]) if call_node.arguments else ''
         return (1, f"{full_name}({arg_str})", vul_lineno)
+
+    # Source Discovery: 检查用户自定义 source producer
+    if _source_registry is not None:
+        source_info = _source_registry.is_source_producer(full_name)
+        if source_info:
+            logger.debug('[AST][Java] Source Discovery: {} is a source producer ({})'.format(
+                full_name, source_info.origin))
+            arg_str = _expr_to_str_java(call_node.arguments[0]) if call_node.arguments else ''
+            return (1, f"{full_name}({arg_str})", vul_lineno)
 
     # 2. 查内置知识库
     for name_variant in [full_name, func_name]:
@@ -2180,6 +2192,20 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
 
         # 初始化函数摘要
         _init_function_summaries(file_path)
+
+        # === Source Discovery 初始化 ===
+        global _source_registry
+        if _source_registry is None:
+            target_dir = os.path.dirname(os.path.abspath(file_path))
+            try:
+                _source_registry = discover_sources(target_dir, _nodes, file_path)
+                if _source_registry.source_members or _source_registry.annotated_param_names:
+                    extra_sources = _source_registry.get_all_source_names()
+                    controlled_params = list(controlled_params) + extra_sources
+                    logger.debug('[AST][Java] Source Discovery injected {} sources'.format(
+                        len(extra_sources)))
+            except Exception as e:
+                logger.debug('[AST][Java] Source Discovery init error: {}'.format(e))
 
         # 1. 找到包含目标行号的方法
         method = _find_method_at_line(_nodes, target_line)
