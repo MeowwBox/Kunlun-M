@@ -616,30 +616,24 @@ class SingleRule(object):
                 else:
                     direct_results.append(ov)
 
-        # 处理间接调用结果（任意函数调用检测）
+        # 将间接调用结果转换为 tuple 格式，追加到直接调用结果中
+        # 统一走 Core.scan() 的 CAST 验证流程，避免误报
+        indirect_indices = []
         for ir in indirect_results:
             try:
-                file_path = ir['file_path']
-                lineno = ir['lineno']
-                matched_text = ir['matched_text']
-                vulnerability = VulnerabilityResult.from_match(
-                    (file_path, lineno, matched_text),
-                    svid=self.sr.svid,
-                    language=self.sr.language,
-                    rule_name=self.sr.vulnerability,
-                    author=self.sr.author
-                )
-                if vulnerability:
-                    vulnerability.analysis = "Arbitrary-function-call"
-                    vulnerability.chain = [("IndirectCall", matched_text, file_path, int(lineno))]
-                    self.rule_vulnerabilities.append(vulnerability)
-                    logger.debug('[CVI-{cvi}] [INDIRECT] Arbitrary function call: {call}'.format(
-                        cvi=self.sr.svid, call=matched_text))
+                indirect_indices.append(len(direct_results))
+                direct_results.append((
+                    ir['file_path'],
+                    ir['lineno'],
+                    ir['matched_text'],
+                ))
+                logger.debug('[CVI-{cvi}] [INDIRECT] Queued for CAST check: {call}'.format(
+                    cvi=self.sr.svid, call=ir['matched_text']))
             except Exception as e:
                 logger.debug('indirect call exception ({e})'.format(e=e))
                 logger.debug(traceback.format_exc())
 
-        # 直接调用结果走正常流程
+        # 直接调用结果 + 间接调用结果统一走 CAST 验证
         origin_vulnerabilities = direct_results
         for index, origin_vulnerability in enumerate(origin_vulnerabilities):
             logger.debug(
@@ -683,6 +677,10 @@ class SingleRule(object):
                     logger.debug('[CVI-{cvi}] [RET] Found {code}'.format(cvi=self.sr.svid, code=reason))
                     vulnerability.analysis = reason
                     vulnerability.chain = data
+                    if index in indirect_indices:
+                        vulnerability.analysis = "Arbitrary-function-call"
+                        logger.debug('[CVI-{cvi}] [INDIRECT] CAST verified arbitrary function call'.format(
+                            cvi=self.sr.svid))
                     self.rule_vulnerabilities.append(vulnerability)
                 else:
                     if reason == 'New Core':  # 新的规则
