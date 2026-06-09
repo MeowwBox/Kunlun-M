@@ -436,6 +436,16 @@ class SingleRule(object):
                                             lineno = str(sink_info['lineno'])
                                             callee = sink_info['callee_name']
                                             matched_text = '{callee}()'.format(callee=callee)
+                                            # 构造 indirect_map: 变量名 -> 实际 sink 函数名
+                                            matched_sink = sink_info.get('matched_sink')
+                                            indirect_map = {}
+                                            if matched_sink:
+                                                from core.utils import SinkName
+                                                sink_name = '{cls}.{method}'.format(
+                                                    cls=matched_sink.class_, method=matched_sink.method
+                                                ) if matched_sink.class_ else matched_sink.method
+                                                indirect_map = {callee: sink_name}
+
                                             indirect_result = {
                                                 'file_path': file_path,
                                                 'lineno': lineno,
@@ -443,6 +453,7 @@ class SingleRule(object):
                                                 'node': sink_info['node'],
                                                 'is_indirect': True,
                                                 'sink_info': sink_info,
+                                                'indirect_map': indirect_map,
                                             }
                                             if result is None:
                                                 result = []
@@ -616,11 +627,13 @@ class SingleRule(object):
         for ir in indirect_results:
             try:
                 indirect_indices.append(len(direct_results))
-                direct_results.append((
+                indirect_tuple = (
                     ir['file_path'],
                     ir['lineno'],
                     ir['matched_text'],
-                ))
+                    ir.get('indirect_map', {}),
+                )
+                direct_results.append(indirect_tuple)
                 logger.debug('[CVI-{cvi}] [INDIRECT] Queued for CAST check: {call}'.format(
                     cvi=self.sr.svid, call=ir['matched_text']))
             except Exception as e:
@@ -630,8 +643,11 @@ class SingleRule(object):
         # 直接调用结果 + 间接调用结果统一走 CAST 验证
         origin_vulnerabilities = direct_results
         for index, origin_vulnerability in enumerate(origin_vulnerabilities):
-            logger.debug(
-                '[CVI-{cvi}] [ORIGIN] {line}'.format(cvi=self.sr.svid, line=": ".join(list(origin_vulnerability))))
+            try:
+                logger.debug(
+                    '[CVI-{cvi}] [ORIGIN] {line}'.format(cvi=self.sr.svid, line=": ".join(list(origin_vulnerability))))
+            except Exception:
+                pass
             if origin_vulnerability == ():
                 logger.debug(' > continue...')
                 continue
@@ -689,8 +705,10 @@ class SingleRule(object):
 
                     else:
                         logger.debug('Not vulnerability: {code}'.format(code=reason))
-            except Exception:
-                raise
+            except Exception as e:
+                logger.debug('[CVI-{cvi}] Exception processing result: {exc}'.format(
+                    cvi=self.sr.svid, exc=e))
+                continue
         logger.debug('[CVI-{cvi}] {vn} Vulnerabilities: {count}'.format(cvi=self.sr.svid, vn=self.sr.vulnerability,
                                                                         count=len(self.rule_vulnerabilities)))
         return self.rule_vulnerabilities

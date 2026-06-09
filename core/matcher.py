@@ -53,6 +53,7 @@ class VulnerabilityMatcher(object):
         self.line_number = vulnerability_result.line_number
         # self.code_content = vulnerability_result.code_content.strip()
         self.code_content = vulnerability_result.code_content
+        self.indirect_map = getattr(vulnerability_result, 'indirect_map', {}) or {}
         self.files = files
         self.languages = languages
         self.tamper_name = tamper_name
@@ -585,7 +586,8 @@ class VulnerabilityMatcher(object):
                 try:
                     result = go_scan_parser(rule_match, self.line_number, self.file_path,
                                             repair_functions=self.repair_functions,
-                                            controlled_params=self.controlled_list, svid=self.cvi)
+                                            controlled_params=self.controlled_list, svid=self.cvi,
+                                            indirect_map=self.indirect_map)
                     logger.debug('[AST] [RET] {c}'.format(c=result))
                     if len(result) > 0:
                         parsed = self._parse_ast_result(result)
@@ -615,7 +617,8 @@ class VulnerabilityMatcher(object):
                 try:
                     result = go_scan_parser(rule_match, self.line_number, self.file_path,
                                             repair_functions=self.repair_functions,
-                                            controlled_params=self.controlled_list, svid=self.cvi)
+                                            controlled_params=self.controlled_list, svid=self.cvi,
+                                            indirect_map=self.indirect_map)
                     logger.debug('[AST][Go] [RET] {c}'.format(c=result))
                     if len(result) > 0:
                         parsed = self._parse_ast_result(result)

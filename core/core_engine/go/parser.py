@@ -1764,7 +1764,7 @@ def _trace_variable_in_lines_impl(file_path, var_name, from_line, to_line,
 
 def scan_parser(rule_match, vul_lineno, file_path,
                 repair_functions=None, controlled_params=None,
-                svid=None, is_config_vuln=False):
+                svid=None, is_config_vuln=False, indirect_map=None):
     """
     Go AST 扫描入口
 
@@ -1775,6 +1775,7 @@ def scan_parser(rule_match, vul_lineno, file_path,
     :param controlled_params: 可控参数列表
     :param svid: 规则编号
     :param is_config_vuln: 是否配置型漏洞
+    :param indirect_map: 间接调用映射 {变量名: sink函数名}，用于替换行文本中的变量名做匹配
     :return: 扫描结果列表
     """
     _trace_cache.clear()
@@ -1809,12 +1810,21 @@ def scan_parser(rule_match, vul_lineno, file_path,
 
     logger.debug("[AST][Go] Scanning line {}: {}".format(vul_lineno, line_text))
 
+    # 间接调用：替换行文本中的变量名为实际 sink 函数名（仅用于匹配，不影响 AST 分析）
+    match_line_text = line_text
+    if indirect_map:
+        for var_name, sink_name in indirect_map.items():
+            if var_name in line_text:
+                match_line_text = line_text.replace(var_name, sink_name, 1)
+                logger.debug("[AST][Go] Indirect call: replaced '{}' -> '{}' in match text".format(var_name, sink_name))
+                break
+
     # 检查行中是否包含规则匹配的函数
     matched_func = None
     for func in rule_match:
         # 清理正则转义
         clean_func = func.replace('\\.', '.').replace('\\(', '(').replace('\\)', ')')
-        if clean_func in line_text:
+        if clean_func in match_line_text:
             matched_func = clean_func
             break
 
@@ -1823,7 +1833,7 @@ def scan_parser(rule_match, vul_lineno, file_path,
         for func in rule_match:
             clean_func = func.replace('\\.', '.').replace('\\(', '(').replace('\\)', ')')
             parts = clean_func.split('.')
-            if any(p in line_text for p in parts if len(p) > 2):
+            if any(p in match_line_text for p in parts if len(p) > 2):
                 matched_func = clean_func
                 break
 
@@ -1848,6 +1858,12 @@ def scan_parser(rule_match, vul_lineno, file_path,
     if ast_tree is not None:
         # 在 AST 中查找 vul_lineno 上的 call_expression
         call_node = _find_call_at_line(ast_tree, vul_lineno, matched_func)
+        # 间接调用：如果按 sink 名找不到，用变量名查找
+        if call_node is None and indirect_map:
+            for var_name in indirect_map:
+                call_node = _find_call_at_line(ast_tree, vul_lineno, var_name)
+                if call_node is not None:
+                    break
         if call_node is not None:
             ast_args = _get_call_args_from_ast(call_node)
 
@@ -1998,6 +2014,7 @@ def _find_indirect_calls_in_func(block_node, sink_names, file_path):
             if child.type == 'short_var_declaration':
                 left_ids = []
                 right_sink = None
+                right_expr_list = None
                 for part in child.children:
                     if part.type == 'expression_list':
                         # 第一个 expression_list 是左侧，第二个是右侧
@@ -2005,6 +2022,7 @@ def _find_indirect_calls_in_func(block_node, sink_names, file_path):
                             left_ids = _extract_left_identifiers(part)
                         else:
                             right_sink = _check_right_side_sink(part)
+                            right_expr_list = part
                     elif part.type == 'identifier' and not left_ids:
                         # 短变量声明可能没有 expression_list 包装
                         left_ids.append(part.text.decode('utf-8', errors='ignore'))
@@ -2013,6 +2031,26 @@ def _find_indirect_calls_in_func(block_node, sink_names, file_path):
                 if left_ids and right_sink:
                     for var_name in left_ids:
                         var_to_sink[var_name] = right_sink
+
+                # 检查右侧 expression_list 中嵌套的间接调用
+                if right_expr_list and var_to_sink:
+                    for sub in right_expr_list.children:
+                        if sub.type == 'call_expression':
+                            callee = sub.children[0] if sub.children else None
+                            if callee and callee.type == 'identifier':
+                                vname = callee.text.decode('utf-8', errors='ignore')
+                                if vname in var_to_sink:
+                                    matched_sink = var_to_sink[vname]
+                                    lineno = sub.start_point[0] + 1
+                                    results.append({
+                                        'file_path': file_path,
+                                        'lineno': lineno,
+                                        'node': sub,
+                                        'is_indirect': True,
+                                        'callee_name': vname,
+                                        'class_name': None,
+                                        'matched_sink': matched_sink,
+                                    })
 
             # assignment_statement: f = exec.Command
             elif child.type == 'assignment_statement':
@@ -2031,6 +2069,13 @@ def _find_indirect_calls_in_func(block_node, sink_names, file_path):
                         if part.type == 'identifier' and part not in expr_lists:
                             left_ids.append(part.text.decode('utf-8', errors='ignore'))
                     right_sink = _check_right_side_sink(expr_lists[0])
+                # 确定右侧 expression_list
+                right_expr_list = None
+                if len(expr_lists) >= 2:
+                    right_expr_list = expr_lists[1]
+                elif len(expr_lists) == 1:
+                    right_expr_list = expr_lists[0]
+
                 if left_ids and right_sink:
                     for var_name in left_ids:
                         var_to_sink[var_name] = right_sink
@@ -2038,6 +2083,26 @@ def _find_indirect_calls_in_func(block_node, sink_names, file_path):
                     # 新的赋值不匹配 sink，清除旧映射
                     for var_name in left_ids:
                         var_to_sink.pop(var_name, None)
+
+                # 检查右侧 expression_list 中嵌套的间接调用
+                if right_expr_list and var_to_sink:
+                    for sub in right_expr_list.children:
+                        if sub.type == 'call_expression':
+                            callee = sub.children[0] if sub.children else None
+                            if callee and callee.type == 'identifier':
+                                vname = callee.text.decode('utf-8', errors='ignore')
+                                if vname in var_to_sink:
+                                    matched_sink = var_to_sink[vname]
+                                    lineno = sub.start_point[0] + 1
+                                    results.append({
+                                        'file_path': file_path,
+                                        'lineno': lineno,
+                                        'node': sub,
+                                        'is_indirect': True,
+                                        'callee_name': vname,
+                                        'class_name': None,
+                                        'matched_sink': matched_sink,
+                                    })
 
             # call_expression: f(userInput)
             elif child.type == 'call_expression':
