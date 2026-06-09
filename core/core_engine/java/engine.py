@@ -17,12 +17,17 @@ def init_match_rule(data):
     # code=5: data[0] 是 dict {'code': 5, 'source': ('func_name', 'param_name', 'vul_function'), ...}
     if isinstance(obj, dict) and 'source' in obj:
         source = obj['source']
-        function_name = source[0]  # 封装函数名
+        function_name = source[0]  # 封装函数名（可能带类名前缀）
         origin_func_name = function_name
 
         match = r"(?:^|[\s=,.])" + re.escape(function_name) + r"\s*\([^)]*\)"
-        # match2 排除 Java 函数定义/声明行（带访问修饰符+返回类型前缀），保留调用行
-        match2 = r"(?:public|private|protected|static|abstract|final|synchronized|native|strictfp|volatile|transient|\s)*(?:[\w<>\[\]]+\s+)+" + re.escape(function_name) + r"\s*\("
+        if '.' in function_name:
+            # 带类名限定符（如 ExecUtils.executeCommand）
+            # Java 方法定义不包含类名前缀，grep 不会误匹配定义行，无需 match2
+            match2 = None
+        else:
+            # 纯方法名（如 executeCommand）
+            match2 = r"(?:public|private|protected|static|abstract|final|synchronized|native|strictfp|volatile|transient|\s)*(?:[\w<>\[\]]+\s+)+" + re.escape(function_name) + r"\s*\("
         logger.debug("[New Rule] Java match (from code=5): {}".format(match))
         return match, match2, function_name, 0, origin_func_name
 
@@ -31,7 +36,10 @@ def init_match_rule(data):
         origin_func_name = function_name
 
         match = r"(?:^|[\s=,.])" + re.escape(function_name) + r"\s*\([^)]*\)"
-        match2 = r"(?:public|private|protected|static|abstract|final|synchronized|native|strictfp|volatile|transient|\s)*(?:[\w<>\[\]]+\s+)+" + re.escape(function_name) + r"\s*\("
+        if '.' in function_name:
+            match2 = None
+        else:
+            match2 = r"(?:public|private|protected|static|abstract|final|synchronized|native|strictfp|volatile|transient|\s)*(?:[\w<>\[\]]+\s+)+" + re.escape(function_name) + r"\s*\("
         logger.debug("[New Rule] Java match: {}".format(match))
         return match, match2, function_name, 0, origin_func_name
 

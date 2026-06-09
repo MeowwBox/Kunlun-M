@@ -449,7 +449,7 @@ def _get_java_literal(expr):
 
 def parameters_back(param_name, stmts, vul_lineno, file_path,
                      repair_functions=None, controlled_params=None, depth=0, max_depth=10,
-                     method_params=None, method_name=''):
+                     method_params=None, method_name='', class_name=''):
     """
     反向追踪变量 param_name 的数据流来源。
     遍历 stmts 从 vul_lineno 往回找对 param_name 的赋值，判断赋值表达式是否可控。
@@ -670,10 +670,11 @@ def parameters_back(param_name, stmts, vul_lineno, file_path,
 
     # 检查 param_name 是否是方法形参 → code=5，交给 NewCore
     if method_params is not None and param_name in method_params:
-        logger.debug("[AST][Java] Variable {} is a parameter of method {}, return code=5".format(
-            param_name, method_name))
-        _trace_cache.put(file_path, param_name, vul_lineno, (5, method_name, 0))
-        return (5, method_name, 0)
+        qualified_name = f"{class_name}.{method_name}" if class_name else method_name
+        logger.debug("[AST][Java] Variable {} is a parameter of method {}, return code=5 (wrapper: {})".format(
+            param_name, method_name, qualified_name))
+        _trace_cache.put(file_path, param_name, vul_lineno, (5, qualified_name, 0))
+        return (5, qualified_name, 0)
 
     # for 循环结束后仍未找到 → 不可控
     _trace_cache.put(file_path, param_name, vul_lineno, (-1, None, 0))
@@ -2221,6 +2222,18 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
             logger.debug("[AST][Java] No method found at line {}".format(target_line))
             return scan_results
 
+        # 获取方法所在的类名（用于 code=5 返回限定函数名）
+        class_name = ''
+        if hasattr(_nodes, 'types') and _nodes.types:
+            for type_decl in _nodes.types:
+                if hasattr(type_decl, 'body') and type_decl.body:
+                    for member in type_decl.body:
+                        if member is method:
+                            class_name = type_decl.name
+                            break
+                if class_name:
+                    break
+
         if not method.body:
             return scan_results
 
@@ -2268,7 +2281,7 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
                     code, cp, expr_lineno = parameters_back(
                         arg_name, method_stmts, lineno, file_path,
                         repair_functions, controlled_params,
-                        method_params=method_params, method_name=method_name
+                        method_params=method_params, method_name=method_name, class_name=class_name
                     )
                     logger.debug("[AST][Java] parameters_back('{}') => code={}, cp={}".format(
                         arg_name, code, cp))
@@ -2331,7 +2344,7 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
                     code, cp, expr_lineno = parameters_back(
                         arg_name, method_stmts, lineno, file_path,
                         repair_functions, controlled_params,
-                        method_params=method_params, method_name=method_name
+                        method_params=method_params, method_name=method_name, class_name=class_name
                     )
 
                     if code == -1:
@@ -2386,7 +2399,7 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
                         code, cp, expr_lineno = parameters_back(
                             arg_name, method_stmts, check_line, file_path,
                             repair_functions, controlled_params,
-                            method_params=method_params, method_name=method_name
+                            method_params=method_params, method_name=method_name, class_name=class_name
                         )
 
                         if code == 5:
