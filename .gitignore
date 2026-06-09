@@ -96,10 +96,13 @@ tests/*
 !tests/python/
 !tests/go/
 !tests/java/
+!tests/php/
 !tests/test_python_cross_file.py
 !tests/test_js_cross_file.py
 !tests/test_go_cross_file.py
 !tests/test_c_cross_file.py
+# Test runner output
+tests/*/_newcore_output/
 
 # scan artifacts
 *.pretty
