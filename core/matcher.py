@@ -262,6 +262,10 @@ class VulnerabilityMatcher(object):
 
         else:
             if type(data) is tuple:
+                # 三元组格式: (wrapper_func, param_name, vul_function) — 来自 cast.py code=4/5 修复
+                if len(data) == 3 and isinstance(data[0], str):
+                    return False, 'New Core', data
+                # 旧格式兼容: tuple([code, controlled_params])
                 if int(data[0]) in (4, 5):
                     return False, 'New Core', data[1]
 
