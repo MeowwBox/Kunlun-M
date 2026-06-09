@@ -98,6 +98,7 @@ tests/*
 !tests/test_python_cross_file.py
 !tests/test_js_cross_file.py
 !tests/test_go_cross_file.py
+!tests/test_c_cross_file.py
 
 # scan artifacts
 *.pretty

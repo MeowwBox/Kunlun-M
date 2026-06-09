@@ -304,7 +304,7 @@ class CAST(object):
                     get_param = re.findall(regex_get_param, param_block_code)
                     if len(get_param) >= 1 and get_param[0] != '':
                         logger.debug("[AST] Is assign out data: `Yes`")
-                        continue
+                        return True, 1, self.data, []
                         # False, self.data
                     logger.debug("[AST] Is assign out data: `No`")
                     return True, -1, self.data, []
@@ -414,9 +414,15 @@ class CAST(object):
                 logger.warning("[AST] Can't get `param`, check built-in rule..error details:\n{}".format(traceback.format_exc()))
                 return False, -1, self.data, []
 
+        # 循环结束后处理 _is_co == 3 的情况（Python/JS/Go/C 的 pass 逻辑）
+        try:
+            _is_co
+        except NameError:
+            return False, self.data, None, None
+
         if _is_co == 3:
-            logger.info("[AST] can't find this param, Unconfirmed vulnerable..")
-            return True, _is_co, _cp, chain
+                logger.info("[AST] can't find this param, Unconfirmed vulnerable..")
+                return True, _is_co, _cp, chain
 
         # if no variable can modify
         return False, self.data, None, None

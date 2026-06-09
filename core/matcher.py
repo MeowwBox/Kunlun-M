@@ -252,7 +252,7 @@ class VulnerabilityMatcher(object):
         if param_is_controllable:
             logger.debug('[CVI-{cvi}] [PARAM-CONTROLLABLE] Param is controllable'.format(cvi=self.cvi))
 
-            if code == 1:
+            if code == 1 or code == -1:
                 return True, 'Vustomize-Match', chain
             elif code == 3:
                 if self.is_unconfirm:
@@ -422,11 +422,12 @@ class VulnerabilityMatcher(object):
             return False, 'Exception'
 
     def _scan_java(self):
-        """Java 扫描（支持 only-regex、regex-return-regex、function-param-controllable）"""
+        """Java 扫描（支持 only-regex、regex-return-regex、function-param-controllable、vustomize-match）"""
         try:
+            self.init_php_repair()
             ast = CAST(self.rule_match, self.target_directory, self.file_path, self.line_number,
                        self.code_content, files=self.files, rule_class=self.single_rule,
-                       repair_functions=self.repair_functions)
+                       repair_functions=self.repair_functions, controlled_params=self.controlled_list)
 
             if self.rule_match_mode == const.mm_regex_only_match:
                 logger.debug("[CVI-{cvi}] [ONLY-MATCH]".format(cvi=self.cvi))
@@ -487,6 +488,9 @@ class VulnerabilityMatcher(object):
                     exc_msg = traceback.format_exc()
                     logger.warning(exc_msg)
                     raise
+
+            elif self.rule_match_mode == const.mm_regex_param_controllable:
+                return self._handle_vustomize_match(ast)
 
             else:
                 logger.warn(

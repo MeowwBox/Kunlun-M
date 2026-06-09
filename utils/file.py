@@ -158,11 +158,14 @@ def get_line(file_path, line_rule):
     """
     搜索指定文件的指定行到指定行的内容
     :param file_path: 指定文件
-    :param line_rule: 指定行规则
-    :return: 
+    :param line_rule: 指定行规则（支持 "1,14" 或 "15p" 或 "1,14p" 格式）
+    :return:
     """
-    s_line = int(line_rule.split(',')[0])
-    e_line = int(line_rule.split(',')[1])
+    # 兼容 "1,14p" 和 "15p" 格式，剥离 p 后缀
+    line_rule = line_rule.rstrip('p')
+    parts = line_rule.split(',')
+    s_line = int(parts[0])
+    e_line = int(parts[1]) if len(parts) > 1 else s_line
     result = []
 
     # with open(file_path) as file:

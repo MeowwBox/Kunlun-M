@@ -19,6 +19,7 @@ from core.core_engine.javascript.engine import init_match_rule as js_init_match_
 from core.core_engine.python.engine import init_match_rule as py_init_match_rule
 from core.core_engine.go.engine import init_match_rule as go_init_match_rule
 from core.core_engine.c.engine import init_match_rule as c_init_match_rule
+from core.core_engine.java.engine import init_match_rule as java_init_match_rule
 
 from rules.autorule import autorule
 from Kunlun_M.const import VulnerabilityResult
@@ -47,6 +48,9 @@ def init_match_rule(data, lan='php'):
 
     if lan.lower() in ("c", "c++", "cpp"):
         return c_init_match_rule(data)
+
+    if lan.lower() == "java":
+        return java_init_match_rule(data)
 
 
 def NewCore(old_single_rule, target_directory, new_rules, files, count=0, languages=None, tamper_name=None,
@@ -112,7 +116,6 @@ def NewCore(old_single_rule, target_directory, new_rules, files, count=0, langua
         newcore_function_list[vul_function] = {"svid": [svid], "origin_func_name": [origin_func_name]}
 
     # grep
-
     try:
         if match:
             f = FileParseAll(files, target_directory, language=language)

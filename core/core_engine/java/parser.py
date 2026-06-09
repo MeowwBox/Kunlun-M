@@ -448,7 +448,8 @@ def _get_java_literal(expr):
 
 
 def parameters_back(param_name, stmts, vul_lineno, file_path,
-                     repair_functions=None, controlled_params=None, depth=0, max_depth=10):
+                     repair_functions=None, controlled_params=None, depth=0, max_depth=10,
+                     method_params=None, method_name=''):
     """
     反向追踪变量 param_name 的数据流来源。
     遍历 stmts 从 vul_lineno 往回找对 param_name 的赋值，判断赋值表达式是否可控。
@@ -666,6 +667,13 @@ def parameters_back(param_name, stmts, vul_lineno, file_path,
                         # case 内未找到赋值 → 不清除缓存，不写入 -1
                         # break 出内层 for，让外层 for 循环继续处理 switch 之前的 stmts
                         break
+
+    # 检查 param_name 是否是方法形参 → code=5，交给 NewCore
+    if method_params is not None and param_name in method_params:
+        logger.debug("[AST][Java] Variable {} is a parameter of method {}, return code=5".format(
+            param_name, method_name))
+        _trace_cache.put(file_path, param_name, vul_lineno, (5, method_name, 0))
+        return (5, method_name, 0)
 
     # for 循环结束后仍未找到 → 不可控
     _trace_cache.put(file_path, param_name, vul_lineno, (-1, None, 0))
@@ -2227,6 +2235,12 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
         # 获取方法体语句
         method_stmts = list(method.body)
 
+        # 获取方法形参列表（用于 code=5 判断）
+        method_params = []
+        method_name = method.name if hasattr(method, 'name') else ''
+        if hasattr(method, 'parameters') and method.parameters:
+            method_params = [p.name for p in method.parameters]
+
         # 2. 在方法体中找 sink 调用并反向追踪
         # 2a. 搜索 MethodInvocation
         found = False
@@ -2253,7 +2267,8 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
 
                     code, cp, expr_lineno = parameters_back(
                         arg_name, method_stmts, lineno, file_path,
-                        repair_functions, controlled_params
+                        repair_functions, controlled_params,
+                        method_params=method_params, method_name=method_name
                     )
                     logger.debug("[AST][Java] parameters_back('{}') => code={}, cp={}".format(
                         arg_name, code, cp))
@@ -2261,6 +2276,19 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
                     if code == -1:
                         # 分支约束阻断：参数不可控
                         scan_results.append({"code": -1, "chain": scan_chain})
+                        found = True
+                        break
+                    elif code == 5:
+                        # 封装函数，参数来自形参 → 交给 NewCore 二次扫描
+                        wrapper_func = cp  # method_name
+                        scan_results.append({
+                            'code': 5,
+                            'source': (wrapper_func, arg_name, mi.member),
+                            'chain': [
+                                ('NewFunction', wrapper_func, file_path, method.position.line if hasattr(method, 'position') and method.position else 0),
+                                ('sink', mi.member, file_path, lineno)
+                            ]
+                        })
                         found = True
                         break
                     elif code == 1:
@@ -2302,11 +2330,25 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
 
                     code, cp, expr_lineno = parameters_back(
                         arg_name, method_stmts, lineno, file_path,
-                        repair_functions, controlled_params
+                        repair_functions, controlled_params,
+                        method_params=method_params, method_name=method_name
                     )
 
                     if code == -1:
                         scan_results.append({"code": -1, "chain": scan_chain})
+                        found = True
+                        break
+                    elif code == 5:
+                        # 封装函数，参数来自形参 → 交给 NewCore 二次扫描
+                        wrapper_func = cp  # method_name
+                        scan_results.append({
+                            'code': 5,
+                            'source': (wrapper_func, arg_name, type_name),
+                            'chain': [
+                                ('NewFunction', wrapper_func, file_path, method.position.line if hasattr(method, 'position') and method.position else 0),
+                                ('sink', type_name, file_path, lineno)
+                            ]
+                        })
                         found = True
                         break
                     elif code == 1:
@@ -2343,10 +2385,24 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
 
                         code, cp, expr_lineno = parameters_back(
                             arg_name, method_stmts, check_line, file_path,
-                            repair_functions, controlled_params
+                            repair_functions, controlled_params,
+                            method_params=method_params, method_name=method_name
                         )
 
-                        if code == 1:
+                        if code == 5:
+                            # 封装函数，参数来自形参 → 交给 NewCore 二次扫描
+                            wrapper_func = cp  # method_name
+                            scan_results.append({
+                                'code': 5,
+                                'source': (wrapper_func, arg_name, func_name),
+                                'chain': [
+                                    ('NewFunction', wrapper_func, file_path, method.position.line if hasattr(method, 'position') and method.position else 0),
+                                    ('sink', func_name, file_path, check_line)
+                                ]
+                            })
+                            found = True
+                            break
+                        elif code == 1:
                             scan_results.append(_build_result(code, scan_chain, cp, source_lines,
                                              check_line, file_path, controlled_params,
                                              repair_functions, is_config_vuln))
