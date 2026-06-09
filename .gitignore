@@ -95,6 +95,7 @@ tests/*
 !tests/c/
 !tests/python/
 !tests/go/
+!tests/java/
 !tests/test_python_cross_file.py
 !tests/test_js_cross_file.py
 !tests/test_go_cross_file.py
