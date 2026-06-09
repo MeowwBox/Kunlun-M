@@ -13,14 +13,27 @@ output_dir = os.path.join(test_dir, '_newcore_output')
 
 
 test_cases = [
-            ('19b_cross_file_exec_main.go', True,
-             'CVI-8001 exec.Command: ExecuteCommand via cross-file',
-             ['CVI-8001'],
-             ['ExecuteCommand', 'userInput']),
+    # NewCore 跨文件封装
+    ('19b_cross_file_exec_main.go', True,
+     'CVI-8001 exec.Command: ExecuteCommand via cross-file',
+     ['CVI-8001'],
+     ['ExecuteCommand', 'userInput']),
     ('20b_cross_file_multifunc_main.go', True,
      'CVI-8001 exec.Command: processInput->runCommand',
      ['CVI-8001'],
      ['processInput']),
+
+    # 间接调用（indirect call）
+    ('22_indirect_exec.go', True,
+     'CVI-8001 exec.Command: indirect call via variable (cmdFunc := exec.Command)',
+     ['CVI-8001'],
+     ['cmdFunc', 'userInput']),
+    ('23_indirect_safe.go', False,
+     'CVI-8001 exec.Command: indirect call with hardcoded args (should NOT detect)',
+     [], []),
+    ('24_indirect_reassign.go', False,
+     'CVI-8001 exec.Command: indirect call after reassignment (should NOT detect)',
+     [], []),
 ]
 
 
