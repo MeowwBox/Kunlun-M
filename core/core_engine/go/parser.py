@@ -1947,6 +1947,143 @@ def scan_parser(rule_match, vul_lineno, file_path,
     return results
 
 
+def _find_indirect_calls_in_func(block_node, sink_names, file_path):
+    """
+    在函数体内检测基于赋值关系的间接调用。
+    遍历函数体语句，追踪"变量 = sink_func"模式，然后检测对该变量的调用。
+
+    :param block_node: 函数体的 block AST 节点
+    :param sink_names: list of SinkName(class_, method)
+    :param file_path: 文件路径
+    :return: list of dict（间接调用结果）
+    """
+    from core.utils import SinkName
+
+    results = []
+    var_to_sink = {}  # 变量名 -> matched SinkName
+
+    def _extract_left_identifiers(expr_list_node):
+        """从 expression_list 提取所有 identifier 的文本"""
+        ids = []
+        for child in expr_list_node.children:
+            if child.type == 'identifier':
+                ids.append(child.text.decode('utf-8', errors='ignore'))
+        return ids
+
+    def _check_right_side_sink(expr_list_node):
+        """检查右侧 expression_list 中是否有 selector_expression 匹配某个 sink"""
+        for child in expr_list_node.children:
+            if child.type == 'selector_expression':
+                # selector_expression: operand.field
+                operand = child.child_by_field_name('operand')
+                field = child.child_by_field_name('field')
+                if operand and field:
+                    obj = operand.text.decode('utf-8', errors='ignore')
+                    method = field.text.decode('utf-8', errors='ignore')
+                    for sink in sink_names:
+                        if sink.class_ and obj == sink.class_ and method == sink.method:
+                            return sink
+            elif child.type == 'identifier':
+                # 纯函数名赋值：f := system
+                id_text = child.text.decode('utf-8', errors='ignore')
+                for sink in sink_names:
+                    if sink.class_ is None and id_text == sink.method:
+                        return sink
+        return None
+
+    def _scan_statements(node):
+        """递归扫描语句节点"""
+        for child in node.children:
+            # short_var_declaration: f := exec.Command
+            if child.type == 'short_var_declaration':
+                left_ids = []
+                right_sink = None
+                for part in child.children:
+                    if part.type == 'expression_list':
+                        # 第一个 expression_list 是左侧，第二个是右侧
+                        if not left_ids:
+                            left_ids = _extract_left_identifiers(part)
+                        else:
+                            right_sink = _check_right_side_sink(part)
+                    elif part.type == 'identifier' and not left_ids:
+                        # 短变量声明可能没有 expression_list 包装
+                        left_ids.append(part.text.decode('utf-8', errors='ignore'))
+                    elif right_sink is None and part.type not in (':=', 'expression_list', 'identifier'):
+                        right_sink = _check_right_side_sink_in_expr(part)
+                if left_ids and right_sink:
+                    for var_name in left_ids:
+                        var_to_sink[var_name] = right_sink
+
+            # assignment_statement: f = exec.Command
+            elif child.type == 'assignment_statement':
+                left_ids = []
+                right_sink = None
+                expr_lists = []
+                for part in child.children:
+                    if part.type == 'expression_list':
+                        expr_lists.append(part)
+                if len(expr_lists) >= 2:
+                    left_ids = _extract_left_identifiers(expr_lists[0])
+                    right_sink = _check_right_side_sink(expr_lists[1])
+                elif len(expr_lists) == 1:
+                    # 可能左侧是单个 identifier（无 expression_list 包装）
+                    for part in child.children:
+                        if part.type == 'identifier' and part not in expr_lists:
+                            left_ids.append(part.text.decode('utf-8', errors='ignore'))
+                    right_sink = _check_right_side_sink(expr_lists[0])
+                if left_ids and right_sink:
+                    for var_name in left_ids:
+                        var_to_sink[var_name] = right_sink
+                elif left_ids and not right_sink:
+                    # 新的赋值不匹配 sink，清除旧映射
+                    for var_name in left_ids:
+                        var_to_sink.pop(var_name, None)
+
+            # call_expression: f(userInput)
+            elif child.type == 'call_expression':
+                callee = child.children[0] if child.children else None
+                if callee and callee.type == 'identifier':
+                    var_name = callee.text.decode('utf-8', errors='ignore')
+                    if var_name in var_to_sink:
+                        matched_sink = var_to_sink[var_name]
+                        lineno = child.start_point[0] + 1
+                        results.append({
+                            'file_path': file_path,
+                            'lineno': lineno,
+                            'node': child,
+                            'is_indirect': True,
+                            'callee_name': var_name,
+                            'class_name': None,
+                            'matched_sink': matched_sink,
+                        })
+
+            # 递归进入嵌套 block（if/for/switch 等）
+            elif child.child_count > 0 and child.type not in (
+                'short_var_declaration', 'assignment_statement', 'call_expression'
+            ):
+                _scan_statements(child)
+
+    def _check_right_side_sink_in_expr(node):
+        """在任意表达式中查找 selector_expression 匹配 sink"""
+        if node.type == 'selector_expression':
+            operand = node.child_by_field_name('operand')
+            field = node.child_by_field_name('field')
+            if operand and field:
+                obj = operand.text.decode('utf-8', errors='ignore')
+                method = field.text.decode('utf-8', errors='ignore')
+                for sink in sink_names:
+                    if sink.class_ and obj == sink.class_ and method == sink.method:
+                        return sink
+        for c in node.children:
+            result = _check_right_side_sink_in_expr(c)
+            if result:
+                return result
+        return None
+
+    _scan_statements(block_node)
+    return results
+
+
 def find_sinks(sink_names, files):
     """
     AST-based sink 查找。遍历所有文件的 tree-sitter AST 节点，查找匹配的函数调用。
@@ -1978,40 +2115,6 @@ def find_sinks(sink_names, files):
                 short_name = func_text.split('.')[-1] if '.' in func_text else func_text
                 # 提取包名/对象名（如 exec.Command → exec）
                 obj_name = func_text.rsplit('.', 1)[0] if '.' in func_text else None
-
-                # 间接调用检测：callee 是纯 identifier（变量调用 func()）
-                # 在 Go 中，如果 func_text 是纯标识符且不以大写字母开头，
-                # 或者 callee 节点是 identifier（不是 selector_expression），可能是变量调用
-                callee_node = node.children[0] if node.children else None
-                is_indirect = False
-                if callee_node and callee_node.type == 'identifier':
-                    # 纯变量调用如 funcVar() — 在 Go 中少见但可能
-                    # 检查是否不匹配任何 sink
-                    matched_any = False
-                    for sink in sink_names:
-                        if sink.class_ is None and func_text == sink.method:
-                            matched_any = True
-                            break
-                        if sink.class_ and func_text == '{}.{}'.format(sink.class_, sink.method):
-                            matched_any = True
-                            break
-                    if not matched_any:
-                        is_indirect = True
-
-                if is_indirect:
-                    lineno = node.start_point[0] + 1
-                    for sink in sink_names:
-                        results.append({
-                            'file_path': file_path,
-                            'lineno': lineno,
-                            'node': node,
-                            'is_indirect': True,
-                            'callee_name': func_text,
-                            'class_name': None,
-                            'matched_sink': sink,
-                        })
-                        break
-                    return
 
                 for sink in sink_names:
                     if sink.class_ is None:
@@ -2047,6 +2150,18 @@ def find_sinks(sink_names, files):
                 _walk_for_calls(child)
 
         _walk_for_calls(tree.root_node)
+
+        # 基于赋值关系的间接调用检测
+        def _walk_for_func_decls(node):
+            if node.type in ('function_declaration', 'method_declaration'):
+                body = node.child_by_field_name('body')
+                if body and body.type == 'block':
+                    indirect_results = _find_indirect_calls_in_func(body, sink_names, file_path)
+                    results.extend(indirect_results)
+            for child in node.children:
+                _walk_for_func_decls(child)
+
+        _walk_for_func_decls(tree.root_node)
 
     return results
 
