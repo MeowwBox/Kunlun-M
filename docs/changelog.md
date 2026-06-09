@@ -1,4 +1,29 @@
 ## 更新日志
+- 2026-06-09
+  - KunLun-M 2.13.6
+  - **C/Java NewCore 跨文件封装检测（code=5）完整实现**
+    - C 引擎：`engine.py` 新增 code=5 dict 格式处理（word boundary + negative lookahead），`autorule.py` 新增 C 参数提取分支，`cast.py` 补全 c/cpp/cc 语言支持
+    - Java 引擎：`parser.py` 3 处修改使 scan_parser 对形参返回 code=5 触发跨文件，`engine.py` 从空桩改为完整实现（dict/str 格式 + match2 排除定义行），`rule_generator.py` 新增 Java 分发分支，`autorule.py` 新增 Java 参数提取分支
+    - Java 类名限定符优化：code=5 返回 `ClassName.methodName` 而非纯方法名，grep 正则精确匹配特定类的封装调用，避免同名方法混淆
+  - **修复 10 个 NewCore 链路 bug**
+    - `matcher.py`：`_scan_java()` 缺少 `vustomize-match` 分支导致 NewCore 二次扫描返回 Unsupport Match；`_handle_vustomize_match()` 不处理 code==-1（Java CAST 返回值）
+    - `file.py`：`get_line()` 不兼容 `"1,14p"` 格式，`int("14p")` 崩溃，修复为 `rstrip('p')` + 单行兼容
+    - `cast.py`：`_is_co` UnboundLocalError（Java 分支 `getParameter` 匹配后 `continue` 导致循环结束访问未定义变量）；`getParameter` 被错误标记为不可控（`continue` 改为 `return True, 1, self.data, []`）
+    - `rule_generator.py`：`init_match_rule` 分发函数无 Java 分支
+  - **C NewCore Benchmark 测试（5 组 10 文件）**
+    - 覆盖场景：命令注入封装（CVI-9001）、格式化字符串封装（CVI-9002）、路径穿越封装（CVI-9004）、返回值传递（fgets→return→strcpy+system）、多 sink 封装
+    - 新增 `tests/c/run_newcore_tests.py` 统一运行器，5/5 PASS
+  - **Java NewCore Benchmark 测试（3 组 6 文件）**
+    - 覆盖场景：命令注入 CVI-6003（ExecUtils.executeCommand→Runtime.exec）、路径穿越 CVI-6004（FileUtils.readConfig→FileInputStream）、SQL 注入参考（SqlUtils→Statement.executeQuery，走 AST 路径非 NewCore）
+    - 新增 `tests/java/run_newcore_tests.py` 统一运行器，2/2 PASS
+  - **全语言统一 Benchmark 运行器**
+    - 为 PHP/Python/Go/JavaScript 新增 `run_newcore_tests.py`，与 C/Java 格式统一
+    - 6 语言 15/15 benchmark 全部通过
+    - PHP (1): CVI-1009 eval 跨文件封装
+    - Python (1): CVI-7000 os.system 跨文件封装
+    - Go (3): CVI-8001 exec.Command 基础封装 + 多层封装 + 安全封装
+    - JavaScript (3): CVI-3003 eval 跨文件 + CVI-3100 exec 解构导入 + 安全封装负面
+  - **回归测试全语言通过**：PHP/Python/Go/JS/Java/C/Solidity 无回归
 - 2026-06-08
   - KunLun-M 2.13.5
   - **JS/PHP 跨文件分析能力（NewFunction → NewCore 链路）**
