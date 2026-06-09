@@ -143,8 +143,11 @@ def NewCore(old_single_rule, target_directory, new_rules, files, count=0, langua
             if re.search(match2, code, re.I):
                 continue
 
-        logger.debug(
-            '[CVI-{cvi}] [ORIGIN] {line}'.format(cvi=svid, line=": ".join(list(origin_vulnerability))))
+        try:
+            logger.debug(
+                '[CVI-{cvi}] [ORIGIN] {line}'.format(cvi=svid, line=": ".join(list(origin_vulnerability))))
+        except Exception:
+            pass
         if origin_vulnerability == ():
             logger.debug(' > continue...')
             continue
@@ -166,7 +169,7 @@ def NewCore(old_single_rule, target_directory, new_rules, files, count=0, langua
                 is_vulnerability, reason, data = datas
 
                 if "New Core" not in reason:
-                    code = "Code: {}".format(origin_vulnerability[2])
+                    code = "Code: {}".format(origin_vulnerability[2]) if len(origin_vulnerability) > 2 else "Code: unknown"
                     data.insert(1, ("NewScan", code, origin_vulnerability[0], origin_vulnerability[1]))
 
             elif len(datas) == 2:
@@ -187,7 +190,7 @@ def NewCore(old_single_rule, target_directory, new_rules, files, count=0, langua
                                                        newcore_function_list=newcore_function_list)
 
                     if not new_rule_vulnerabilities:
-                        return rule_vulnerabilities
+                        continue
 
                     if len(new_rule_vulnerabilities) > 0:
                         rule_vulnerabilities.extend(new_rule_vulnerabilities)
@@ -195,7 +198,9 @@ def NewCore(old_single_rule, target_directory, new_rules, files, count=0, langua
                 else:
                     logger.debug('Not vulnerability: {code}'.format(code=reason))
 
-        except Exception:
-            raise
+        except Exception as e:
+            logger.debug('[CVI-{cvi}] Exception processing result: {exc}'.format(
+                cvi=svid, exc=e))
+            continue
 
     return rule_vulnerabilities
