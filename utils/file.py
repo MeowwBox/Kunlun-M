@@ -394,11 +394,9 @@ class FileParseAll:
         """
         多行匹配，对全文做匹配
         :param reg: 
-        :return: 
+        :return: list of (filepath, line_number_str, matched_text)
         """
         result = []
-        line_number = 0
-        chunk_offset = 0
 
         for ffile in self.t_filelist:
             filepath = check_filepath(self.target, ffile)
@@ -406,21 +404,21 @@ class FileParseAll:
             if not filepath:
                 continue
 
-            file = codecs.open(filepath, "r", encoding='utf-8', errors='ignore')
-            content = file.read(1000)
+            with codecs.open(filepath, "r", encoding='utf-8', errors='ignore') as file:
+                full_text = file.read()
 
-            while content:
-                r_con_obj = re.search(reg, content, re.I)
+            line_number = 0
+            search_pos = 0
+            compiled = re.compile(reg, re.I)
 
-                if r_con_obj:
-                    start_pos = r_con_obj.regs[0][0]
-                    line_number = len(content[:start_pos].split('\n'))
-                    result.append((filepath, str(line_number), r_con_obj.group(0)))
-
-                chunk_offset += len(content)
-                content = file.read(1000)
-
-            file.close()
+            while True:
+                m = compiled.search(full_text, search_pos)
+                if not m:
+                    break
+                # 行号 = 匹配位置之前的换行数 + 1（1-indexed）
+                line_number = full_text[:m.start()].count('\n') + 1
+                result.append((filepath, str(line_number), m.group()))
+                search_pos = m.end()
 
         return result
     
