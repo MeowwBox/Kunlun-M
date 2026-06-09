@@ -1,5 +1,19 @@
 ## 更新日志
 - 2026-06-09
+  - KunLun-M 2.13.7
+  - **修复 multi_grep() 行号 bug（utils/file.py）**
+    - 原 chunked reading（1000字节/块）导致同一 chunk 内多匹配只取第一个、跨 chunk 行号不累加
+    - 改为全文 `read()` + 递进 `re.search()`，`line_number = full_text[:m.start()].count('\n') + 1`
+  - **修复间接调用(Arbitrary-function-call)跳过 CAST 验证（core/scanner.py）**
+    - 原 `is_indirect=True` 结果直接生成漏洞报告，不经过 `Core.scan()` CAST 验证
+    - 导致 Go 72 条误报（9 文件 × 8 规则各 1 次），任何非 sink 的 identifier 函数调用都被误报
+    - 修复：间接调用结果转换为 tuple 格式追加到 direct_results，统一走 CAST 验证
+    - Go 误报从 72 条降至 4 条（剩余 4 条为 CAST 确认参数可控但无法跨函数分析过滤的固有限制）
+  - **增强 6 语言 benchmark 运行器**
+    - 新增 `verify_line_content()`：从扫描结果提取行号，读取源文件对应行验证关键词
+    - 关键词匹配改为 ANY（NewCore 不同 CVI 匹配不同行）
+    - 修正 JS CVI ID（3101/3003）和 Go/PHP/Python expected_keywords
+- 2026-06-09
   - KunLun-M 2.13.6
   - **C/Java NewCore 跨文件封装检测（code=5）完整实现**
     - C 引擎：`engine.py` 新增 code=5 dict 格式处理（word boundary + negative lookahead），`autorule.py` 新增 C 参数提取分支，`cast.py` 补全 c/cpp/cc 语言支持
