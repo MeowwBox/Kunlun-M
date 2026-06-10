@@ -3133,6 +3133,8 @@ def analysis(nodes, vul_function, back_node, vul_lineno, file_path=None, functio
     :param file_path: 当前分析文件的地址
     :return:
     """
+    if not nodes or not isinstance(nodes, list):
+        return
     buffer_ = []
 
     for node in nodes:
@@ -3511,6 +3513,8 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
         is_controlled_params = controlled_params
         _trace_cache.clear()
         all_nodes = ast_object.get_nodes(file_path)
+        if not all_nodes or not isinstance(all_nodes, list):
+            continue
 
         # Source Discovery: 首次调用时初始化
         global _source_registry
