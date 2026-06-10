@@ -2310,6 +2310,24 @@ def _handle_java_indirect_call(_nodes, vul_lineno, indirect_map, repair_function
             })
             return scan_results
 
+    # === Fallback: parameters_back 无法判断时，做启发式分析 ===
+    # 如果有任何参数不是字面量（Literal/MemberReference 为简单变量引用），
+    # 视为可能可控，标记为 code=5 交给 NewCore 二次扫描
+    for arg in (target_node.arguments or []):
+        if isinstance(arg, javalang.tree.Literal):
+            continue
+        arg_name = _get_var_name(arg) or _expr_to_str_java(arg)
+        if arg_name:
+            scan_results.append({
+                'code': 1,
+                'source': ('Function-param-controllable', arg_name),
+                'chain': [
+                    ('NewFunction', method_name, file_path, method.position.line if hasattr(method, 'position') and method.position else 0),
+                    ('sink', callee_variable, file_path, lineno)
+                ]
+            })
+            return scan_results
+
     return None
 
 
