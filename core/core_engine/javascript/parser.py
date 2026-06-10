@@ -2995,6 +2995,98 @@ def _extract_call_name_js(node):
         return None, True
 
 
+def _check_js_indirect_assignment(var_name, sink_names, all_nodes):
+    """
+    JS 赋值追踪：在 AST 中查找 var_name 的赋值，检查赋值右侧是否包含 sink 引用。
+
+    支持模式：
+    - const f = eval;       → f = eval（Identifier 直接引用 sink）
+    - const f = obj.eval;   → f = obj.eval（MemberExpression 引用 sink）
+    - const f = require('child_process').exec → f = exec
+
+    :param var_name: 变量名（如 'f'）
+    :param sink_names: sink 名称列表
+    :param all_nodes: 文件顶层 AST 节点列表
+    :return: bool — 是否发现间接调用
+    """
+    sink_method_set = {s.method for s in sink_names if s.class_ is None}
+
+    def _walk_and_check(node):
+        """递归遍历节点查找变量声明和赋值"""
+        if not hasattr(node, 'type'):
+            return False
+        node_type = getattr(node, 'type', '')
+
+        # VariableDeclaration: const/let/var f = <expr>
+        if node_type == 'VariableDeclaration':
+            for decl in getattr(node, 'declarations', []):
+                if not hasattr(decl, 'type'):
+                    continue
+                decl_id = getattr(decl, 'id', None)
+                if hasattr(decl_id, 'type') and getattr(decl_id, 'type', '') == 'Identifier':
+                    if getattr(decl_id, 'name', None) == var_name:
+                        init = getattr(decl, 'init', None)
+                        if _check_value_is_sink(init, sink_method_set):
+                            return True
+
+        # AssignmentExpression: f = <expr>
+        if node_type == 'AssignmentExpression':
+            left = getattr(node, 'left', None)
+            if hasattr(left, 'type') and getattr(left, 'type', '') == 'Identifier':
+                if getattr(left, 'name', None) == var_name:
+                    right = getattr(node, 'right', None)
+                    if _check_value_is_sink(right, sink_method_set):
+                        return True
+
+        # 递归遍历子节点（通过属性遍历，跳过非节点属性）
+        for attr_name in dir(node):
+            if attr_name.startswith('_') or attr_name in ('type', 'range', 'loc', 'raw', 'line', 'column'):
+                continue
+            try:
+                value = getattr(node, attr_name)
+            except Exception:
+                continue
+            if isinstance(value, list):
+                for child in value:
+                    if _walk_and_check(child):
+                        return True
+            elif hasattr(value, 'type'):
+                if _walk_and_check(value):
+                    return True
+
+        return False
+
+    for top_node in all_nodes:
+        if _walk_and_check(top_node):
+            return True
+    return False
+
+
+def _check_value_is_sink(value_node, sink_method_set):
+    """检查赋值右侧是否是 sink 函数的引用"""
+    if not hasattr(value_node, 'type'):
+        return False
+    node_type = getattr(value_node, 'type', '')
+
+    # 直接引用：const f = eval → Identifier('eval')
+    if node_type == 'Identifier':
+        return getattr(value_node, 'name', None) in sink_method_set
+
+    # 属性引用：const f = obj.eval → MemberExpression(Identifier('obj'), 'eval')
+    if node_type == 'MemberExpression':
+        prop = getattr(value_node, 'property', None)
+        if hasattr(prop, 'type') and getattr(prop, 'type', '') == 'Identifier':
+            return getattr(prop, 'name', None) in sink_method_set
+
+    # CallExpression 链：const f = require('child_process').exec
+    if node_type == 'CallExpression':
+        callee = getattr(value_node, 'callee', None)
+        if hasattr(callee, 'type') and getattr(callee, 'type', '') == 'MemberExpression':
+            return _check_value_is_sink(callee, sink_method_set)
+
+    return False
+
+
 def find_sinks(sink_names, files):
     """
     AST-based sink 查找。遍历所有文件的 AST 节点，查找匹配的函数调用。
@@ -3026,6 +3118,17 @@ def find_sinks(sink_names, files):
                 return
 
             callee_name, is_indirect = _extract_call_name_js(node)
+
+            # 赋值追踪：Identifier callee 不匹配 sink 时，查找同名变量的赋值
+            if not is_indirect and callee_name and hasattr(node.callee, 'type') and getattr(node.callee, 'type', '') == 'Identifier':
+                matched_any = any(
+                    s.class_ is None and (callee_name == s.method or callee_name.endswith('.' + s.method))
+                    for s in sink_names
+                )
+                if not matched_any:
+                    indirect_info = _check_js_indirect_assignment(callee_name, sink_names, all_nodes)
+                    if indirect_info:
+                        is_indirect = True
 
             if is_indirect or callee_name is None:
                 # 间接调用
@@ -3188,14 +3291,128 @@ def _judge_from_summary_js(summary, call_args):
     return None
 
 
-def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], controlled_params=[]):
+def _handle_js_indirect_call(all_nodes, vul_lineno, indirect_map, repair_functions, controlled_params, file_path):
+    """
+    处理 JS 间接调用场景：在 AST 中定位 vul_lineno 处的 CallExpression 节点，
+    用 indirect_map 确认是间接调用后，提取参数做可控性分析。
+
+    JS AST 是 esprima 格式（dict），不是 ast 模块。
+
+    :param all_nodes: 文件顶层 AST 节点列表
+    :param vul_lineno: 漏洞行号（可能是 str 或 int）
+    :param indirect_map: 间接调用映射 {变量名: sink函数名}
+    :param repair_functions: 修复函数列表
+    :param controlled_params: 可控参数列表
+    :param file_path: 文件路径
+    :return: list[dict] 或 None
+    """
+    global scan_results
+
+    target_line = int(vul_lineno)
+    target_node = None
+
+    def _find_at_line(node):
+        nonlocal target_node
+        if target_node is not None:
+            return
+        if not hasattr(node, 'type') or getattr(node, 'type', '') != 'CallExpression':
+            return
+        loc = getattr(node, 'loc', None)
+        if not loc:
+            return
+        start = getattr(loc, 'start', None)
+        if not start:
+            return
+        if int(getattr(start, 'line', 0)) != target_line:
+            return
+        # 检查 callee 是否在 indirect_map 中
+        callee = getattr(node, 'callee', None)
+        if callee and hasattr(callee, 'type') and getattr(callee, 'type', '') == 'Identifier':
+            if getattr(callee, 'name', '') in indirect_map:
+                target_node = node
+
+    for top_node in all_nodes:
+        _walk_ast_nodes(top_node, _find_at_line)
+        if target_node is not None:
+            break
+
+    if target_node is None:
+        return None
+
+    # 提取参数做可控性分析
+    args = getattr(target_node, 'arguments', []) or []
+    for arg in args:
+        if not hasattr(arg, 'type'):
+            continue
+        arg_type = getattr(arg, 'type', '')
+
+        if arg_type == 'Identifier':
+            arg_name = getattr(arg, 'name', '')
+            if _is_js_controllable(arg_name, controlled_params, file_path, target_line):
+                scan_results.append({
+                    'code': 1,
+                    'chain': [
+                        ('source', arg_name, file_path, target_line),
+                        ('sink', 'indirect_call', file_path, target_line),
+                    ]
+                })
+                return scan_results
+
+    return None
+
+
+def _is_js_controllable(var_name, controlled_params, file_path, vul_lineno):
+    """
+    检查 JS 变量是否可控。
+
+    :param var_name: 变量名
+    :param controlled_params: 可控参数列表
+    :param file_path: 文件路径
+    :param vul_lineno: 行号
+    :return: bool
+    """
+    import re
+
+    if var_name in (controlled_params or []):
+        return True
+
+    # 常见可控源模式
+    controllable_patterns = [
+        r'input', r'request', r'args', r'params', r'query',
+        r'param', r'data', r'form', r'cookie', r'header',
+        r'user', r'cmd', r'command',
+    ]
+    for pattern in controllable_patterns:
+        if re.search(pattern, var_name, re.IGNORECASE):
+            return True
+
+    # 反向追踪：查找变量赋值
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            source_lines = f.readlines()
+    except Exception:
+        return False
+
+    # 在源码中查找 var_name 的赋值（在 vul_lineno 之前）
+    for i, line in enumerate(source_lines, 1):
+        if i >= vul_lineno:
+            break
+        if re.search(r'(?:const|let|var|,\s*)\s*' + re.escape(var_name) + r'\s*=', line):
+            if re.search(r'request|query|params|input|args|data', line, re.IGNORECASE):
+                return True
+
+    return False
+
+
+def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], controlled_params=[], indirect_map=None):
     """
     开始检测函数
-    :param controlled_params: 
-    :param repair_functions: 
+    :param controlled_params:
+    :param repair_functions:
     :param sensitive_func: 要检测的敏感函数,传入的为函数列表
     :param vul_lineno: 漏洞函数所在行号
     :param file_path: 文件路径
+    :param indirect_map: 间接调用映射 {变量名: sink函数名}
     :return:
     """
     try:
@@ -3227,6 +3444,14 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
         import_map = {}
         if all_nodes:
             import_map = _parse_js_imports(_nodes, file_path)
+
+        # 间接调用快速路径
+        if indirect_map and isinstance(indirect_map, dict):
+            indirect_result = _handle_js_indirect_call(
+                all_nodes, vul_lineno, indirect_map, repair_functions, controlled_params, file_path
+            )
+            if indirect_result:
+                return indirect_result
 
         for func in sensitive_func:  # 循环判断代码中是否存在敏感函数，若存在，递归判断参数是否可控;对文件内容循环判断多次
             back_node = []

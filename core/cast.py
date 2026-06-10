@@ -372,11 +372,19 @@ class CAST(object):
                     elif _is_co == 3:
                         pass
                     elif _is_co in (4, 5):
-                        if hasattr(_cp[0], "name"):
-                            logger.info("[AST] New vul function {}()".format(_cp[0].name))
+                        # 从 chain 中提取封装函数名，构造与 scan_parser code=5 一致的三元组
+                        wrapper_func = None
+                        for c in chain:
+                            if isinstance(c, tuple) and len(c) >= 2 and c[0] == 'NewFunction':
+                                wrapper_func = c[1]
+                                break
+                        if wrapper_func is not None:
+                            wrapper_source = (wrapper_func, param_name, self.sr.vul_function)
+                            logger.info("[AST] New vul function {}()".format(wrapper_func))
+                            return False, _is_co, wrapper_source, chain
                         else:
-                            logger.info("[AST] New vul function {}()".format(_cp[0]))
-                        return False, _is_co, tuple([_is_co, _cp]), chain
+                            logger.info("[AST] New vul function but no wrapper info in chain")
+                            return False, _is_co, tuple([_is_co, _cp]), chain
                     else:
                         continue
 
@@ -394,11 +402,19 @@ class CAST(object):
                     elif _is_co == 3:
                         pass
                     elif _is_co in (4, 5):
-                        if hasattr(_cp[0], "name"):
-                            logger.info("[AST] New vul function {}()".format(_cp[0].name))
+                        # 从 chain 中提取封装函数名，构造与 scan_parser code=5 一致的三元组
+                        wrapper_func = None
+                        for c in chain:
+                            if isinstance(c, tuple) and len(c) >= 2 and c[0] == 'NewFunction':
+                                wrapper_func = c[1]
+                                break
+                        if wrapper_func is not None:
+                            wrapper_source = (wrapper_func, param_name, self.sr.vul_function)
+                            logger.info("[AST] New vul function {}()".format(wrapper_func))
+                            return False, _is_co, wrapper_source, chain
                         else:
-                            logger.info("[AST] New vul function {}()".format(_cp[0]))
-                        return False, _is_co, tuple([_is_co, _cp]), chain
+                            logger.info("[AST] New vul function but no wrapper info in chain")
+                            return False, _is_co, tuple([_is_co, _cp]), chain
                     else:
                         continue
 

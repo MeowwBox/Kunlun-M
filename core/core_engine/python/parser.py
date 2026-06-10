@@ -1490,6 +1490,154 @@ def _init_function_summaries(file_path):
         _summaries_initialized = True
 
 
+def _is_controllable(var_name, controlled_params, file_path, vul_lineno):
+    """
+    检查变量是否可控（简化版）。
+
+    :param var_name: 变量名
+    :param controlled_params: 可控参数列表（如 ['cmd', 'user_input']）
+    :param file_path: 文件路径
+    :param vul_lineno: 行号
+    :return: bool
+    """
+    import re as _re
+
+    # 1. 直接匹配可控参数
+    if var_name in (controlled_params or []):
+        return True
+
+    # 2. 常见可控源模式
+    controllable_patterns = [
+        r'input', r'request', r'args', r'params', r'query',
+        r'param', r'data', r'form', r'cookie', r'header',
+        r'get\w*', r'post\w*', r'user', r'cmd', r'command',
+    ]
+    for pattern in controllable_patterns:
+        if _re.search(pattern, var_name, _re.IGNORECASE):
+            return True
+
+    # 3. 反向追踪：在文件中查找变量赋值
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            source = f.read()
+        assign_tree = ast.parse(source)
+
+        for node in ast.walk(assign_tree):
+            if not isinstance(node, ast.Assign):
+                continue
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == var_name:
+                    # 找到赋值，检查右侧
+                    value_str = ast.dump(node.value)
+                    for pattern in controllable_patterns:
+                        if _re.search(pattern, value_str, _re.IGNORECASE):
+                            return True
+                    # 如果右侧是函数参数（来自函数定义）
+                    if isinstance(node.value, ast.Name):
+                        return _is_controllable(node.value.id, controlled_params, file_path, node.lineno)
+    except Exception:
+        pass
+
+    return False
+
+
+def _handle_python_indirect_call(tree, vul_lineno, indirect_map, repair_functions, controlled_params, file_path):
+    """
+    处理 Python 间接调用场景：在 AST 中定位 vul_lineno 处的 Call 节点，
+    用 indirect_map 确认是间接调用后，提取参数做可控性分析。
+
+    :param tree: AST tree
+    :param vul_lineno: 漏洞行号
+    :param indirect_map: 间接调用映射 {变量名: sink函数名}
+    :param repair_functions: 修复函数列表
+    :param controlled_params: 可控参数列表
+    :param file_path: 文件路径
+    :return: list[dict] 或 None
+    """
+    global scan_results
+
+    target_node = None
+
+    target_line = int(vul_lineno)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if int(node.lineno) != target_line:
+            continue
+        # 检查 callee 是否在 indirect_map 中
+        if isinstance(node.func, ast.Name):
+            if node.func.id in indirect_map:
+                target_node = node
+                break
+        elif isinstance(node.func, ast.Subscript):
+            # globals()['os.system'](x) — callee 是 Subscript
+            target_node = node
+            break
+
+    if target_node is None:
+        return None
+
+    # 提取参数做可控性分析
+    for arg in target_node.args:
+        if isinstance(arg, ast.Name):
+            arg_name = arg.id
+            if _is_controllable(arg_name, controlled_params, file_path, vul_lineno):
+                scan_results.append({
+                    'code': 1,
+                    'chain': [
+                        ('source', arg_name, file_path, vul_lineno),
+                        ('sink', 'indirect_call', file_path, vul_lineno),
+                    ]
+                })
+                return scan_results
+
+    return None
+
+
+def _check_indirect_assignment(value_node, sink_names, var_name):
+    """
+    检查赋值右侧是否包含间接调用 sink 的模式。
+
+    支持的模式：
+    - globals().get('os.system')
+    - getattr(os, 'system')
+    - os.system 或其他模块.函数引用
+
+    :param value_node: 赋值右侧的 AST 节点
+    :param sink_names: sink 名称列表
+    :param var_name: 被赋值的变量名
+    :return: str or None — 间接调用的描述文本，或 None
+    """
+    def _ast_to_str(node):
+        """将 AST 节点近似还原为源代码字符串"""
+        if isinstance(node, ast.Name):
+            return node.id
+        elif isinstance(node, ast.Attribute):
+            val = _ast_to_str(node.value)
+            return '{v}.{a}'.format(v=val, a=node.attr)
+        elif isinstance(node, ast.Constant):
+            return repr(node.value)
+        elif isinstance(node, ast.Call):
+            func = _ast_to_str(node.func)
+            args = ', '.join(_ast_to_str(a) for a in node.args)
+            return '{f}({a})'.format(f=func, a=args)
+        elif isinstance(node, ast.Str):  # Python 3.7 compat
+            return repr(node.s)
+        elif isinstance(node, ast.Num):
+            return repr(node.n)
+        else:
+            return ''
+
+    value_str = _ast_to_str(value_node)
+
+    for sink in sink_names:
+        # 模式1: globals().get('os.system') 或 getattr(os, 'system')
+        if sink.method in value_str:
+            return '{v}={m}'.format(v=var_name, m=sink.method)
+
+    return None
+
+
 def find_sinks(sink_names, files):
     """
     AST-based sink 查找。遍历所有文件的 AST 节点，查找匹配的函数调用。
@@ -1525,20 +1673,33 @@ def find_sinks(sink_names, files):
             call_name = _get_call_name(node)
             func = node.func
 
-            # 间接调用检测：func 是 Name 且不是直接匹配的 sink
-            # 如 func_var = os.system; func_var(x)
+            # 间接调用检测
             is_indirect = False
+            indirect_callee_name = None  # 间接调用的变量名
+
             if isinstance(func, ast.Name):
-                # 检查是否所有 sink 都不匹配这个简单名称
-                if not any(s.class_ is None and s.method == func.id for s in sink_names):
-                    # 如果 func.id 不匹配任何 sink 的 method，可能是间接调用
-                    # 但也可能是普通函数调用，只在 node.func 不是已知 sink 时标记
-                    is_indirect = False
+                func_id = func.id
+                if not any(s.class_ is None and s.method == func_id for s in sink_names):
+                    # func.id 不匹配任何 sink 的 method → 可能是间接调用
+                    # 赋值追踪：在文件 AST 中查找 func_id 的赋值
+                    for assign_node in ast.walk(tree):
+                        if not isinstance(assign_node, ast.Assign):
+                            continue
+                        for target in assign_node.targets:
+                            if isinstance(target, ast.Name) and target.id == func_id:
+                                # 找到赋值: func_id = <expr>
+                                # 检查赋值右侧是否包含 sink 相关模式
+                                value = assign_node.value
+                                indirect_callee_name = _check_indirect_assignment(value, sink_names, func_id)
+                                if indirect_callee_name:
+                                    is_indirect = True
+                                    break
+                        if is_indirect:
+                            break
             elif isinstance(func, ast.Attribute):
                 pass
             else:
                 # ast.Subscript 等其他类型 → 间接调用
-                # 如 globals()['os.system'](x)
                 is_indirect = True
 
             if is_indirect:
@@ -1548,7 +1709,7 @@ def find_sinks(sink_names, files):
                         'lineno': node.lineno if hasattr(node, 'lineno') else 0,
                         'node': node,
                         'is_indirect': True,
-                        'callee_name': '<indirect>',
+                        'callee_name': func.id if isinstance(func, ast.Name) else '<indirect>',
                         'class_name': None,
                         'matched_sink': sink,
                     })
@@ -1589,7 +1750,7 @@ def find_sinks(sink_names, files):
     return results
 
 
-def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], controlled_params=[], svid=None):
+def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], controlled_params=[], svid=None, indirect_map=None):
     """
     Python AST scan parser - 分析敏感函数参数是否可控
 
@@ -1599,6 +1760,7 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
     :param repair_functions: 修复函数列表
     :param controlled_params: 可控参数列表
     :param svid: 规则 ID
+    :param indirect_map: 间接调用映射 {变量名: sink函数名}
     :return: scan_results 列表，每个元素是 {"code": N, "chain": [...], "source": ...}
     """
     global scan_results, is_repair_functions, is_controlled_params, scan_chain, _trace_visited
@@ -1643,6 +1805,14 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
                 logger.debug('[AST][Python] Source Discovery init error: {}'.format(e))
 
         target_line = int(vul_lineno)
+
+        # 间接调用快速路径
+        if indirect_map and isinstance(indirect_map, dict):
+            indirect_result = _handle_python_indirect_call(
+                tree, vul_lineno, indirect_map, repair_functions, controlled_params, file_path
+            )
+            if indirect_result:
+                return indirect_result
 
         # 解析 import 语句，用于跨文件追踪
         import_map = _parse_imports(tree, file_path)

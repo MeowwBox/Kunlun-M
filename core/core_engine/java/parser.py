@@ -2083,6 +2083,20 @@ def find_sinks(sink_names, files):
         if not _nodes:
             continue
 
+        # === 第一遍遍历：收集方法引用赋值映射（间接调用） ===
+        assignment_map = {}  # 变量名 -> 原始方法名
+        try:
+            for mref_path, mref_node in _nodes.filter(javalang.tree.MethodReference):
+                method_name = mref_node.method.member if hasattr(mref_node.method, 'member') else str(mref_node.method)
+                # 查找赋值目标：向上搜索 path 中的 LocalVariableDeclaration
+                for ancestor in reversed(mref_path):
+                    if isinstance(ancestor, javalang.tree.LocalVariableDeclaration):
+                        var_name = ancestor.declarators[0].name
+                        assignment_map[var_name] = method_name
+                        break
+        except Exception:
+            pass
+
         # 使用 javalang 的 filter 遍历 MethodInvocation
         try:
             for path, node in _nodes.filter(javalang.tree.MethodInvocation):
@@ -2153,13 +2167,171 @@ def find_sinks(sink_names, files):
                                 'matched_sink': sink,
                             })
                             break
+
+            # === 间接调用匹配：检查 qualifier 是否是赋值了方法引用的变量 ===
+            try:
+                for path, node in _nodes.filter(javalang.tree.MethodInvocation):
+                    qualifier = node.qualifier or ''
+                    # qualifier 可能是字符串（如 'execFunc'）或 MemberReference 对象
+                    callee_var = None
+                    if isinstance(qualifier, str) and qualifier in assignment_map:
+                        callee_var = qualifier
+                    elif hasattr(qualifier, 'member') and qualifier.member in assignment_map:
+                        callee_var = qualifier.member
+                    if callee_var:
+                        real_method = assignment_map[callee_var]
+                        for sink in sink_names:
+                            if real_method == sink.method:
+                                lineno = node.position[0] if hasattr(node, 'position') and node.position else 0
+                                results.append({
+                                    'file_path': file_path,
+                                    'lineno': lineno,
+                                    'node': node,
+                                    'is_indirect': True,
+                                    'callee_name': callee_var,
+                                    'class_name': None,
+                                    'matched_sink': sink,
+                                })
+                                break
+            except Exception:
+                pass
         except Exception:
             continue
 
     return results
 
 
-def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], controlled_params=[], is_config_vuln=False):
+def _handle_java_indirect_call(_nodes, vul_lineno, indirect_map, repair_functions, controlled_params, file_path):
+    """
+    处理 Java 间接调用场景：在 AST 中定位 vul_lineno 处的 MethodInvocation 节点，
+    用 indirect_map 确认是间接调用后，提取参数做可控性分析。
+
+    :param _nodes: javalang CompilationUnit AST nodes
+    :param vul_lineno: 漏洞行号
+    :param indirect_map: 间接调用映射 {变量名: sink函数名}
+    :param repair_functions: 修复函数列表
+    :param controlled_params: 可控参数列表
+    :param file_path: 文件路径
+    :return: list[dict] 或 None
+    """
+    global scan_results
+
+    target_line = int(vul_lineno)
+    target_node = None
+    callee_variable = None
+
+    for path, node in _nodes.filter(javalang.tree.MethodInvocation):
+        lineno = node.position[0] if hasattr(node, 'position') and node.position else 0
+        if lineno != target_line:
+            continue
+        # 检查 qualifier 是否在 indirect_map 中（qualifier 可能是字符串或 MemberReference）
+        qualifier = node.qualifier or ''
+        callee_var = None
+        if isinstance(qualifier, str) and qualifier in indirect_map:
+            callee_var = qualifier
+        elif hasattr(qualifier, 'member') and qualifier.member in indirect_map:
+            callee_var = qualifier.member
+        if callee_var:
+            target_node = node
+            callee_variable = callee_var
+            break
+
+    if target_node is None:
+        return None
+
+    # 提取参数做反向追踪可控性分析
+    # 读取源码用于 _build_result
+    source_lines = []
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+            source_lines = f.readlines()
+    except Exception:
+        pass
+
+    # 找到包含目标行的方法
+    method = _find_method_at_line(_nodes, target_line)
+    if not method or not method.body:
+        return None
+
+    method_stmts = list(method.body)
+
+    # 获取方法参数列表
+    method_params = []
+    method_name = method.name if hasattr(method, 'name') else ''
+    if hasattr(method, 'parameters') and method.parameters:
+        method_params = [p.name for p in method.parameters]
+
+    # 获取类名
+    class_name = ''
+    if hasattr(_nodes, 'types') and _nodes.types:
+        for type_decl in _nodes.types:
+            if hasattr(type_decl, 'body') and type_decl.body:
+                for member in type_decl.body:
+                    if member is method:
+                        class_name = type_decl.name
+                        break
+            if class_name:
+                break
+
+    lineno = target_line
+
+    # 对每个参数进行反向追踪
+    for arg in (target_node.arguments or []):
+        arg_name = _get_var_name(arg) or _expr_to_str_java(arg)
+        if not arg_name:
+            continue
+
+        code, cp, expr_lineno = parameters_back(
+            arg_name, method_stmts, lineno, file_path,
+            repair_functions, controlled_params,
+            method_params=method_params, method_name=method_name, class_name=class_name
+        )
+
+        if code == 1:
+            scan_results.append(_build_result(code, scan_chain, cp, source_lines,
+                             lineno, file_path, controlled_params,
+                             repair_functions, is_config_vuln=False))
+            return scan_results
+        elif code == 2:
+            scan_results.append(_build_result(code, scan_chain, cp, source_lines,
+                             lineno, file_path, controlled_params,
+                             repair_functions, is_config_vuln=False))
+            return scan_results
+        elif code == 5:
+            # 封装函数，参数来自形参 → 交给 NewCore 二次扫描
+            wrapper_func = cp
+            scan_results.append({
+                'code': 5,
+                'source': (wrapper_func, arg_name, callee_variable),
+                'chain': [
+                    ('NewFunction', wrapper_func, file_path, method.position.line if hasattr(method, 'position') and method.position else 0),
+                    ('sink', callee_variable, file_path, lineno)
+                ]
+            })
+            return scan_results
+
+    # === Fallback: parameters_back 无法判断时，做启发式分析 ===
+    # 如果有任何参数不是字面量（Literal/MemberReference 为简单变量引用），
+    # 视为可能可控，标记为 code=5 交给 NewCore 二次扫描
+    for arg in (target_node.arguments or []):
+        if isinstance(arg, javalang.tree.Literal):
+            continue
+        arg_name = _get_var_name(arg) or _expr_to_str_java(arg)
+        if arg_name:
+            scan_results.append({
+                'code': 1,
+                'source': ('Function-param-controllable', arg_name),
+                'chain': [
+                    ('NewFunction', method_name, file_path, method.position.line if hasattr(method, 'position') and method.position else 0),
+                    ('sink', callee_variable, file_path, lineno)
+                ]
+            })
+            return scan_results
+
+    return None
+
+
+def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], controlled_params=[], is_config_vuln=False, indirect_map=None):
     """
     Java AST scan parser - 反向追踪模式
     从 grep 匹配到的 sink 参数反向追踪数据流，直到碰到 source。
@@ -2171,6 +2343,7 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
     :param repair_functions: 修复函数列表，如 ["PreparedStatement"]
     :param controlled_params: 可控参数列表
     :param is_config_vuln: 是否是配置类漏洞
+    :param indirect_map: 间接调用映射 {变量名: sink函数名}
     :return: scan_results 列表，每个元素是 {"code": N, "chain": [...], ...}
     """
     global scan_results, is_repair_functions, is_controlled_params, scan_chain
@@ -2201,6 +2374,14 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
 
         # 初始化函数摘要
         _init_function_summaries(file_path)
+
+        # 间接调用快速路径
+        if indirect_map and isinstance(indirect_map, dict):
+            indirect_result = _handle_java_indirect_call(
+                _nodes, vul_lineno, indirect_map, repair_functions, controlled_params, file_path
+            )
+            if indirect_result:
+                return indirect_result
 
         # === Source Discovery 初始化 ===
         global _source_registry

@@ -144,6 +144,7 @@ class VulnerabilityResult:
         self.code_content = None
         self.commit_author = 'Unknown'
         self.is_unconfirm = None  # None 表示未手动设置（延迟推断）
+        self.indirect_map = {}    # 间接调用：变量名 -> 实际 sink 函数名
 
     @property
     def is_unconfirmed(self):
@@ -175,6 +176,9 @@ class VulnerabilityResult:
             mr.line_number = single_match[1]
             mr.code_content = single_match[2]
             mr.file_path = single_match[0]
+            # 间接调用：第 4 个元素是 indirect_map
+            if len(single_match) > 3 and single_match[3]:
+                mr.indirect_map = single_match[3]
         except Exception:
             from utils.log import logger
             logger.warning('[ENGINE] match line parse exception')

@@ -53,6 +53,7 @@ class VulnerabilityMatcher(object):
         self.line_number = vulnerability_result.line_number
         # self.code_content = vulnerability_result.code_content.strip()
         self.code_content = vulnerability_result.code_content
+        self.indirect_map = getattr(vulnerability_result, 'indirect_map', {}) or {}
         self.files = files
         self.languages = languages
         self.tamper_name = tamper_name
@@ -262,6 +263,10 @@ class VulnerabilityMatcher(object):
 
         else:
             if type(data) is tuple:
+                # 三元组格式: (wrapper_func, param_name, vul_function) — 来自 cast.py code=4/5 修复
+                if len(data) == 3 and isinstance(data[0], str):
+                    return False, 'New Core', data
+                # 旧格式兼容: tuple([code, controlled_params])
                 if int(data[0]) in (4, 5):
                     return False, 'New Core', data[1]
 
@@ -291,7 +296,8 @@ class VulnerabilityMatcher(object):
                 try:
                     result = php_scan_parser(rule_match, self.line_number, self.file_path,
                                              repair_functions=self.repair_functions,
-                                             controlled_params=self.controlled_list, svid=self.cvi)
+                                             controlled_params=self.controlled_list, svid=self.cvi,
+                                             indirect_map=self.indirect_map)
                     logger.debug('[AST] [RET] {c}'.format(c=result))
                     if len(result) > 0:
                         parsed = self._parse_ast_result(result)
@@ -366,7 +372,8 @@ class VulnerabilityMatcher(object):
                 try:
                     result = js_scan_parser(rule_match, self.line_number, self.file_path,
                                             repair_functions=self.repair_functions,
-                                            controlled_params=self.controlled_list)
+                                            controlled_params=self.controlled_list,
+                                            indirect_map=self.indirect_map)
                     logger.debug('[AST] [RET] {c}'.format(c=result))
                     if len(result) > 0:
                         parsed = self._parse_ast_result(result)
@@ -473,7 +480,8 @@ class VulnerabilityMatcher(object):
                     result = java_scan_parser(rule_match, self.line_number, self.file_path,
                                               repair_functions=self.repair_functions,
                                               controlled_params=self.controlled_list,
-                                              is_config_vuln=is_config_vuln)
+                                              is_config_vuln=is_config_vuln,
+                                              indirect_map=self.indirect_map)
                     logger.debug('[AST] [RET] {c}'.format(c=result))
                     if len(result) > 0:
                         parsed = self._parse_ast_result(result)
@@ -522,7 +530,8 @@ class VulnerabilityMatcher(object):
                 try:
                     result = python_scan_parser(rule_match, self.line_number, self.file_path,
                                                 repair_functions=self.repair_functions,
-                                                controlled_params=self.controlled_list, svid=self.cvi)
+                                                controlled_params=self.controlled_list, svid=self.cvi,
+                                                indirect_map=self.indirect_map)
                     logger.debug("[AST] [RET] {c}".format(c=result))
                     if len(result) > 0:
                         parsed = self._parse_ast_result(result)
@@ -581,7 +590,8 @@ class VulnerabilityMatcher(object):
                 try:
                     result = go_scan_parser(rule_match, self.line_number, self.file_path,
                                             repair_functions=self.repair_functions,
-                                            controlled_params=self.controlled_list, svid=self.cvi)
+                                            controlled_params=self.controlled_list, svid=self.cvi,
+                                            indirect_map=self.indirect_map)
                     logger.debug('[AST] [RET] {c}'.format(c=result))
                     if len(result) > 0:
                         parsed = self._parse_ast_result(result)
@@ -611,7 +621,8 @@ class VulnerabilityMatcher(object):
                 try:
                     result = go_scan_parser(rule_match, self.line_number, self.file_path,
                                             repair_functions=self.repair_functions,
-                                            controlled_params=self.controlled_list, svid=self.cvi)
+                                            controlled_params=self.controlled_list, svid=self.cvi,
+                                            indirect_map=self.indirect_map)
                     logger.debug('[AST][Go] [RET] {c}'.format(c=result))
                     if len(result) > 0:
                         parsed = self._parse_ast_result(result)
@@ -688,7 +699,8 @@ class VulnerabilityMatcher(object):
                 try:
                     result = c_scan_parser(rule_match, self.line_number, self.file_path,
                                            repair_functions=self.repair_functions,
-                                           controlled_params=self.controlled_list, svid=self.cvi)
+                                           controlled_params=self.controlled_list, svid=self.cvi,
+                                           indirect_map=self.indirect_map)
                     logger.debug('[AST] [RET] {c}'.format(c=result))
                     if len(result) > 0:
                         parsed = self._parse_ast_result(result)

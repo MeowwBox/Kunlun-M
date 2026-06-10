@@ -2006,9 +2006,134 @@ def _collect_return_values(body_node):
 # scan_parser — 入口
 # ---------------------------------------------------------------------------
 
+def _handle_c_indirect_call(vul_lineno, indirect_map, repair_functions, controlled_params, file_path):
+    """
+    处理 C 间接调用场景：在 AST 中定位 vul_lineno 处的 call_expression 节点，
+    用 indirect_map 确认是间接调用后，提取参数做可控性分析。
+
+    :param vul_lineno: 漏洞行号
+    :param indirect_map: 间接调用映射 {变量名: sink函数名}
+    :param repair_functions: 修复函数列表
+    :param controlled_params: 可控参数列表
+    :param file_path: 文件路径
+    :return: list[dict] scan_results 格式的结果列表，或 None
+    """
+    global scan_results
+
+    try:
+        vul_lineno = int(vul_lineno)
+    except (ValueError, TypeError):
+        return None
+
+    ast_tree = _parse_c_ast(file_path)
+    if ast_tree is None:
+        return None
+
+    # 在 AST 中查找 vul_lineno 处的 call_expression
+    target_node = None
+    matched_sink_name = None
+
+    def _find_call_at_vul_line(node):
+        nonlocal target_node, matched_sink_name
+        if target_node is not None:
+            return
+        if node.type == 'call_expression':
+            node_line = node.start_point[0] + 1
+            if node_line == vul_lineno:
+                func_child = node.child_by_field_name('function')
+                if not func_child and node.children:
+                    func_child = node.children[0]
+                if func_child and func_child.type == 'identifier':
+                    func_name = _node_text(func_child)
+                    if func_name in indirect_map:
+                        target_node = node
+                        matched_sink_name = indirect_map[func_name]
+        for child in node.children:
+            _find_call_at_vul_line(child)
+
+    _find_call_at_vul_line(ast_tree.root_node)
+
+    if target_node is None:
+        return None
+
+    # 提取参数做可控性分析
+    ast_args = _get_call_args_from_ast(target_node)
+    if not ast_args:
+        return None
+
+    results = []
+    saved_results = list(scan_results)
+
+    for arg_idx, arg_node in enumerate(ast_args):
+        arg_text = _node_text(arg_node)
+
+        # 字面量 → 不可控
+        if _is_literal_node(arg_node):
+            continue
+
+        # 提取参数中的所有标识符
+        var_names = _collect_identifiers_from_ast(arg_node)
+
+        for var_name in var_names:
+            # 直接可控源
+            if _is_controllable_source(var_name, controlled_params):
+                source_lineno = vul_lineno
+                _, sl = _trace_variable_in_lines(
+                    file_path, var_name, vul_lineno, vul_lineno,
+                    repair_functions, controlled_params
+                )
+                if sl:
+                    source_lineno = sl
+
+                results.append({
+                    "code": 1,
+                    "vul_func": matched_sink_name,
+                    "param": var_name,
+                    "language": "c",
+                    "source_file": file_path,
+                    "source_lineno": source_lineno,
+                    "chain": [],
+                })
+                scan_results = results
+                return results
+
+            # 反向追踪
+            trace_code, src_lineno = _trace_variable_in_lines(
+                file_path, var_name, vul_lineno, vul_lineno,
+                repair_functions, controlled_params
+            )
+            if trace_code == 1:
+                results.append({
+                    "code": 1,
+                    "vul_func": matched_sink_name,
+                    "param": var_name,
+                    "language": "c",
+                    "source_file": file_path,
+                    "source_lineno": src_lineno if src_lineno else vul_lineno,
+                    "chain": [],
+                })
+                scan_results = results
+                return results
+            elif trace_code == 2:
+                results.append({
+                    "code": 2,
+                    "vul_func": matched_sink_name,
+                    "param": var_name,
+                    "language": "c",
+                    "source_file": file_path,
+                    "source_lineno": src_lineno if src_lineno else vul_lineno,
+                    "chain": [],
+                })
+                scan_results = results
+                return results
+
+    scan_results = saved_results
+    return None
+
+
 def scan_parser(rule_match, vul_lineno, file_path,
                 repair_functions=None, controlled_params=None,
-                svid=None, is_config_vuln=False):
+                svid=None, is_config_vuln=False, indirect_map=None):
     """C/C++ AST 扫描入口
 
     :param rule_match: 规则匹配的函数名列表
@@ -2061,6 +2186,15 @@ def scan_parser(rule_match, vul_lineno, file_path,
         return results
 
     logger.debug("[AST][C] Scanning line {}: {}".format(vul_lineno, line_text))
+
+    # ---- 间接调用快速路径 ----
+    if indirect_map and isinstance(indirect_map, dict):
+        indirect_result = _handle_c_indirect_call(
+            vul_lineno, indirect_map, repair_functions, controlled_params, file_path
+        )
+        if indirect_result:
+            scan_results = indirect_result
+            return indirect_result
 
     # 检查行中是否包含规则匹配的函数
     matched_func = None
@@ -2456,3 +2590,197 @@ def analysis_params(param_name, parent_func_names, vul_function, lineno, file_pa
         ]
     else:
         return -1, [], 0, []
+
+
+# ---------------------------------------------------------------------------
+# find_sinks — 间接调用 / 直接调用 sink 检测（供 scanner.py 调用）
+# ---------------------------------------------------------------------------
+
+def find_sinks(sink_names, files):
+    """
+    AST-based sink 查找。遍历所有文件的 tree-sitter AST 节点，查找匹配的函数调用。
+    支持直接调用匹配和基于函数指针赋值的间接调用检测。
+
+    :param sink_names: list of SinkName(class_, method) from parse_sink_names()
+    :param files: 文件路径列表
+    :return: list of dict with keys:
+        file_path, lineno, node, is_indirect, callee_name, class_name, matched_sink
+    """
+    from core.utils import SinkName
+
+    results = []
+
+    for file_path in files:
+        file_path = _ast_object_singleton.get_path(file_path)
+        if not file_path:
+            continue
+        tree = _parse_c_ast(file_path)
+        if not tree:
+            continue
+
+        root = tree.root_node
+
+        # ---- 第一遍：遍历函数体，构建函数指针赋值映射 ----
+        # var_to_sink: {变量名: matched SinkName}
+        var_to_sink = {}
+        # var_reassign_lines: {变量名: list of reassignment line numbers}
+        var_reassign_lines = {}
+
+        def _walk_for_declarations(node):
+            """遍历 AST，找 init_declarator / declaration 中的函数指针赋值和重新赋值。"""
+            if node.type == 'init_declarator':
+                # 模式: int (*func)(const char *) = system;
+                # init_declarator 包含 declarator 和 value（= 右侧）
+                decl_node = node.child_by_field_name('declarator')
+                value_node = node.child_by_field_name('value')
+                if decl_node and value_node:
+                    # 检查是否是函数指针声明（类型包含指针符号）
+                    type_text = _node_text(decl_node)
+                    if '(' in type_text and '*' in type_text:
+                        # 提取左侧变量名
+                        var_name = _extract_declarator_name_simple(decl_node)
+                        if var_name:
+                            # 检查右侧是否是 sink 函数名
+                            val_text = _node_text(value_node)
+                            if value_node.type == 'identifier':
+                                for sink in sink_names:
+                                    if sink.class_ is None and val_text == sink.method:
+                                        var_to_sink[var_name] = sink
+                                        break
+                            elif value_node.type == 'call_expression':
+                                # cast 赋值: func = (int (*)(const char *))system
+                                # call_expression 的 function 可能是 cast
+                                pass
+
+            elif node.type == 'declaration':
+                # declaration 可能包含 init_declarator
+                pass
+
+            elif node.type == 'assignment_expression':
+                # 模式: func = (int (*)(const char *))printf;  (重新赋值)
+                left_node = node.child_by_field_name('left')
+                right_node = node.child_by_field_name('right')
+                if left_node and right_node:
+                    if left_node.type == 'identifier':
+                        var_name = _node_text(left_node)
+                        lineno = node.start_point[0] + 1
+                        # 检查右侧
+                        val_text = _node_text(right_node)
+                        if right_node.type == 'identifier':
+                            # func = printf; -> 重新赋值
+                            # 如果右侧是 sink，更新映射；否则清除映射
+                            found_sink = None
+                            for sink in sink_names:
+                                if sink.class_ is None and val_text == sink.method:
+                                    found_sink = sink
+                                    break
+                            if found_sink:
+                                var_to_sink[var_name] = found_sink
+                            elif var_name in var_to_sink:
+                                # 重新赋值为非 sink，清除映射
+                                del var_to_sink[var_name]
+                        elif right_node.type == 'cast_expression':
+                            # func = (type *)other_func;
+                            # 尝试提取 cast 内部的 identifier
+                            inner = right_node.child_by_field_name('value')
+                            if inner and inner.type == 'identifier':
+                                inner_text = _node_text(inner)
+                                found_sink = None
+                                for sink in sink_names:
+                                    if sink.class_ is None and inner_text == sink.method:
+                                        found_sink = sink
+                                        break
+                                if found_sink:
+                                    var_to_sink[var_name] = found_sink
+                                elif var_name in var_to_sink:
+                                    del var_to_sink[var_name]
+                            else:
+                                # cast 到其他类型，清除映射
+                                if var_name in var_to_sink:
+                                    del var_to_sink[var_name]
+                        else:
+                            # 其他类型右侧，清除映射
+                            if var_name in var_to_sink:
+                                del var_to_sink[var_name]
+
+            elif node.type == 'function_definition':
+                # 遍历函数体内部
+                body = node.child_by_field_name('body')
+                if body:
+                    for child in body.children:
+                        _walk_for_declarations(child)
+
+            for child in node.children:
+                _walk_for_declarations(child)
+
+        _walk_for_declarations(root)
+
+        # ---- 第二遍：遍历 call_expression，检测直接和间接调用 ----
+        def _walk_for_calls(node):
+            if node.type == 'call_expression':
+                func_child = node.child_by_field_name('function')
+                if not func_child and node.children:
+                    func_child = node.children[0]
+                if not func_child:
+                    for child in node.children:
+                        _walk_for_calls(child)
+                    return
+
+                func_text = _node_text(func_child)
+
+                # 检查是否是间接调用
+                if func_child.type == 'identifier' and func_text in var_to_sink:
+                    matched_sink = var_to_sink[func_text]
+                    lineno = node.start_point[0] + 1
+                    results.append({
+                        'file_path': file_path,
+                        'lineno': lineno,
+                        'node': node,
+                        'is_indirect': True,
+                        'callee_name': func_text,
+                        'class_name': None,
+                        'matched_sink': matched_sink,
+                    })
+                    # 继续遍历子节点
+                    for child in node.children:
+                        _walk_for_calls(child)
+                    return
+
+                # 检查直接调用
+                short_name = func_text.split('::')[-1] if '::' in func_text else func_text
+                short_name = short_name.split('.')[-1] if '.' in short_name else short_name
+
+                for sink in sink_names:
+                    if sink.class_ is None:
+                        if func_text == sink.method or short_name == sink.method:
+                            lineno = node.start_point[0] + 1
+                            results.append({
+                                'file_path': file_path,
+                                'lineno': lineno,
+                                'node': node,
+                                'is_indirect': False,
+                                'callee_name': func_text,
+                                'class_name': None,
+                                'matched_sink': sink,
+                            })
+                            break
+                    else:
+                        if func_text == '{}.{}'.format(sink.class_, sink.method):
+                            lineno = node.start_point[0] + 1
+                            results.append({
+                                'file_path': file_path,
+                                'lineno': lineno,
+                                'node': node,
+                                'is_indirect': False,
+                                'callee_name': func_text,
+                                'class_name': sink.class_,
+                                'matched_sink': sink,
+                            })
+                            break
+
+            for child in node.children:
+                _walk_for_calls(child)
+
+        _walk_for_calls(root)
+
+    return results

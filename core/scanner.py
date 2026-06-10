@@ -25,6 +25,7 @@ from core.core_engine.python.parser import find_sinks as python_find_sinks
 from core.core_engine.java.parser import find_sinks as java_find_sinks
 from core.core_engine.javascript.parser import find_sinks as js_find_sinks
 from core.core_engine.go.parser import find_sinks as go_find_sinks
+from core.core_engine.c.parser import find_sinks as c_find_sinks
 from Kunlun_M import const
 from Kunlun_M.const import VulnerabilityResult
 from utils.utils import show_context
@@ -178,7 +179,6 @@ def scan(target_directory, a_sid=None, s_sid=None, special_rules=None, language=
         logger.critical('no rules!')
         return False
     logger.info('[PUSH] {rc} Rules'.format(rc=len(rules)))
-    print('[CI] DEBUG: Loaded rules: {}'.format(','.join(sorted(rules.keys()))))
     push_rules = []
     scan_list = []
 
@@ -413,8 +413,15 @@ class SingleRule(object):
             # AST-based sink finding for indirect call detection
             try:
                 if hasattr(self.sr, 'match') and self.sr.match:
-                    from core.utils import parse_sink_names
-                    sink_names = parse_sink_names(self.sr.match)
+                    from core.utils import parse_sink_names, SinkName as _SinkName
+                    # 优先使用 vul_function（干净函数名列表）构建 sink_names
+                    # C/Go 等语言的 match 是正则表达式，parse_sink_names 无法正确解析
+                    if (hasattr(self.sr, 'vul_function') and
+                        isinstance(self.sr.vul_function, list) and
+                        len(self.sr.vul_function) > 0):
+                        sink_names = parse_sink_names('|'.join(self.sr.vul_function))
+                    else:
+                        sink_names = parse_sink_names(self.sr.match)
                     if sink_names:
                         # self.files 是 dict 格式 {('.php', {'count': N, 'list': [paths]})}
                         # 需要用 file_list_parse 提取实际文件路径列表
@@ -427,6 +434,7 @@ class SingleRule(object):
                                 'java': java_find_sinks,
                                 'javascript': js_find_sinks,
                                 'go': go_find_sinks,
+                                'c': c_find_sinks,
                             }.get(self.lan)
                             if _find_sinks_fn:
                                 indirect_sinks = _find_sinks_fn(sink_names, scan_file_list)
@@ -437,6 +445,16 @@ class SingleRule(object):
                                             lineno = str(sink_info['lineno'])
                                             callee = sink_info['callee_name']
                                             matched_text = '{callee}()'.format(callee=callee)
+                                            # 构造 indirect_map: 变量名 -> 实际 sink 函数名
+                                            matched_sink = sink_info.get('matched_sink')
+                                            indirect_map = {}
+                                            if matched_sink:
+                                                from core.utils import SinkName
+                                                sink_name = '{cls}.{method}'.format(
+                                                    cls=matched_sink.class_, method=matched_sink.method
+                                                ) if matched_sink.class_ else matched_sink.method
+                                                indirect_map = {callee: sink_name}
+
                                             indirect_result = {
                                                 'file_path': file_path,
                                                 'lineno': lineno,
@@ -444,6 +462,7 @@ class SingleRule(object):
                                                 'node': sink_info['node'],
                                                 'is_indirect': True,
                                                 'sink_info': sink_info,
+                                                'indirect_map': indirect_map,
                                             }
                                             if result is None:
                                                 result = []
@@ -579,14 +598,9 @@ class SingleRule(object):
         # exists result
         if origin_results == '' or origin_results is None:
             logger.debug('[CVI-{cvi}] [ORIGIN] NOT FOUND!'.format(cvi=self.sr.svid))
-            print('[CI] DEBUG: [CVI-{cvi}] origin_results=None, match_mode={mm}, match={m}'.format(
-                cvi=self.sr.svid, mm=self.sr.match_mode, m=getattr(self.sr, 'match', '?')))
             return None
         else:
-            print('[CI] DEBUG: [CVI-{cvi}] origin_results count={cnt}, match_mode={mm}'.format(
-                cvi=self.sr.svid, cnt=len(origin_results), mm=self.sr.match_mode))
-            for i, ov in enumerate(origin_results[:5]):
-                print('[CI] DEBUG: [CVI-{cvi}] origin[{i}]: {ov}'.format(cvi=self.sr.svid, i=i, ov=ov))
+            pass
 
         # framework-dependency 模式: 直接生成结果，不需要 AST 分析
         if self.sr.match_mode == const.mm_framework_dependency:
@@ -616,34 +630,33 @@ class SingleRule(object):
                 else:
                     direct_results.append(ov)
 
-        # 处理间接调用结果（任意函数调用检测）
+        # 将间接调用结果转换为 tuple 格式，追加到直接调用结果中
+        # 统一走 Core.scan() 的 CAST 验证流程，避免误报
+        indirect_indices = []
         for ir in indirect_results:
             try:
-                file_path = ir['file_path']
-                lineno = ir['lineno']
-                matched_text = ir['matched_text']
-                vulnerability = VulnerabilityResult.from_match(
-                    (file_path, lineno, matched_text),
-                    svid=self.sr.svid,
-                    language=self.sr.language,
-                    rule_name=self.sr.vulnerability,
-                    author=self.sr.author
+                indirect_indices.append(len(direct_results))
+                indirect_tuple = (
+                    ir['file_path'],
+                    ir['lineno'],
+                    ir['matched_text'],
+                    ir.get('indirect_map', {}),
                 )
-                if vulnerability:
-                    vulnerability.analysis = "Arbitrary-function-call"
-                    vulnerability.chain = [("IndirectCall", matched_text, file_path, int(lineno))]
-                    self.rule_vulnerabilities.append(vulnerability)
-                    logger.debug('[CVI-{cvi}] [INDIRECT] Arbitrary function call: {call}'.format(
-                        cvi=self.sr.svid, call=matched_text))
+                direct_results.append(indirect_tuple)
+                logger.debug('[CVI-{cvi}] [INDIRECT] Queued for CAST check: {call}'.format(
+                    cvi=self.sr.svid, call=ir['matched_text']))
             except Exception as e:
                 logger.debug('indirect call exception ({e})'.format(e=e))
                 logger.debug(traceback.format_exc())
 
-        # 直接调用结果走正常流程
+        # 直接调用结果 + 间接调用结果统一走 CAST 验证
         origin_vulnerabilities = direct_results
         for index, origin_vulnerability in enumerate(origin_vulnerabilities):
-            logger.debug(
-                '[CVI-{cvi}] [ORIGIN] {line}'.format(cvi=self.sr.svid, line=": ".join(list(origin_vulnerability))))
+            try:
+                logger.debug(
+                    '[CVI-{cvi}] [ORIGIN] {line}'.format(cvi=self.sr.svid, line=": ".join(list(origin_vulnerability))))
+            except Exception:
+                pass
             if origin_vulnerability == ():
                 logger.debug(' > continue...')
                 continue
@@ -676,13 +689,14 @@ class SingleRule(object):
                 else:
                     is_vulnerability, reason = False, "Unpack error"
 
-                print('[CI] DEBUG: [CVI-{cvi}] Core.scan() result: is_vul={iv}, reason={r}'.format(
-                    cvi=self.sr.svid, iv=is_vulnerability, r=reason))
-
                 if is_vulnerability:
                     logger.debug('[CVI-{cvi}] [RET] Found {code}'.format(cvi=self.sr.svid, code=reason))
                     vulnerability.analysis = reason
                     vulnerability.chain = data
+                    if index in indirect_indices:
+                        vulnerability.analysis = "Arbitrary-function-call"
+                        logger.debug('[CVI-{cvi}] [INDIRECT] CAST verified arbitrary function call'.format(
+                            cvi=self.sr.svid))
                     self.rule_vulnerabilities.append(vulnerability)
                 else:
                     if reason == 'New Core':  # 新的规则
@@ -700,10 +714,10 @@ class SingleRule(object):
 
                     else:
                         logger.debug('Not vulnerability: {code}'.format(code=reason))
-            except Exception:
-                print('[CI] DEBUG: [CVI-{cvi}] EXCEPTION in Core.scan(): {e}'.format(
-                    cvi=self.sr.svid, e=traceback.format_exc()))
-                raise
+            except Exception as e:
+                logger.debug('[CVI-{cvi}] Exception processing result: {exc}'.format(
+                    cvi=self.sr.svid, exc=e))
+                continue
         logger.debug('[CVI-{cvi}] {vn} Vulnerabilities: {count}'.format(cvi=self.sr.svid, vn=self.sr.vulnerability,
                                                                         count=len(self.rule_vulnerabilities)))
         return self.rule_vulnerabilities
