@@ -3013,40 +3013,44 @@ def _check_js_indirect_assignment(var_name, sink_names, all_nodes):
 
     def _walk_and_check(node):
         """递归遍历节点查找变量声明和赋值"""
-        if not isinstance(node, dict):
+        if not hasattr(node, 'type'):
             return False
-        node_type = node.get('type', '')
+        node_type = getattr(node, 'type', '')
 
         # VariableDeclaration: const/let/var f = <expr>
         if node_type == 'VariableDeclaration':
-            for decl in node.get('declarations', []):
-                if not isinstance(decl, dict):
+            for decl in getattr(node, 'declarations', []):
+                if not hasattr(decl, 'type'):
                     continue
-                decl_id = decl.get('id')
-                if isinstance(decl_id, dict) and decl_id.get('type') == 'Identifier':
-                    if decl_id.get('name') == var_name:
-                        init = decl.get('init')
+                decl_id = getattr(decl, 'id', None)
+                if hasattr(decl_id, 'type') and getattr(decl_id, 'type', '') == 'Identifier':
+                    if getattr(decl_id, 'name', None) == var_name:
+                        init = getattr(decl, 'init', None)
                         if _check_value_is_sink(init, sink_method_set):
                             return True
 
         # AssignmentExpression: f = <expr>
         if node_type == 'AssignmentExpression':
-            left = node.get('left')
-            if isinstance(left, dict) and left.get('type') == 'Identifier':
-                if left.get('name') == var_name:
-                    right = node.get('right')
+            left = getattr(node, 'left', None)
+            if hasattr(left, 'type') and getattr(left, 'type', '') == 'Identifier':
+                if getattr(left, 'name', None) == var_name:
+                    right = getattr(node, 'right', None)
                     if _check_value_is_sink(right, sink_method_set):
                         return True
 
-        # 递归遍历子节点
-        for key, value in node.items():
-            if key in ('type', 'name', 'value', 'loc', 'range', 'raw'):
+        # 递归遍历子节点（通过属性遍历，跳过非节点属性）
+        for attr_name in dir(node):
+            if attr_name.startswith('_') or attr_name in ('type', 'range', 'loc', 'raw', 'line', 'column'):
+                continue
+            try:
+                value = getattr(node, attr_name)
+            except Exception:
                 continue
             if isinstance(value, list):
                 for child in value:
                     if _walk_and_check(child):
                         return True
-            elif isinstance(value, dict):
+            elif hasattr(value, 'type'):
                 if _walk_and_check(value):
                     return True
 
@@ -3060,24 +3064,24 @@ def _check_js_indirect_assignment(var_name, sink_names, all_nodes):
 
 def _check_value_is_sink(value_node, sink_method_set):
     """检查赋值右侧是否是 sink 函数的引用"""
-    if not isinstance(value_node, dict):
+    if not hasattr(value_node, 'type'):
         return False
-    node_type = value_node.get('type', '')
+    node_type = getattr(value_node, 'type', '')
 
     # 直接引用：const f = eval → Identifier('eval')
     if node_type == 'Identifier':
-        return value_node.get('name') in sink_method_set
+        return getattr(value_node, 'name', None) in sink_method_set
 
     # 属性引用：const f = obj.eval → MemberExpression(Identifier('obj'), 'eval')
     if node_type == 'MemberExpression':
-        prop = value_node.get('property')
-        if isinstance(prop, dict) and prop.get('type') == 'Identifier':
-            return prop.get('name') in sink_method_set
+        prop = getattr(value_node, 'property', None)
+        if hasattr(prop, 'type') and getattr(prop, 'type', '') == 'Identifier':
+            return getattr(prop, 'name', None) in sink_method_set
 
     # CallExpression 链：const f = require('child_process').exec
     if node_type == 'CallExpression':
-        callee = value_node.get('callee')
-        if isinstance(callee, dict) and callee.get('type') == 'MemberExpression':
+        callee = getattr(value_node, 'callee', None)
+        if hasattr(callee, 'type') and getattr(callee, 'type', '') == 'MemberExpression':
             return _check_value_is_sink(callee, sink_method_set)
 
     return False
