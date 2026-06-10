@@ -3295,6 +3295,49 @@ def _init_function_summaries(file_path):
         _summaries_initialized = True
 
 
+def _walk_php_ast_nodes(node, callback):
+    """
+    递归遍历 PHP AST 子树，对每个节点调用 callback(node)。
+
+    PHP AST (lphply) 的子节点结构：
+    - Block.nodes: 子语句列表
+    - If.node: Block, If.else_: Else, Else.node: Block
+    - Function.nodes/params, Echo.nodes
+    - 各节点 fields 属性包含字段名列表
+    """
+    callback(node)
+
+    # 优先处理已知的容器属性
+    if hasattr(node, 'nodes') and isinstance(node.nodes, list):
+        for child in node.nodes:
+            if hasattr(child, 'lineno'):
+                _walk_php_ast_nodes(child, callback)
+    if hasattr(node, 'params') and isinstance(node.params, list):
+        for child in node.params:
+            if hasattr(child, 'lineno'):
+                _walk_php_ast_nodes(child, callback)
+    if hasattr(node, 'else_') and node.else_ is not None:
+        _walk_php_ast_nodes(node.else_, callback)
+
+    # 通用递归：遍历 fields 中值为节点或列表的属性
+    if hasattr(node, 'fields') and isinstance(node.fields, list):
+        for field_name in node.fields:
+            if field_name in ('nodes', 'params', 'else_', 'fields'):
+                continue
+            try:
+                child = getattr(node, field_name, None)
+            except Exception:
+                continue
+            if child is None:
+                continue
+            if isinstance(child, list):
+                for item in child:
+                    if hasattr(item, 'lineno'):
+                        _walk_php_ast_nodes(item, callback)
+            elif hasattr(child, 'lineno'):
+                _walk_php_ast_nodes(child, callback)
+
+
 def find_sinks(sink_names, files):
     """
     AST-based sink 查找。遍历所有文件的 AST 节点，查找匹配的函数调用。
@@ -3323,10 +3366,9 @@ def find_sinks(sink_names, files):
         if not all_nodes:
             continue
 
-        call_count = 0
-        for node in all_nodes:
+        def _on_call_node(node):
             if not isinstance(node, _FUNCTION_CALL_TYPES):
-                continue
+                return
 
             matched = _match_call_node(node, sink_names)
             if matched:
@@ -3340,6 +3382,9 @@ def find_sinks(sink_names, files):
                     'matched_sink': matched['matched_sink'],
                     'callback_callee': matched['callback_callee'],
                 })
+
+        for top_node in all_nodes:
+            _walk_php_ast_nodes(top_node, _on_call_node)
 
     return results
 
