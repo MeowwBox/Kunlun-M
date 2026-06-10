@@ -3490,15 +3490,71 @@ def _match_call_node(node, sink_names):
     return None
 
 
-def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], controlled_params=[], svid=0):
+def _handle_indirect_call(all_nodes, vul_lineno, indirect_map, repair_functions, controlled_params, file_path):
+    """
+    处理间接调用场景：在 AST 中定位 vul_lineno 处的 FunctionCall 节点，
+    用 indirect_map 确认是间接调用后，提取参数做可控性分析。
+
+    :param all_nodes: AST 节点列表（顶层）
+    :param vul_lineno: 漏洞行号
+    :param indirect_map: 间接调用映射 {变量名: sink函数名}
+    :param repair_functions: 修复函数列表
+    :param controlled_params: 可控参数列表
+    :param file_path: 文件路径
+    :return: list[dict] scan_results 格式的结果列表，或 None
+    """
+    global scan_results
+
+    target_node = None
+
+    def _find_at_line(node):
+        nonlocal target_node
+        if target_node is not None:
+            return
+        if not isinstance(node, _FUNCTION_CALL_TYPES):
+            return
+        if int(node.lineno) != int(vul_lineno):
+            return
+        if isinstance(node.name, php.Variable):
+            var_name = node.name.name  # e.g. '$func'
+            if var_name in indirect_map:
+                target_node = node
+
+    for top_node in all_nodes:
+        _walk_php_ast_nodes(top_node, _find_at_line)
+        if target_node is not None:
+            break
+
+    if target_node is None:
+        return None
+
+    # 提取参数做可控性分析
+    func_params = get_all_functioncall_params(target_node)
+    saved_results = list(scan_results)
+    scan_results.clear()
+
+    for param in func_params:
+        if isinstance(param, php.Variable):
+            back_node = []
+            analysis_variable_node(param, back_node, None, vul_lineno, func_params, file_path=file_path)
+            if scan_results:
+                return scan_results
+
+    scan_results.clear()
+    scan_results.extend(saved_results)
+    return None
+
+
+def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], controlled_params=[], svid=0, indirect_map=None):
     """
     开始检测函数
     :param svid:
     :param controlled_params:
-    :param repair_functions: 
+    :param repair_functions:
     :param sensitive_func: 要检测的敏感函数,传入的为函数列表
     :param vul_lineno: 漏洞函数所在行号
     :param file_path: 文件路径
+    :param indirect_map: 间接调用映射 {变量名: sink函数名}
     :return:
     """
     try:
@@ -3522,6 +3578,14 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
             target_dir = ast_object.target_directory if hasattr(ast_object, 'target_directory') else ''
             if target_dir:
                 _source_registry = discover_sources(target_dir, ast_object)
+
+        # 间接调用快速路径
+        if indirect_map and isinstance(indirect_map, dict):
+            indirect_result = _handle_indirect_call(
+                all_nodes, vul_lineno, indirect_map, repair_functions, controlled_params, file_path
+            )
+            if indirect_result:
+                return indirect_result
 
         for func in sensitive_func:  # 循环判断代码中是否存在敏感函数，若存在，递归判断参数是否可控;对文件内容循环判断多次
             back_node = []
