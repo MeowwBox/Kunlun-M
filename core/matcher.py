@@ -699,7 +699,8 @@ class VulnerabilityMatcher(object):
                 try:
                     result = c_scan_parser(rule_match, self.line_number, self.file_path,
                                            repair_functions=self.repair_functions,
-                                           controlled_params=self.controlled_list, svid=self.cvi)
+                                           controlled_params=self.controlled_list, svid=self.cvi,
+                                           indirect_map=self.indirect_map)
                     logger.debug('[AST] [RET] {c}'.format(c=result))
                     if len(result) > 0:
                         parsed = self._parse_ast_result(result)
