@@ -3120,7 +3120,7 @@ def find_sinks(sink_names, files):
             callee_name, is_indirect = _extract_call_name_js(node)
 
             # 赋值追踪：Identifier callee 不匹配 sink 时，查找同名变量的赋值
-            if not is_indirect and callee_name and isinstance(node.callee, dict) and node.callee.get('type') == 'Identifier':
+            if not is_indirect and callee_name and hasattr(node.callee, 'type') and getattr(node.callee, 'type', '') == 'Identifier':
                 matched_any = any(
                     s.class_ is None and (callee_name == s.method or callee_name.endswith('.' + s.method))
                     for s in sink_names
@@ -3315,25 +3315,21 @@ def _handle_js_indirect_call(all_nodes, vul_lineno, indirect_map, repair_functio
         nonlocal target_node
         if target_node is not None:
             return
-        if not isinstance(node, dict):
+        if not hasattr(node, 'type') or getattr(node, 'type', '') != 'CallExpression':
             return
-        if node.get('type') != 'CallExpression':
+        loc = getattr(node, 'loc', None)
+        if not loc:
             return
-        loc = node.get('loc')
-        if not loc or not isinstance(loc, dict):
-            return
-        start = loc.get('start')
+        start = getattr(loc, 'start', None)
         if not start:
             return
-        if int(start.get('line', 0)) != target_line:
+        if int(getattr(start, 'line', 0)) != target_line:
             return
         # 检查 callee 是否在 indirect_map 中
-        callee = node.get('callee')
-        if isinstance(callee, dict):
-            callee_type = callee.get('type', '')
-            if callee_type == 'Identifier':
-                if callee.get('name') in indirect_map:
-                    target_node = node
+        callee = getattr(node, 'callee', None)
+        if callee and hasattr(callee, 'type') and getattr(callee, 'type', '') == 'Identifier':
+            if getattr(callee, 'name', '') in indirect_map:
+                target_node = node
 
     for top_node in all_nodes:
         _walk_ast_nodes(top_node, _find_at_line)
@@ -3344,14 +3340,14 @@ def _handle_js_indirect_call(all_nodes, vul_lineno, indirect_map, repair_functio
         return None
 
     # 提取参数做可控性分析
-    args = target_node.get('arguments', [])
+    args = getattr(target_node, 'arguments', []) or []
     for arg in args:
-        if not isinstance(arg, dict):
+        if not hasattr(arg, 'type'):
             continue
-        arg_type = arg.get('type', '')
+        arg_type = getattr(arg, 'type', '')
 
         if arg_type == 'Identifier':
-            arg_name = arg.get('name', '')
+            arg_name = getattr(arg, 'name', '')
             if _is_js_controllable(arg_name, controlled_params, file_path, target_line):
                 scan_results.append({
                     'code': 1,
