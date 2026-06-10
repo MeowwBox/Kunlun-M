@@ -1558,10 +1558,11 @@ def _handle_python_indirect_call(tree, vul_lineno, indirect_map, repair_function
 
     target_node = None
 
+    target_line = int(vul_lineno)
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        if node.lineno != vul_lineno:
+        if int(node.lineno) != target_line:
             continue
         # 检查 callee 是否在 indirect_map 中
         if isinstance(node.func, ast.Name):
