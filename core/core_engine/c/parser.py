@@ -2006,9 +2006,134 @@ def _collect_return_values(body_node):
 # scan_parser — 入口
 # ---------------------------------------------------------------------------
 
+def _handle_c_indirect_call(vul_lineno, indirect_map, repair_functions, controlled_params, file_path):
+    """
+    处理 C 间接调用场景：在 AST 中定位 vul_lineno 处的 call_expression 节点，
+    用 indirect_map 确认是间接调用后，提取参数做可控性分析。
+
+    :param vul_lineno: 漏洞行号
+    :param indirect_map: 间接调用映射 {变量名: sink函数名}
+    :param repair_functions: 修复函数列表
+    :param controlled_params: 可控参数列表
+    :param file_path: 文件路径
+    :return: list[dict] scan_results 格式的结果列表，或 None
+    """
+    global scan_results
+
+    try:
+        vul_lineno = int(vul_lineno)
+    except (ValueError, TypeError):
+        return None
+
+    ast_tree = _parse_c_ast(file_path)
+    if ast_tree is None:
+        return None
+
+    # 在 AST 中查找 vul_lineno 处的 call_expression
+    target_node = None
+    matched_sink_name = None
+
+    def _find_call_at_vul_line(node):
+        nonlocal target_node, matched_sink_name
+        if target_node is not None:
+            return
+        if node.type == 'call_expression':
+            node_line = node.start_point[0] + 1
+            if node_line == vul_lineno:
+                func_child = node.child_by_field_name('function')
+                if not func_child and node.children:
+                    func_child = node.children[0]
+                if func_child and func_child.type == 'identifier':
+                    func_name = _node_text(func_child)
+                    if func_name in indirect_map:
+                        target_node = node
+                        matched_sink_name = indirect_map[func_name]
+        for child in node.children:
+            _find_call_at_vul_line(child)
+
+    _find_call_at_vul_line(ast_tree.root_node)
+
+    if target_node is None:
+        return None
+
+    # 提取参数做可控性分析
+    ast_args = _get_call_args_from_ast(target_node)
+    if not ast_args:
+        return None
+
+    results = []
+    saved_results = list(scan_results)
+
+    for arg_idx, arg_node in enumerate(ast_args):
+        arg_text = _node_text(arg_node)
+
+        # 字面量 → 不可控
+        if _is_literal_node(arg_node):
+            continue
+
+        # 提取参数中的所有标识符
+        var_names = _collect_identifiers_from_ast(arg_node)
+
+        for var_name in var_names:
+            # 直接可控源
+            if _is_controllable_source(var_name, controlled_params):
+                source_lineno = vul_lineno
+                _, sl = _trace_variable_in_lines(
+                    file_path, var_name, vul_lineno, vul_lineno,
+                    repair_functions, controlled_params
+                )
+                if sl:
+                    source_lineno = sl
+
+                results.append({
+                    "code": 1,
+                    "vul_func": matched_sink_name,
+                    "param": var_name,
+                    "language": "c",
+                    "source_file": file_path,
+                    "source_lineno": source_lineno,
+                    "chain": [],
+                })
+                scan_results = results
+                return results
+
+            # 反向追踪
+            trace_code, src_lineno = _trace_variable_in_lines(
+                file_path, var_name, vul_lineno, vul_lineno,
+                repair_functions, controlled_params
+            )
+            if trace_code == 1:
+                results.append({
+                    "code": 1,
+                    "vul_func": matched_sink_name,
+                    "param": var_name,
+                    "language": "c",
+                    "source_file": file_path,
+                    "source_lineno": src_lineno if src_lineno else vul_lineno,
+                    "chain": [],
+                })
+                scan_results = results
+                return results
+            elif trace_code == 2:
+                results.append({
+                    "code": 2,
+                    "vul_func": matched_sink_name,
+                    "param": var_name,
+                    "language": "c",
+                    "source_file": file_path,
+                    "source_lineno": src_lineno if src_lineno else vul_lineno,
+                    "chain": [],
+                })
+                scan_results = results
+                return results
+
+    scan_results = saved_results
+    return None
+
+
 def scan_parser(rule_match, vul_lineno, file_path,
                 repair_functions=None, controlled_params=None,
-                svid=None, is_config_vuln=False):
+                svid=None, is_config_vuln=False, indirect_map=None):
     """C/C++ AST 扫描入口
 
     :param rule_match: 规则匹配的函数名列表
@@ -2061,6 +2186,15 @@ def scan_parser(rule_match, vul_lineno, file_path,
         return results
 
     logger.debug("[AST][C] Scanning line {}: {}".format(vul_lineno, line_text))
+
+    # ---- 间接调用快速路径 ----
+    if indirect_map and isinstance(indirect_map, dict):
+        indirect_result = _handle_c_indirect_call(
+            vul_lineno, indirect_map, repair_functions, controlled_params, file_path
+        )
+        if indirect_result:
+            scan_results = indirect_result
+            return indirect_result
 
     # 检查行中是否包含规则匹配的函数
     matched_func = None
