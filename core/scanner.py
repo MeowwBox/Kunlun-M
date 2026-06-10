@@ -419,7 +419,7 @@ class SingleRule(object):
                     if (hasattr(self.sr, 'vul_function') and
                         isinstance(self.sr.vul_function, list) and
                         len(self.sr.vul_function) > 0):
-                        sink_names = [_SinkName(class_=None, method=f.strip()) for f in self.sr.vul_function]
+                        sink_names = parse_sink_names('|'.join(self.sr.vul_function))
                     else:
                         sink_names = parse_sink_names(self.sr.match)
                     if sink_names:
