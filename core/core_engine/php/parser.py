@@ -3293,8 +3293,7 @@ def _init_function_summaries(file_path):
 
         _summaries_initialized = True
     except Exception as e:
-        logger.debug(f"[AST][PHP] 摘要初始化失败: {e}")
-        _summaries_initialized = True
+        logger.warning(f"[AST][PHP] 摘要初始化失败: {e}")
 
 
 def _walk_php_ast_nodes(node, callback):

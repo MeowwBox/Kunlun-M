@@ -3236,8 +3236,7 @@ def _init_function_summaries(file_path):
 
         _summaries_initialized = True
     except Exception as e:
-        logger.debug(f"[AST][JS] 摘要初始化失败: {e}")
-        _summaries_initialized = True
+        logger.warning(f"[AST][JS] 摘要初始化失败: {e}")
 
 
 def _judge_from_summary_js(summary, call_args):

@@ -1486,8 +1486,7 @@ def _init_function_summaries(file_path):
 
         _summaries_initialized = True
     except Exception as e:
-        logger.debug(f"[AST][Python] 摘要初始化失败: {e}")
-        _summaries_initialized = True
+        logger.warning(f"[AST][Python] 摘要初始化失败: {e}")
 
 
 def _is_controllable(var_name, controlled_params, file_path, vul_lineno):

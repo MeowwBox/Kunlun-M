@@ -129,7 +129,8 @@ def _parse_c_ast(file_path):
         tree = _ts_parser.parse(source)
         _ast_cache[file_path] = tree
         return tree
-    except Exception:
+    except Exception as e:
+        logger.warning(f"[AST][C] C AST 解析失败: file={file_path}, error={e}")
         return None
 
 
@@ -1297,8 +1298,7 @@ def _init_function_summaries(file_path):
 
         _summaries_initialized = True
     except Exception as e:
-        logger.debug("[AST][C] 摘要初始化失败: {}".format(e))
-        _summaries_initialized = True
+        logger.warning("[AST][C] 摘要初始化失败: {}".format(e))
 
 
 # ---------------------------------------------------------------------------
@@ -2170,6 +2170,17 @@ def scan_parser(rule_match, vul_lineno, file_path,
     code 含义：1=可控, 2=已修复, 3=未确认, 4=NewFunction, -1=不可控
     """
     global scan_results, is_repair_functions, is_controlled_params, scan_chain
+    # 清除上次扫描残留，重建 C_CONTROLLED_SOURCES 初始列表（防止跨项目污染）
+    global C_CONTROLLED_SOURCES
+    C_CONTROLLED_SOURCES = [
+        "argv", "argc",
+        "getenv", "secure_getenv",
+        "scanf", "fscanf", "sscanf",
+        "fgets", "gets", "getline", "getdelim",
+        "read", "fread", "recv", "recvfrom", "recvmsg",
+        "stdin", "STDIN_FILENO", "FILE stdin", "std::cin",
+        "cin",
+    ]
     _trace_cache.clear()
 
     if repair_functions is None:

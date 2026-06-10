@@ -1067,12 +1067,12 @@ def _init_function_summaries(file_path):
                     try:
                         with open(fp, 'r', encoding='utf-8', errors='ignore') as f:
                             files_dict[fp] = f.read()
-                    except:
+                    except Exception:
                         pass
         try:
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 files_dict[file_path] = f.read()
-        except:
+        except Exception:
             pass
 
         if files_dict:
@@ -1089,8 +1089,7 @@ def _init_function_summaries(file_path):
 
         _summaries_initialized = True
     except Exception as e:
-        logger.debug(f"[AST][Java] 摘要初始化失败: {e}")
-        _summaries_initialized = True
+        logger.warning(f"[AST][Java] 摘要初始化失败: {e}")
 
 
 def _find_method_at_line(tree, target_line):

@@ -240,8 +240,7 @@ def _init_function_summaries(file_path):
 
         _summaries_initialized = True
     except Exception as e:
-        logger.debug(f"[AST][Go] 摘要初始化失败: {e}")
-        _summaries_initialized = True
+        logger.warning(f"[AST][Go] 摘要初始化失败: {e}")
 
 
 # ---- tree-sitter AST 辅助函数 ----
@@ -615,7 +614,8 @@ def _parse_go_ast(file_path):
         tree = _ts_parser.parse(source)
         _ast_cache[file_path] = tree
         return tree
-    except Exception:
+    except Exception as e:
+        logger.warning(f"[AST][Go] Go AST 解析失败: file={file_path}, error={e}")
         return None
 
 
@@ -1778,6 +1778,23 @@ def scan_parser(rule_match, vul_lineno, file_path,
     :param indirect_map: 间接调用映射 {变量名: sink函数名}，用于替换行文本中的变量名做匹配
     :return: 扫描结果列表
     """
+    # 清除上次扫描残留，重建 GO_CONTROLLED_SOURCES 初始列表（防止跨项目污染）
+    global GO_CONTROLLED_SOURCES
+    GO_CONTROLLED_SOURCES = [
+        "r.URL.Query()", "r.FormValue", "r.PostFormValue",
+        "r.Header.Get", "r.Header.Get",
+        "r.Body", "r.URL.Path", "r.URL.RawPath",
+        "r.Host", "r.RemoteAddr", "r.UserAgent",
+        "r.Referer", "r.Method",
+        "os.Args", "os.Getenv",
+        "flag.String", "flag.Int", "flag.Bool",
+        "gin.Default", "c.Query", "c.Param", "c.PostForm",
+        "c.ShouldBind", "c.ShouldBindJSON", "c.ShouldBindQuery",
+        "c.GetHeader", "c.GetCookie",
+        "echo.QueryParams", "echo.FormValue",
+        "fiber.Query", "fiber.Params", "fiber.Body",
+        "beego.Input", "beego.GetString", "beego.GetStrings",
+    ]
     _trace_cache.clear()
 
     if repair_functions is None:
