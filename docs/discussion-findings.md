@@ -215,6 +215,14 @@ except Exception as e:
 
 将过滤函数判定逻辑从 tamper/is_repair/builtin 中独立出来，统一为一个 `filter_functions` 模块。
 
+✅ **已完成（2026-06-12）**：三层体系已实现（commit ea6366f/d69e414/153d6b1）
+- `core/filter_functions.py` — FilterFunctionRegistry，L1/L2/L3 数据结构 + 查询接口
+- L1 (builtin): 从 IS_REPAIR_DEFAULT 加载，精确函数名 → CVI 集合
+- L2 (summary): `_trace_function_return` 分析函数定义时自动继承 safe_for
+- L3 (rule): CVI 规则通过 `extra_repair_functions` 属性追加
+- 修复 Python/Go/C 的 `rf in expr_str` 字符串包含误判 → 精确匹配
+- matcher 同时维护 `repair_functions` 列表（兼容现有 scan_parser 接口）
+
 #### 三层加载机制
 
 **第一层：内置表（builtin）**
