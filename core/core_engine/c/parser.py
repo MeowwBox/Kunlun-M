@@ -2677,6 +2677,9 @@ def find_sinks(sink_names, files):
                                     if sink.class_ is None and val_text == sink.method:
                                         var_to_sink[var_name] = sink
                                         break
+                                # 多层间接调用：右侧 identifier 在 var_to_sink 中则继承
+                                if val_text in var_to_sink and var_name not in var_to_sink:
+                                    var_to_sink[var_name] = var_to_sink[val_text]
                             elif value_node.type == 'call_expression':
                                 # cast 赋值: func = (int (*)(const char *))system
                                 # call_expression 的 function 可能是 cast
@@ -2698,7 +2701,7 @@ def find_sinks(sink_names, files):
                         val_text = _node_text(right_node)
                         if right_node.type == 'identifier':
                             # func = printf; -> 重新赋值
-                            # 如果右侧是 sink，更新映射；否则清除映射
+                            # 如果右侧是 sink，更新映射；否则检查多层传播
                             found_sink = None
                             for sink in sink_names:
                                 if sink.class_ is None and val_text == sink.method:
@@ -2706,6 +2709,9 @@ def find_sinks(sink_names, files):
                                     break
                             if found_sink:
                                 var_to_sink[var_name] = found_sink
+                            elif val_text in var_to_sink:
+                                # 多层间接调用：右侧 identifier 在 var_to_sink 中则继承
+                                var_to_sink[var_name] = var_to_sink[val_text]
                             elif var_name in var_to_sink:
                                 # 重新赋值为非 sink，清除映射
                                 del var_to_sink[var_name]

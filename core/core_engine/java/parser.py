@@ -2093,6 +2093,24 @@ def find_sinks(sink_names, files):
                         var_name = ancestor.declarators[0].name
                         assignment_map[var_name] = method_name
                         break
+
+            # 多层间接调用：收集变量到变量的赋值链
+            # rt2 = rt → assignment_map['rt2'] = assignment_map.get('rt')
+            try:
+                for lvd_path, lvd_node in _nodes.filter(javalang.tree.LocalVariableDeclaration):
+                    for decl in (lvd_node.declarators or []):
+                        if hasattr(decl, 'name') and hasattr(decl, 'initializer') and decl.initializer:
+                            init = decl.initializer
+                            # init 是 MemberReference 时, member 可能是已有映射的变量名
+                            if isinstance(init, javalang.tree.MemberReference):
+                                inner_name = init.member
+                                if inner_name in assignment_map:
+                                    assignment_map[decl.name] = assignment_map[inner_name]
+                            # init 是字符串变量名
+                            elif isinstance(init, str) and init in assignment_map:
+                                assignment_map[decl.name] = assignment_map[init]
+            except Exception:
+                pass
         except Exception:
             pass
 

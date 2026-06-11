@@ -3011,8 +3011,10 @@ def _check_js_indirect_assignment(var_name, sink_names, all_nodes):
     """
     sink_method_set = {s.method for s in sink_names if s.class_ is None}
 
-    def _walk_and_check(node):
+    def _walk_and_check(node, visited=None):
         """递归遍历节点查找变量声明和赋值"""
+        if visited is None:
+            visited = set()
         if not hasattr(node, 'type'):
             return False
         node_type = getattr(node, 'type', '')
@@ -3028,6 +3030,14 @@ def _check_js_indirect_assignment(var_name, sink_names, all_nodes):
                         init = getattr(decl, 'init', None)
                         if _check_value_is_sink(init, sink_method_set):
                             return True
+                        # 多层间接调用递归: func2 = func → 查找 func = eval
+                        if hasattr(init, 'type') and init.type == 'Identifier':
+                            inner_name = init.name
+                            if inner_name not in visited:
+                                visited.add(inner_name)
+                                for top_node in all_nodes:
+                                    if _check_js_indirect_assignment_inner(inner_name, sink_method_set, [top_node], visited):
+                                        return True
 
         # AssignmentExpression: f = <expr>
         if node_type == 'AssignmentExpression':
@@ -3037,6 +3047,14 @@ def _check_js_indirect_assignment(var_name, sink_names, all_nodes):
                     right = getattr(node, 'right', None)
                     if _check_value_is_sink(right, sink_method_set):
                         return True
+                    # 多层间接调用递归: func2 = func → 查找 func = eval
+                    if hasattr(right, 'type') and right.type == 'Identifier':
+                        inner_name = right.name
+                        if inner_name not in visited:
+                            visited.add(inner_name)
+                            for top_node in all_nodes:
+                                if _check_js_indirect_assignment_inner(inner_name, sink_method_set, [top_node], visited):
+                                    return True
 
         # 递归遍历子节点（通过属性遍历，跳过非节点属性）
         for attr_name in dir(node):
@@ -3083,6 +3101,50 @@ def _check_value_is_sink(value_node, sink_method_set):
         callee = getattr(value_node, 'callee', None)
         if hasattr(callee, 'type') and getattr(callee, 'type', '') == 'MemberExpression':
             return _check_value_is_sink(callee, sink_method_set)
+
+    return False
+
+
+def _check_js_indirect_assignment_inner(var_name, sink_method_set, all_nodes, visited):
+    """递归解析间接调用赋值链: func2 = func → func = eval → 匹配 sink"""
+    if var_name in visited:
+        return False
+
+    for top_node in all_nodes:
+        if not hasattr(top_node, 'type'):
+            continue
+        node_type = getattr(top_node, 'type', '')
+
+        if node_type == 'VariableDeclaration':
+            for decl in getattr(top_node, 'declarations', []):
+                if not hasattr(decl, 'type'):
+                    continue
+                decl_id = getattr(decl, 'id', None)
+                if hasattr(decl_id, 'type') and getattr(decl_id, 'type', '') == 'Identifier':
+                    if getattr(decl_id, 'name', None) == var_name:
+                        init = getattr(decl, 'init', None)
+                        if _check_value_is_sink(init, sink_method_set):
+                            return True
+                        if hasattr(init, 'type') and init.type == 'Identifier':
+                            inner_name = init.name
+                            if inner_name not in visited:
+                                visited.add(inner_name)
+                                if _check_js_indirect_assignment_inner(inner_name, sink_method_set, all_nodes, visited):
+                                    return True
+
+        if node_type == 'AssignmentExpression':
+            left = getattr(top_node, 'left', None)
+            if hasattr(left, 'type') and getattr(left, 'type', '') == 'Identifier':
+                if getattr(left, 'name', None) == var_name:
+                    right = getattr(top_node, 'right', None)
+                    if _check_value_is_sink(right, sink_method_set):
+                        return True
+                    if hasattr(right, 'type') and right.type == 'Identifier':
+                        inner_name = right.name
+                        if inner_name not in visited:
+                            visited.add(inner_name)
+                            if _check_js_indirect_assignment_inner(inner_name, sink_method_set, all_nodes, visited):
+                                return True
 
     return False
 

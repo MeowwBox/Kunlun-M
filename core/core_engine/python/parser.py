@@ -1593,6 +1593,30 @@ def _handle_python_indirect_call(tree, vul_lineno, indirect_map, repair_function
     return None
 
 
+def _resolve_indirect_chain(tree, var_name, sink_names, visited=None):
+    """递归解析间接调用赋值链: func2 = func → func = os.system → 匹配 sink"""
+    if visited is None:
+        visited = set()
+    if var_name in visited:
+        return False
+    visited.add(var_name)
+
+    for assign_node in ast.walk(tree):
+        if not isinstance(assign_node, ast.Assign):
+            continue
+        for target in assign_node.targets:
+            if isinstance(target, ast.Name) and target.id == var_name:
+                value = assign_node.value
+                # 直接匹配: func = os.system
+                result = _check_indirect_assignment(value, sink_names, var_name)
+                if result:
+                    return True
+                # 递归: func = func2 → 查找 func2 的赋值
+                if isinstance(value, ast.Name):
+                    return _resolve_indirect_chain(tree, value.id, sink_names, visited)
+    return False
+
+
 def _check_indirect_assignment(value_node, sink_names, var_name):
     """
     检查赋值右侧是否包含间接调用 sink 的模式。
@@ -1693,6 +1717,12 @@ def find_sinks(sink_names, files):
                                 if indirect_callee_name:
                                     is_indirect = True
                                     break
+                                # 多层间接调用递归: func2 = func → 查找 func = os.system
+                                if isinstance(value, ast.Name):
+                                    resolved = _resolve_indirect_chain(tree, value.id, sink_names)
+                                    if resolved:
+                                        is_indirect = True
+                                        break
                         if is_indirect:
                             break
             elif isinstance(func, ast.Attribute):
