@@ -1994,14 +1994,8 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
             for arg in (node.args or []):
                 arg_str = _expr_to_str(arg)
 
-                # 直接检查参数是否是可控源（含传播后的变量）
-                if is_controllable(arg_str, extended_controlled):
-                    source_ln = target_line
-                    chain = ["{}:{}".format(source_ln, source_lines[source_ln - 1].strip() if source_ln <= len(source_lines) else arg_str)]
-                    scan_results.append({"code": 1, "chain": chain, "source": arg_str})
-                    break
-
-                # 如果参数是函数调用，直接走 _trace_expr 追踪（Source Discovery 支持）
+                # 如果参数是函数调用，先走 _trace_expr 追踪（Source Discovery 支持）
+                # 必须在 is_controllable 之前，否则 safe 修复函数（如 shlex.quote）会被字符串匹配误判为可控
                 if isinstance(arg, ast.Call):
                     call_name = _get_call_name(arg)
                     func_def = _find_function_def(tree, call_name) if call_name else None
@@ -2040,6 +2034,23 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
                             chain = ["{}:{}".format(source_ln, source_lines[source_ln - 1].strip() if source_ln <= len(source_lines) else arg_str)]
                             scan_results.append({"code": 2, "chain": chain, "source": result[1]})
                             break
+                    else:
+                        # 当前文件和跨文件都找不到函数定义，检查 builtin 知识库
+                        if call_name:
+                            builtin_info = lookup_builtin(call_name)
+                            if builtin_info and builtin_info.get('safe'):
+                                logger.debug("[AST][Python] Builtin safe function in arg: {}".format(call_name))
+                                source_ln = target_line
+                                chain = ["{}:{}".format(source_ln, source_lines[source_ln - 1].strip() if source_ln <= len(source_lines) else arg_str)]
+                                scan_results.append({"code": 2, "chain": chain, "source": call_name})
+                                break
+
+                # 直接检查参数是否是可控源（含传播后的变量）
+                if is_controllable(arg_str, extended_controlled):
+                    source_ln = target_line
+                    chain = ["{}:{}".format(source_ln, source_lines[source_ln - 1].strip() if source_ln <= len(source_lines) else arg_str)]
+                    scan_results.append({"code": 1, "chain": chain, "source": arg_str})
+                    break
 
                 # 收集参数中的变量名，反向追踪
                 arg_names = _collect_names(arg)

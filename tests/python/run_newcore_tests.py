@@ -65,6 +65,11 @@ test_cases = [
              'CVI-7000 os.system: getattr class method indirect call',
              ['CVI-7000'],
              ['func(user_input)']),
+
+            # subprocess + shlex.quote 修复 — 不应检出
+            ('37_subprocess_safe.py', False,
+             'No detection: subprocess.call(shlex.quote(user_input)) is safe',
+             []),
 ]
 
 
