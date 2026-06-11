@@ -13,10 +13,34 @@ output_dir = os.path.join(test_dir, '_newcore_output')
 
 
 test_cases = [
+            # 跨文件 import: process_command(user_input) → os.system(cmd)
             ('13b_cross_file_eval_main.py', True,
-             'CVI-7000 os.system: runCommand via cross-file',
+             'CVI-7000 os.system: process_command via cross-file',
              ['CVI-7000'],
              ['process_command']),
+
+            # 间接调用: globals().get('os.system')(user_input)
+            ('30_indirect_exec.py', True,
+             'CVI-7000 os.system: globals() indirect call',
+             ['CVI-7000'],
+             ['func(user_input)']),
+
+            # 间接调用但参数硬编码: func('ls -la') — 不应检出
+            ('31_indirect_safe.py', False,
+             'No detection: indirect call with hardcoded arg',
+             []),
+
+            # 多层间接调用: func=os.system, func2=func, func2(user_input)
+            ('32_indirect_multilevel.py', True,
+             'CVI-7000 os.system: multi-level indirect chain',
+             ['CVI-7000'],
+             ['func2(user_input)']),
+
+            # 跨文件 import 追踪: sanitize 修复 → os.system(cmd) 不检出, passthrough 透传 → eval(data) 检出
+            ('cross_file_main.py', True,
+             'CVI-7001 eval: passthrough via cross-file; CVI-7000 os.system suppressed by sanitize',
+             ['CVI-7001'],
+             ['eval(data)']),
 ]
 
 
