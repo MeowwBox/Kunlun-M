@@ -76,7 +76,7 @@ NewCore 是**独立的机制**，和回溯分析不在一条路上。
 
 - 位置：`core/core_engine/go/parser.py` 第 641-729 行
 - 现状：函数有完整的 import 解析和本地包判定逻辑，但从未被任何地方调用
-- 关联：此问题与 1.4.3 属同一类别（import 解析未接入），但 Go 的引用递归分析缺失更根本（1.4.1 中回溯路径本身就有问题）
+- 分析（2026-06-12）：`_parse_go_imports` 的功能（import 别名 → 本地文件映射）已被 `_build_func_def_index_cross_file` 覆盖（全局扫描所有 Go 文件构建函数索引）。跨包调用不工作的**实际根因是 NewCore 的 grep 正则不支持包前缀**（如 `helpers.ExecuteCommand`），已在 commit c16ebe3 中修复。`_parse_go_imports` 属于冗余代码，可在后续清理中删除。
 
 ### 1.5 无问题的语言
 
