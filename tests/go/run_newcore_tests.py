@@ -39,6 +39,12 @@ test_cases = [
      'CVI-8001 exec.Command: multi-level indirect call (cmdFunc := exec.Command -> cmdFunc2 := cmdFunc -> cmdFunc2())',
      ['CVI-8001'],
      ['cmdFunc2']),
+
+    # 跨包 import 调用（不同 package）
+    ('26b_cross_pkg_main.go', True,
+     'CVI-8001 exec.Command: cross-package helpers.ExecuteCommand(userInput)',
+     ['CVI-8001'],
+     ['helpers.ExecuteCommand', 'userInput']),
 ]
 
 
