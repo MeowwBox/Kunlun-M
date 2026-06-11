@@ -21,6 +21,7 @@ from core.core_engine.python.parser import scan_parser as python_scan_parser
 from core.core_engine.go.parser import scan_parser as go_scan_parser
 from core.core_engine.c.parser import scan_parser as c_scan_parser
 
+from core.filter_functions import load_builtin, get_repair_functions, clear_runtime
 from .cast import CAST
 from .filters import VulnerabilityFilter
 from Kunlun_M import const
@@ -104,8 +105,12 @@ class VulnerabilityMatcher(object):
     def init_php_repair(self):
         """
         初始化修复函数规则
+        同时将 repair_dict 注册到 filter_functions 三层体系的 L1 层
         :return:
         """
+        # 清除上一次的运行时数据（L2/L3），保留 L1
+        clear_runtime()
+
         if self.lan == "php":
             a = __import__('rules.tamper.demo', fromlist=['PHP_IS_REPAIR_DEFAULT'])
             self.repair_dict = getattr(a, 'PHP_IS_REPAIR_DEFAULT')
@@ -134,6 +139,17 @@ class VulnerabilityMatcher(object):
             b = __import__("rules.tamper.demo_go", fromlist=["GO_IS_CONTROLLED_DEFAULT"])
             self.controlled_list = getattr(b, "GO_IS_CONTROLLED_DEFAULT")
 
+        elif self.lan == "javascript":
+            a = __import__("rules.tamper.demo_nodejs", fromlist=["JS_IS_REPAIR_DEFAULT"])
+            self.repair_dict = getattr(a, "JS_IS_REPAIR_DEFAULT")
+
+            b = __import__("rules.tamper.demo_nodejs", fromlist=["JS_IS_CONTROLLED_DEFAULT"])
+            self.controlled_list = getattr(b, "JS_IS_CONTROLLED_DEFAULT")
+
+        elif self.lan == "c":
+            self.repair_dict = {}
+            self.controlled_list = []
+
         # 如果指定加载某个tamper，那么无视语言
         if self.tamper_name is not None:
             try:
@@ -151,10 +167,14 @@ class VulnerabilityMatcher(object):
             except ImportError:
                 logger.warning('[AST][INIT] tamper_name init error... No module named {}'.format(self.tamper_name))
 
-        # init
-        for key in self.repair_dict:
-            if self.single_rule.svid in self.repair_dict[key]:
-                self.repair_functions.append(key)
+        # 注册到 filter_functions L1（仅首次）
+        from core.filter_functions import stats
+        if not stats().get(self.lan, {}).get("L1_builtin", 0):
+            load_builtin(self.lan, self.repair_dict)
+
+        # 兼容：按 svid 过滤生成 repair_functions 列表
+        # scan_parser 仍通过此列表传递 repair_functions 参数
+        self.repair_functions = get_repair_functions(self.lan, self.single_rule.svid)
 
     def scan(self):
         """

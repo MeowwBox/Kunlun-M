@@ -360,15 +360,22 @@ def is_controllable(expr_str, controlled_params=None):
 
 
 def is_repair(expr_str, repair_functions=None):
-    """检查表达式字符串是否包含修复函数"""
+    """
+    检查表达式是否经过修复函数 — 精确匹配函数名。
+
+    不再使用 'rf in expr_str' 字符串包含匹配（会导致 'int' 误匹配 'parseInt' 等）。
+    改为：repair_functions 是精确函数名列表，检查 expr_str 的最外层调用名是否在列表中。
+    """
     if repair_functions is None:
         repair_functions = is_repair_functions
 
     if not repair_functions:
         return False
 
+    # repair_functions 是 filter_functions 精确函数名集合，直接精确匹配
     for rf in repair_functions:
-        if rf in expr_str:
+        # 精确匹配：要么 expr_str 就是函数名，要么 expr_str 以 "func_name(" 开头
+        if expr_str == rf or expr_str.startswith(rf + "(") or expr_str.startswith(rf + "."):
             return True
     return False
 

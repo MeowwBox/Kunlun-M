@@ -1153,12 +1153,19 @@ def _is_controllable_source(expr_str, controlled_params=None):
 
 
 def _is_repair_function(expr_str, repair_functions=None):
-    """检查表达式是否包含修复函数"""
+    """
+    检查表达式是否包含修复函数 — 精确匹配函数名。
+    Go 修复函数名格式为 "pkg.Func"（如 "html.EscapeString"）。
+    """
     if repair_functions is None:
         repair_functions = is_repair_functions
 
+    if not repair_functions:
+        return False
+
     for rf in repair_functions:
-        if rf in expr_str:
+        # 精确匹配：expr_str 就是函数名、或以 "func_name(" 开头
+        if expr_str == rf or expr_str.startswith(rf + "("):
             return True
     return False
 

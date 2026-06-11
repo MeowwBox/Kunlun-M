@@ -1178,18 +1178,24 @@ def _is_controllable_source(expr_str, controlled_params=None):
 
 
 def _is_repair_function(expr_str, repair_functions=None):
-    """检查表达式是否包含修复函数。"""
+    """
+    检查表达式是否包含修复函数 — 精确匹配函数名。
+    """
     if repair_functions is None:
         repair_functions = is_repair_functions
 
+    if not repair_functions:
+        pass  # 继续检查 builtin
+
     for rf in repair_functions:
-        if rf in expr_str:
+        # 精确匹配：expr_str 就是函数名、或以 "func_name(" 开头
+        if expr_str == rf or expr_str.startswith(rf + "("):
             return True
 
-    # 也检查 builtin_knowledge 中标记 safe 的函数
+    # 也检查 builtin_knowledge 中标记 safe 的函数（精确匹配）
     for func_name in _BUILTIN_KNOWLEDGE:
         knowledge = _BUILTIN_KNOWLEDGE[func_name]
-        if knowledge.get("safe") and func_name in expr_str:
+        if knowledge.get("safe") and (expr_str == func_name or expr_str.startswith(func_name + "(")):
             return True
 
     return False
