@@ -41,6 +41,30 @@ test_cases = [
              'CVI-7001 eval: passthrough via cross-file; CVI-7000 os.system suppressed by sanitize',
              ['CVI-7001'],
              ['eval(data)']),
+
+            # exec 直接调用
+            ('33_exec_direct.py', True,
+             'CVI-7001 exec: direct call with user input',
+             ['CVI-7001'],
+             ['exec(user_input)']),
+
+            # eval 直接调用
+            ('34_eval_direct.py', True,
+             'CVI-7001 eval: direct call with user input',
+             ['CVI-7001'],
+             ['eval(user_input)']),
+
+            # 跨文件 import + 条件调用
+            ('35_import_conditional.py', True,
+             'CVI-7000 os.system: import utils with conditional call',
+             ['CVI-7000'],
+             ['process_command(user_input)']),
+
+            # getattr 类方法间接调用
+            ('36_getattr_method.py', True,
+             'CVI-7000 os.system: getattr class method indirect call',
+             ['CVI-7000'],
+             ['func(user_input)']),
 ]
 
 
