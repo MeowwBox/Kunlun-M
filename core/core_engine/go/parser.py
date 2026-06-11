@@ -821,10 +821,10 @@ def _collect_identifiers_from_ast(node):
             if n.children and n.children[0].type == 'identifier':
                 base_name = n.children[0].text.decode('utf-8', errors='ignore')
                 identifiers.append(base_name)
-            # 也收集完整表达式文本（如 r.URL.Query）
+            # 也收集完整表达式文本（如 os.Args, r.URL.Query）
             full_text = n.text.decode('utf-8', errors='ignore')
             if full_text not in identifiers:
-                pass  # 不收集完整链式表达式，只收集基础变量
+                identifiers.append(full_text)
             # 递归处理子节点（可能包含 call_expression）
             for child in n.children:
                 _walk(child)
@@ -2048,6 +2048,15 @@ def _find_indirect_calls_in_func(block_node, sink_names, file_path):
                 if left_ids and right_sink:
                     for var_name in left_ids:
                         var_to_sink[var_name] = right_sink
+                elif left_ids and not right_sink and right_expr_list:
+                    # 多层间接调用：右侧是 identifier 且在 var_to_sink 中，继承映射
+                    for sub in right_expr_list.children:
+                        if sub.type == 'identifier':
+                            id_text = sub.text.decode('utf-8', errors='ignore')
+                            if id_text in var_to_sink:
+                                for var_name in left_ids:
+                                    var_to_sink[var_name] = var_to_sink[id_text]
+                            break  # 只检查第一个 identifier
 
                 # 检查右侧 expression_list 中嵌套的间接调用
                 if right_expr_list and var_to_sink:
@@ -2097,9 +2106,28 @@ def _find_indirect_calls_in_func(block_node, sink_names, file_path):
                     for var_name in left_ids:
                         var_to_sink[var_name] = right_sink
                 elif left_ids and not right_sink:
-                    # 新的赋值不匹配 sink，清除旧映射
-                    for var_name in left_ids:
-                        var_to_sink.pop(var_name, None)
+                    # 多层间接调用：仅检查右侧 expression_list 的 identifier 是否在 var_to_sink 中
+                    propagated = False
+                    if len(expr_lists) >= 2:
+                        # 左右分离：只检查右侧
+                        right_exprs = expr_lists[1:]
+                    elif len(expr_lists) == 1:
+                        # 只有一个 expr_list（可能是左侧单 identifier 的情况），不检查
+                        right_exprs = []
+                    else:
+                        right_exprs = []
+                    for expr_list in right_exprs:
+                        for sub in expr_list.children:
+                            if sub.type == 'identifier':
+                                id_text = sub.text.decode('utf-8', errors='ignore')
+                                if id_text in var_to_sink:
+                                    for var_name in left_ids:
+                                        var_to_sink[var_name] = var_to_sink[id_text]
+                                    propagated = True
+                                break
+                    if not propagated:
+                        for var_name in left_ids:
+                            var_to_sink.pop(var_name, None)
 
                 # 检查右侧 expression_list 中嵌套的间接调用
                 if right_expr_list and var_to_sink:

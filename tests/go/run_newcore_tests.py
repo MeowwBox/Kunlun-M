@@ -34,6 +34,11 @@ test_cases = [
     ('24_indirect_reassign.go', False,
      'CVI-8001 exec.Command: indirect call after reassignment (should NOT detect)',
      [], []),
+    # 多层间接调用
+    ('25_indirect_multilevel.go', True,
+     'CVI-8001 exec.Command: multi-level indirect call (cmdFunc := exec.Command -> cmdFunc2 := cmdFunc -> cmdFunc2())',
+     ['CVI-8001'],
+     ['cmdFunc2']),
 ]
 
 

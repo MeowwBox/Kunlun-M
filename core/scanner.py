@@ -699,6 +699,8 @@ class SingleRule(object):
                             cvi=self.sr.svid))
                     self.rule_vulnerabilities.append(vulnerability)
                 else:
+                    if index in indirect_indices:
+                        pass  # 间接调用 CAST 失败，静默跳过
                     if reason == 'New Core':  # 新的规则
 
                         logger.debug('[CVI-{cvi}] [NEW-VUL] New Rules init'.format(cvi=self.sr.svid))
