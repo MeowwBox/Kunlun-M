@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 from utils.api import *
 
-
-class CVI_6063():
+class CVI_6063(SingleRuleMixin):
     """
     Fastjson 1.2.68-1.2.80 autoType safeMode 绕过
     """
@@ -10,9 +9,7 @@ class CVI_6063():
         self.svid = 6063
         self.language = "java"
         self.vulnerability = "Fastjson safeMode 绕过 RCE"
-        self.author = "Kunlun-M"
         self.level = 7
-        self.status = True
         self.description = "Fastjson 1.2.68引入safeMode但有绕过,1.2.80之前版本仍存在expectClass利用链"
 
         self.match_mode = "framework-dependency"
@@ -31,9 +28,4 @@ class CVI_6063():
         self.config_patterns = []
         self.exclude_patterns = []
 
-        self.match_name = None
-        self.black_list = None
-        self.keyword = None
-        self.unmatch = None
-        self.vul_function = None
         self.main = None

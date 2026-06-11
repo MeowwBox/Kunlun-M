@@ -12,8 +12,7 @@
 import re
 from utils.api import *
 
-
-class CVI_3101():
+class CVI_3101(SingleRuleMixin):
     """
     Node.js 路径穿越规则
     匹配 fs 文件系统操作函数，用户可控路径可能导致路径穿越
@@ -22,27 +21,13 @@ class CVI_3101():
     def __init__(self):
         self.svid = 3101
         self.language = "javascript"
-        self.author = "KunLun-M"
         self.vulnerability = "路径穿越"
         self.description = "使用了文件系统操作函数（fs.readFile、fs.writeFile、fs.readFileSync等）且路径参数可能受用户控制，可能导致路径穿越漏洞。建议对用户输入的路径进行规范化处理（path.resolve）并校验是否在允许的目录范围内。"
         self.level = 7
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "function-param-regex"
         self.match = r"readFileSync\s*\(|readFile\s*\(|writeFileSync\s*\(|writeFile\s*\(|appendFileSync\s*\(|appendFile\s*\(|createReadStream\s*\(|createWriteStream\s*\(|openSync\s*\(|open\s*\(|unlinkSync\s*\(|unlink\s*\(|readdirSync\s*\(|readdir\s*\(|renameSync\s*\(|rename\s*\("
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
-        # for regex
-        self.unmatch = None
 
         self.vul_function = [
             "readFileSync", "readFile", "writeFileSync", "writeFile",

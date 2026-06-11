@@ -12,8 +12,7 @@
 import re
 from utils.api import *
 
-
-class CVI_9004():
+class CVI_9004(SingleRuleMixin):
     """
     C/C++ 路径穿越规则
     匹配 fopen、remove、rename、access、unlink、openat 等文件操作函数
@@ -23,27 +22,13 @@ class CVI_9004():
     def __init__(self):
         self.svid = 9004
         self.language = "c"
-        self.author = "KunLun-M"
         self.vulnerability = "路径穿越"
         self.description = "使用了文件操作函数（fopen、remove、rename、access、unlink、openat等），且路径参数可能受用户控制，可能导致路径穿越漏洞。攻击者可利用 ../ 序列访问预期目录之外的文件。建议对用户输入进行路径规范化校验，限制在安全目录内。"
         self.level = 8
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "function-param-regex"
         self.match = r"\bfopen\s*\(|\bremove\s*\(|\brename\s*\(|\baccess\s*\(|\bunlink\s*\(|\bopenat\s*\("
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
-        # for regex
-        self.unmatch = None
 
         self.vul_function = ["fopen", "remove", "rename", "access", "unlink", "openat"]
 

@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 from utils.api import *
 
-
-class CVI_7002():
+class CVI_7002(SingleRuleMixin):
     """
     Python SQL 注入
     覆盖: cursor.execute, Django ORM raw/extra, SQLAlchemy, psycopg2 等
@@ -10,17 +9,11 @@ class CVI_7002():
     def __init__(self):
         self.svid = 7002
         self.language = "python"
-        self.author = "LoRexxar"
         self.vulnerability = "SQL注入"
         self.description = "使用了可能存在SQL注入风险的数据库操作函数"
         self.level = 7
-        self.status = True
         self.match_mode = "function-param-regex"
         self.match = r"cursor\.execute|connection\.execute|session\.execute|engine\.execute|db\.execute|\.raw\(|\.extra\(|RawSQL\(|cursor\.executemany|connection\.cursor|text\(|\.from_statement\("
-        self.match_name = None
-        self.black_list = None
-        self.keyword = None
-        self.unmatch = None
         self.vul_function = ["execute", "cursor.execute", "raw", "extra"]
 
     def main(self, regex_string):

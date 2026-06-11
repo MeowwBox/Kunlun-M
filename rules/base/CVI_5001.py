@@ -11,8 +11,7 @@
 
 from utils.api import *
 
-
-class CVI_5001():
+class CVI_5001(SingleRuleMixin):
     """
     rule class
     """
@@ -20,29 +19,16 @@ class CVI_5001():
     def __init__(self):
         self.svid = 5001
         self.language = "base"
-        self.author = "LoRexxar"
         self.vulnerability = "硬编码密码"
         self.description = "密码不应硬编码在代码当中，而是应该通过配置文件或更安全的方式引入。"
         self.level = 2
-
-        # status
-        self.status = True
 
         # 部分配置
         self.match_mode = "only-regex"
         self.match = ['((password)\\b[\'"]?\\s*[:=(,]+\\s*[\'"]?([^\'"\\s]{3,})[\'"]?\\b)']
 
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
         # for regex
         self.unmatch = ['value', 'database', 'Keys', 'pwd', 'null', 'str']
-
-        self.vul_function = None
 
     def main(self, regex_string):
         """

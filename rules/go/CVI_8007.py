@@ -12,8 +12,7 @@
 import re
 from utils.api import *
 
-
-class CVI_8007():
+class CVI_8007(SingleRuleMixin):
     """
     Go 不安全反序列化规则
     匹配 json.Unmarshal 到 interface{}、yaml.Unmarshal、xml.NewDecoder、
@@ -23,27 +22,13 @@ class CVI_8007():
     def __init__(self):
         self.svid = 8007
         self.language = "go"
-        self.author = "KunLun-M"
         self.vulnerability = "不安全反序列化"
         self.description = "使用了可能不安全的反序列化操作（json.Unmarshal到interface{}、yaml.Unmarshal、xml.NewDecoder、toml.Decode、gob.NewDecoder等），如果反序列化的数据来自不可信来源，可能导致安全风险。建议将数据反序列化到明确的结构体类型，避免使用interface{}。"
         self.level = 6
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "function-param-regex"
         self.match = r"json\.Unmarshal\s*\(|json\.NewDecoder\s*\(|yaml\.Unmarshal\s*\(|yaml\.NewDecoder\s*\(|xml\.Unmarshal\s*\(|xml\.NewDecoder\s*\(|toml\.Decode\s*\(|toml\.NewDecoder\s*\(|gob\.NewDecoder\s*\(|gob\.NewEncoder\s*\(|encoding/gob|gopkg\.in/yaml|github\.com/BurntSushi/toml"
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
-        # for regex
-        self.unmatch = None
 
         self.vul_function = [
             "json.Unmarshal", "json.NewDecoder",

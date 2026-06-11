@@ -11,8 +11,7 @@
 
 from utils.api import *
 
-
-class CVI_3010():
+class CVI_3010(SingleRuleMixin):
     """
     rule class
     """
@@ -21,29 +20,13 @@ class CVI_3010():
 
         self.svid = 3010
         self.language = "javascript"
-        self.author = "LoRexxar"
         self.vulnerability = "Handlebars XSS"
         self.description = "Handlebars 中 SafeString 可导致XSS"
         self.level = 4
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "function-param-regex"
         self.match = r"SafeString"
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
-        # for regex
-        self.unmatch = None
-
-        self.vul_function = None
 
     def main(self, regex_string):
         """

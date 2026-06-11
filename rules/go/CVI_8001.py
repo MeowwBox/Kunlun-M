@@ -12,8 +12,7 @@
 import re
 from utils.api import *
 
-
-class CVI_8001():
+class CVI_8001(SingleRuleMixin):
     """
     Go 命令注入规则
     匹配 exec.Command / exec.CommandContext 等
@@ -22,27 +21,13 @@ class CVI_8001():
     def __init__(self):
         self.svid = 8001
         self.language = "go"
-        self.author = "KunLun-M"
         self.vulnerability = "命令注入"
         self.description = "使用了可能执行系统命令的函数（exec.Command、exec.CommandContext等），可能导致命令注入漏洞。建议对用户输入进行严格校验和转义，或避免将用户输入直接传递给命令执行函数。"
         self.level = 8
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "function-param-regex"
         self.match = r"exec\.Command|exec\.CommandContext|os\.StartProcess|syscall\.Exec"
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
-        # for regex
-        self.unmatch = None
 
         self.vul_function = ["exec.Command", "exec.CommandContext", "os.StartProcess", "syscall.Exec"]
 

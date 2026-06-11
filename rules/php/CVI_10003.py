@@ -11,30 +11,22 @@
 
 from utils.api import *
 
-class CVI_10002(SingleRuleMixin):
+class CVI_10003(SingleRuleMixin):
     """
     rule class
     """
 
     def __init__(self):
 
-        self.svid = 10002
+        self.svid = 10003
         self.language = "php"
-        self.vulnerability = "Reflected XSS"
-        self.description = "echo参数可控会导致XSS漏洞"
-        self.level = 4
+        self.vulnerability = "test_eval_check"
+        self.description = "test_eval_check"
+        self.level = 1
 
         # 部分配置
         self.match_mode = "function-param-regex"
-        self.match = r"echo|print"
-
-        # for chrome ext
-        self.keyword = "is_echo_statement"
+        self.match = r"eval\s*\("
 
     def main(self, regex_string):
-        """
-        regex string input
-        :regex_string: regex match string
-        :return:
-        """
-        pass
+        return None

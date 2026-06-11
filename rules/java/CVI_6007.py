@@ -13,8 +13,7 @@ import re
 
 from utils.api import *
 
-
-class CVI_6007():
+class CVI_6007(SingleRuleMixin):
     """
     rule class
     """
@@ -22,24 +21,13 @@ class CVI_6007():
     def __init__(self):
         self.svid = 6007
         self.language = "java"
-        self.author = "KunLun-M"
         self.vulnerability = "XXE"
         self.description = "通过AST分析检测DocumentBuilderFactory/SAXParserFactory/XMLInputFactory等XML解析器是否未禁用外部实体，追踪数据流以发现XXE漏洞。建议设置disallow-doctype-decl或FEATURE_SECURE_PROCESSING。"
         self.level = 8
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "function-param-regex"
         self.match = r"\.parse\s*\(|newSAXParser|parseText|SAXParser|SAXBuilder|SAXReader|DocumentBuilder|XMLReader|Digester"
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
 
         # for regex
         self.unmatch = [
@@ -49,7 +37,6 @@ class CVI_6007():
         ]
 
         self.vul_function = ["parse", "DocumentBuilderFactory", "SAXParserFactory", "XMLInputFactory"]
-
 
     def main(self, regex_string):
         """XML 解析器工厂名已足够精确，不需要额外筛选"""

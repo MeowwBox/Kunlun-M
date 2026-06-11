@@ -11,8 +11,7 @@
 
 from utils.api import *
 
-
-class CVI_1013():
+class CVI_1013(SingleRuleMixin):
     """
     rule class
     """
@@ -26,24 +25,9 @@ class CVI_1013():
         self.description = "URL任意重定向漏洞可能会导致潜在的业务安全问题，配合其他漏洞可能会导致更严重的漏洞危害"
         self.level = 1
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "function-param-regex"
         self.match = r"header"
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
-        # for regex
-        self.unmatch = None
-
-        self.vul_function = None
 
     def main(self, regex_string):
         """

@@ -11,8 +11,7 @@
 
 from utils.api import *
 
-
-class CVI_6019():
+class CVI_6019(SingleRuleMixin):
     """
     rule class
     """
@@ -20,13 +19,9 @@ class CVI_6019():
     def __init__(self):
         self.svid = 6019
         self.language = "java"
-        self.author = "KunLun-M"
         self.vulnerability = "Insecure CORS"
         self.description = "Access-Control-Allow-Origin响应头设置为通配符*，允许任意域名的跨域请求，可能导致敏感数据泄露。"
         self.level = 4
-
-        # status
-        self.status = True
 
         # 部分配置
         self.match_mode = "only-regex"
@@ -36,17 +31,8 @@ class CVI_6019():
             r'\.allowedOrigins\s*\(\s*"\*"\s*\)',
         ]
 
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
         # for regex
         self.unmatch = [r"allowedOriginPatterns", r"Access-Control-Allow-Credentials"]
-
-        self.vul_function = None
 
     def main(self, regex_string):
         pass

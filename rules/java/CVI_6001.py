@@ -13,8 +13,7 @@ import re
 
 from utils.api import *
 
-
-class CVI_6001():
+class CVI_6001(SingleRuleMixin):
     """
     rule class
     """
@@ -22,24 +21,13 @@ class CVI_6001():
     def __init__(self):
         self.svid = 6001
         self.language = "java"
-        self.author = "KunLun-M"
         self.vulnerability = "SQL Injection"
         self.description = "通过AST分析检测Statement的executeQuery/executeUpdate/execute等方法参数是否来自用户可控输入，追踪数据流以发现SQL注入漏洞。建议使用PreparedStatement进行参数化查询。"
         self.level = 8
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "function-param-regex"
         self.match = "createStatement|executeQuery|executeUpdate|execute|addBatch"
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
 
         # for regex
         self.unmatch = [
@@ -49,7 +37,6 @@ class CVI_6001():
         ]
 
         self.vul_function = ["executeQuery", "executeUpdate", "execute", "addBatch"]
-
 
     def main(self, regex_string):
         """

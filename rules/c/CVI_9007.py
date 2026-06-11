@@ -12,8 +12,7 @@
 import re
 from utils.api import *
 
-
-class CVI_9007():
+class CVI_9007(SingleRuleMixin):
     """
     C/C++ 任意文件读取规则
     匹配 open、pread 等 POSIX 文件操作函数
@@ -23,27 +22,13 @@ class CVI_9007():
     def __init__(self):
         self.svid = 9007
         self.language = "c"
-        self.author = "KunLun-M"
         self.vulnerability = "任意文件读取"
         self.description = "使用了 POSIX 文件操作函数（open、pread等），且文件路径参数可能受用户控制，可能导致任意文件读取漏洞。攻击者可利用此漏洞读取系统敏感文件（如 /etc/passwd、/etc/shadow）。建议对用户输入进行路径规范化校验，使用白名单限制可访问的文件。"
         self.level = 8
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "function-param-regex"
         self.match = r"\bopen\s*\(|\bpread\s*\("
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
-        # for regex
-        self.unmatch = None
 
         self.vul_function = ["open", "pread"]
 

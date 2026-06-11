@@ -11,8 +11,7 @@
 
 from utils.api import *
 
-
-class CVI_3001():
+class CVI_3001(SingleRuleMixin):
     """
     rule class
     """
@@ -21,7 +20,6 @@ class CVI_3001():
 
         self.svid = 3001
         self.language = "javascript"
-        self.author = "LoRexxar"
         self.vulnerability = "JQuery 原型链污染"
         self.description = "jQuery.extend 在3.4.0以下，调用extend并且为true，可能会导致原型链污染"
         self.level = 5
@@ -33,17 +31,8 @@ class CVI_3001():
         self.match_mode = "only-regex"
         self.match = ['\\.extend\\(\\s*true\\s*,']
 
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
         # for regex
         self.unmatch = ['\\bjQuery\\.extend\\s*=\\s*jQuery\\.fn\\.extend\\b']
-
-        self.vul_function = None
 
     def main(self, regex_string):
         """

@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 from utils.api import *
 
-
-class CVI_7009():
+class CVI_7009(SingleRuleMixin):
     """
     Python 开放重定向
     覆盖: Flask redirect, Django HttpResponseRedirect, redirect, RedirectResponse
@@ -10,17 +9,11 @@ class CVI_7009():
     def __init__(self):
         self.svid = 7009
         self.language = "python"
-        self.author = "LoRexxar"
         self.vulnerability = "开放重定向"
         self.description = "使用了可能存在开放重定向风险的跳转函数"
         self.level = 4
-        self.status = True
         self.match_mode = "function-param-regex"
         self.match = r"redirect\(|HttpResponseRedirect\(|RedirectResponse\(|Redirect\(|flask\.redirect|django\.http\.HttpResponseRedirect"
-        self.match_name = None
-        self.black_list = None
-        self.keyword = None
-        self.unmatch = None
         self.vul_function = ["redirect", "HttpResponseRedirect", "RedirectResponse", "Redirect"]
 
     def main(self, regex_string):

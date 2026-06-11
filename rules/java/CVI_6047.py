@@ -12,23 +12,16 @@
 
 from utils.api import *
 
-
-class CVI_6047():
+class CVI_6047(SingleRuleMixin):
     def __init__(self):
         self.svid = 6047
         self.language = "java"
-        self.author = "KunLun-M"
         self.vulnerability = "Jackson Unsafe Polymorphic Deserialization"
         self.description = "Jackson ObjectMapper启用了enableDefaultTyping，允许多态反序列化，可能导致远程代码执行"
         self.level = 6
 
-        self.status = True
         self.match_mode = "java-function-param-regex"
         self.match = "enableDefaultTyping"
-        self.match_name = None
-        self.black_list = None
-        self.keyword = None
-        self.unmatch = None
         self.vul_function = ["enableDefaultTyping"]
         self.is_config_vuln = True
 

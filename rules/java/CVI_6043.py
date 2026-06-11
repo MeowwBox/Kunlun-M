@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 from utils.api import *
 
-
-class CVI_6043():
+class CVI_6043(SingleRuleMixin):
     """
     JdbcTemplate SQL Injection — 检测 Spring JdbcTemplate 的 query/queryForObject/execute/update 
     方法参数是否来自用户可控输入的字符串拼接 SQL
@@ -10,18 +9,14 @@ class CVI_6043():
     def __init__(self):
         self.svid = 6043
         self.language = "java"
-        self.author = "KunLun-M"
         self.vulnerability = "JdbcTemplate SQL Injection"
         self.description = "检测Spring JdbcTemplate的query/queryForObject等方法参数是否为用户可控的拼接SQL"
         self.level = 9
-        self.status = True
         self.match_mode = "java-function-param-regex"
         # 精确匹配 JdbcTemplate 方法名（避免匹配其他 query 调用）
         self.match = r"jdbcTemplate\.query\b|jdbcTemplate\.queryForObject|jdbcTemplate\.queryForList|jdbcTemplate\.queryForMap|jdbcTemplate\.queryForRowSet|jdbcTemplate\.execute\b|jdbcTemplate\.update\b"
         self.unmatch = []
-        self.match_name = None
         self.black_list = []
-        self.keyword = None
         # AST 搜索 sink 函数名
         self.vul_function = ["query", "queryForObject", "queryForList", "queryForMap", "queryForRowSet", "execute", "update"]
 

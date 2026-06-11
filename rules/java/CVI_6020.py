@@ -11,8 +11,7 @@
 
 from utils.api import *
 
-
-class CVI_6020():
+class CVI_6020(SingleRuleMixin):
     """
     rule class
     """
@@ -20,13 +19,9 @@ class CVI_6020():
     def __init__(self):
         self.svid = 6020
         self.language = "java"
-        self.author = "KunLun-M"
         self.vulnerability = "Insecure JWT"
         self.description = "JWT使用了不安全的配置，如Algorithm.none()无签名或空字符串作为签名密钥，可能导致JWT伪造和身份冒充。应使用HMAC、RSA或ECDSA等安全签名算法。"
         self.level = 6
-
-        # status
-        self.status = True
 
         # 部分配置
         self.match_mode = "only-regex"
@@ -37,17 +32,8 @@ class CVI_6020():
             r'JWT\.require\s*\(\s*Algorithm\.none',
         ]
 
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
         # for regex
         self.unmatch = [r"HMAC", r"RSA", r"ECDSA", r"SecretKey", r"KeyPair"]
-
-        self.vul_function = None
 
     def main(self, regex_string):
         pass

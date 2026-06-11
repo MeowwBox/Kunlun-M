@@ -13,8 +13,7 @@ import re
 
 from utils.api import *
 
-
-class CVI_6003():
+class CVI_6003(SingleRuleMixin):
     """
     rule class
     """
@@ -22,30 +21,18 @@ class CVI_6003():
     def __init__(self):
         self.svid = 6003
         self.language = "java"
-        self.author = "KunLun-M"
         self.vulnerability = "Command Injection"
         self.description = "通过AST分析检测Runtime.getRuntime().exec()或ProcessBuilder构造参数是否来自用户可控输入，追踪数据流以发现命令注入漏洞。"
         self.level = 9
-
-        # status
-        self.status = True
 
         # 部分配置
         self.match_mode = "function-param-regex"
         self.match = "(?<!execute)exec\\s*\\(|ProcessBuilder"
 
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
         # for regex
         self.unmatch = []
 
         self.vul_function = ["exec", "ProcessBuilder"]
-
 
     def main(self, regex_string):
         """二次筛选：确认 Runtime.exec/ProcessBuilder 调用"""

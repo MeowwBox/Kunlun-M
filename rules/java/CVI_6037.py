@@ -7,22 +7,16 @@
 
 from utils.api import *
 
-
-class CVI_6037():
+class CVI_6037(SingleRuleMixin):
     def __init__(self):
         self.svid = 6037
         self.language = "java"
-        self.author = "KunLun-M"
         self.vulnerability = "Fastjson Deserialization"
         self.description = "Fastjson反序列化用户可控JSON可能导致远程代码执行"
         self.level = 4
 
-        self.status = True
         self.match_mode = "java-function-param-regex"
         self.match = "parseObject|parse"
-        self.match_name = None
-        self.black_list = None
-        self.keyword = None
         self.unmatch = [r"SafeMode", r"autoTypeFilter", r"ParserConfig.getGlobalInstance\\(\\).setAutoTypeSupport"]
         self.vul_function = ["parseObject", "parse"]
 

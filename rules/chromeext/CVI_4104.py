@@ -11,8 +11,7 @@
 
 from utils.api import *
 
-
-class CVI_4104():
+class CVI_4104(SingleRuleMixin):
     """
     rule class
     """
@@ -21,29 +20,19 @@ class CVI_4104():
 
         self.svid = 4104
         self.language = "chromeext"
-        self.author = "LoRexxar"
         self.vulnerability = "Manifest.json permissions 要求权限过大"
         self.description = "Manifest.json permissions 要求权限过大"
         self.level = 3
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "special-crx-keyword-match"
         self.match = ['bookmarks', 'history', 'topSites', 'tabs', 'pageCapture', 'webRequest', 'downloads', 'sessions']
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
 
         # for chrome ext
         self.keyword = r"permissions"
 
         # for regex
         self.unmatch = []
-
-        self.vul_function = None
 
     def main(self, regex_string):
         """

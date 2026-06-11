@@ -11,8 +11,7 @@
 
 from utils.api import *
 
-
-class CVI_30111():
+class CVI_30111(SingleRuleMixin):
     """
     rule class
     """
@@ -21,24 +20,13 @@ class CVI_30111():
 
         self.svid = 30111
         self.language = "javascript"
-        self.author = "LoRexxar"
         self.vulnerability = "addEventListener message param 可控"
         self.description = "addEventListener message param 可控, 可以通过windows.postMessage传递，有可能导致安全问题，这里主要假设为chrome ext contentjs场景"
         self.level = 7
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "only-regex"
         self.match = ['(addEventListener\\(\\s*[\'"]{1}message[\'"]{1}\\s*,\\s*function\\([^\\)]+\\))']
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
 
         # for regex
         self.unmatch = []

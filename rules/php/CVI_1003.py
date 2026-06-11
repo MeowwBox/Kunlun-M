@@ -11,8 +11,7 @@
 
 from utils.api import *
 
-
-class CVI_1003():
+class CVI_1003(SingleRuleMixin):
     """
     rule class
     """
@@ -32,18 +31,6 @@ class CVI_1003():
         # 部分配置
         self.match_mode = "function-param-regex"
         self.match = r"get_headers"
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
-        # for regex
-        self.unmatch = None
-
-        self.vul_function = None
 
     def main(self, regex_string):
         """

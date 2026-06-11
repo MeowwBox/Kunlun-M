@@ -12,8 +12,7 @@
 import re
 from utils.api import *
 
-
-class CVI_9002():
+class CVI_9002(SingleRuleMixin):
     """
     C/C++ 格式化字符串漏洞规则
     匹配 printf、fprintf、sprintf、vprintf、vfprintf、vsnprintf 等
@@ -23,27 +22,13 @@ class CVI_9002():
     def __init__(self):
         self.svid = 9002
         self.language = "c"
-        self.author = "KunLun-M"
         self.vulnerability = "格式化字符串漏洞"
         self.description = "使用了格式化字符串函数（printf、fprintf、sprintf等），且格式串参数可能受用户控制，可能导致格式化字符串漏洞。攻击者可利用 %n、%x 等格式符读取或写入内存。建议确保格式串为硬编码字符串常量。"
         self.level = 8
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "function-param-regex"
         self.match = r"\bprintf\s*\(|\bfprintf\s*\(|\bsprintf\s*\(|\bvprintf\s*\(|\bvfprintf\s*\(|\bvsnprintf\s*\("
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
-        # for regex
-        self.unmatch = None
 
         self.vul_function = ["printf", "fprintf", "sprintf", "vprintf", "vfprintf", "vsnprintf"]
 

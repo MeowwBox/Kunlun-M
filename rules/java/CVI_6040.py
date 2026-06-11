@@ -10,16 +10,13 @@
 """
 from utils.api import *
 
-
-class CVI_6040():
+class CVI_6040(SingleRuleMixin):
     def __init__(self):
         self.svid = 6040
         self.language = "java"
-        self.author = "KunLun-M"
         self.vulnerability = "Jackson Deserialization (enableDefaultTyping)"
         self.description = "Jackson ObjectMapper启用了enableDefaultTyping，可能导致反序列化漏洞（CVE-2017-7525等）"
         self.level = 9
-        self.status = True
         self.match_mode = "only-regex"
         self.match = [
             r'enableDefaultTyping\s*\(',
@@ -30,8 +27,6 @@ class CVI_6040():
             r'DefaultTyping\.NON_CONCRETE_AND_ARRAYS',
         ]
         self.black_list = []
-        self.keyword = None
-        self.vul_function = None
 
     def main(self, regex_string):
         pass

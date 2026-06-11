@@ -11,8 +11,7 @@
 
 from utils.api import *
 
-
-class CVI_10001():
+class CVI_10001(SingleRuleMixin):
     """
     rule class
     """
@@ -21,7 +20,6 @@ class CVI_10001():
 
         self.svid = 10001
         self.language = "php"
-        self.author = "LoRexxar"
         self.vulnerability = "Reflected XSS"
         self.description = "echo参数可控会导致XSS漏洞"
         self.level = 4
@@ -32,18 +30,6 @@ class CVI_10001():
         # 部分配置
         self.match_mode = "vustomize-match"
         self.match = r"(echo\s?['\"]?(.+?)?\$(.+?)?['\"]?(.+?)?;)"
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
-        # for regex
-        self.unmatch = None
-
-        self.vul_function = None
 
     def main(self, regex_string):
         """

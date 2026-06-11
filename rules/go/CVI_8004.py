@@ -12,8 +12,7 @@
 import re
 from utils.api import *
 
-
-class CVI_8004():
+class CVI_8004(SingleRuleMixin):
     """
     Go 文件操作规则
     匹配 os.Open/os.Create/os.WriteFile/os.ReadFile/ioutil.ReadFile/ioutil.WriteFile
@@ -23,27 +22,13 @@ class CVI_8004():
     def __init__(self):
         self.svid = 8004
         self.language = "go"
-        self.author = "KunLun-M"
         self.vulnerability = "文件操作"
         self.description = "使用了文件操作函数（os.Open、os.Create、os.WriteFile、os.ReadFile、ioutil.ReadFile、ioutil.WriteFile、os.Remove、os.RemoveAll等），如果文件路径来自用户输入，可能导致任意文件读写删除等安全问题。建议对文件路径进行严格校验和白名单限制。"
         self.level = 7
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "function-param-regex"
         self.match = r"os\.Open\s*\(|os\.Create\s*\(|os\.WriteFile\s*\(|os\.ReadFile\s*\(|ioutil\.ReadFile\s*\(|ioutil\.WriteFile\s*\(|os\.Remove\s*\(|os\.RemoveAll\s*\(|os\.OpenFile\s*\(|os\.Mkdir\s*\(|os\.MkdirAll\s*\(|os\.CreateTemp\s*\(|os\.ReadDir\s*\("
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
-        # for regex
-        self.unmatch = None
 
         self.vul_function = [
             "os.Open", "os.Create", "os.WriteFile", "os.ReadFile",

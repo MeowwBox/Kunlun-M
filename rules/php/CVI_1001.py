@@ -11,8 +11,7 @@
 
 from utils.api import *
 
-
-class CVI_1001():
+class CVI_1001(SingleRuleMixin):
     """
     rule class
     """
@@ -26,22 +25,9 @@ class CVI_1001():
         self.description = "cURL的函数相应函数可控，可能会造成SSRF漏洞。"
         self.level = 7
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "vustomize-match"
         self.match = r"curl_setopt\s*\(.*,\s*CURLOPT_URL\s*,(.*)\)"
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
-        # for regex
-        self.unmatch = None
 
         self.vul_function = "curl_setopt"
 

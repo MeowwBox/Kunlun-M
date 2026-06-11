@@ -13,26 +13,17 @@ import re
 
 from utils.api import *
 
-
-class CVI_6002():
+class CVI_6002(SingleRuleMixin):
     def __init__(self):
         self.svid = 6002
         self.language = "java"
-        self.author = "KunLun-M"
         self.vulnerability = "Reflected XSS"
         self.description = "直接将用户输入输出到HTTP响应中，未进行编码转义。通过AST分析追踪数据流，结合精确grep定位response输出上下文。"
         self.level = 3
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "function-param-regex"
         self.match = r"print|write|println|addObject|ModelAndView"
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
 
         # for regex
         self.unmatch = [
@@ -45,7 +36,6 @@ class CVI_6002():
         ]
 
         self.vul_function = ["print", "write", "println"]
-
 
     def main(self, regex_string):
         if not isinstance(regex_string, str):
