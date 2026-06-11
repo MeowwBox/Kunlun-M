@@ -23,6 +23,7 @@ from core.core_engine.branch_constraint import BranchConstraint
 from core.core_engine.python.builtin_knowledge import lookup as lookup_builtin
 from core.core_engine.python.summary_generator import lookup_summary
 from core.core_engine.python.source_discovery import SourceRegistry, discover_sources
+from core.filter_functions import register_summary, get_summary_safe_set
 
 # 全局状态（与 PHP/Java parser 保持一致的模式）
 scan_results = []
@@ -378,6 +379,16 @@ def is_repair(expr_str, repair_functions=None):
         if expr_str == rf or expr_str.startswith(rf + "(") or expr_str.startswith(rf + "."):
             return True
     return False
+
+
+def _register_l2_inherit(language, func_name, safe_func_name):
+    """
+    L2 注册：当函数 func_name 的 return 语句调用了 safe_func_name 时，
+    将 func_name 也标记为安全函数，继承 safe_func_name 的 safe_for 集合。
+    """
+    safe_set = get_summary_safe_set(language, safe_func_name)
+    if safe_set:
+        register_summary(language, func_name, safe_set)
 
 
 # ---------------------------------------------------------------------------
@@ -1340,7 +1351,7 @@ def _trace_function_return(func_def, call_node, lineno, file_path,
                             repair_functions, controlled_params,
                             visited_funcs, depth, tree):
     """追踪函数的返回值是否可控
-    
+
     核心原则：函数体是封闭作用域，只通过形参→实参映射判断可控性。
     不在函数体内再调 parameters_back（避免和调用者的赋值行冲突导致循环）。
     返回值:
@@ -1371,6 +1382,8 @@ def _trace_function_return(func_def, call_node, lineno, file_path,
         knowledge = lookup_builtin(call_func_name)
         if knowledge:
             if knowledge["safe"] and not knowledge["passthrough"] and not knowledge.get("param_flow"):
+                # L2 注册：当前函数 return 了 safe 函数，继承 safe_for
+                _register_l2_inherit("python", func_name, call_func_name)
                 return -1, None, 0
             if knowledge["passthrough"] or knowledge.get("param_flow"):
                 deps = set()
@@ -1454,6 +1467,8 @@ def _trace_function_return(func_def, call_node, lineno, file_path,
                 if return_call_name:
                     return_builtin = lookup_builtin(return_call_name)
                     if return_builtin and return_builtin.get("safe"):
+                        # L2 注册：当前函数 return 了 safe 函数，继承 safe_for
+                        _register_l2_inherit("python", func_name, return_call_name)
                         logger.debug("[AST][Python] Function {} returns safe function call: {}".format(
                             func_name, return_call_name))
                         return -1, None, lineno
