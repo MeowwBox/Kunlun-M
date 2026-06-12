@@ -168,16 +168,20 @@ def scan(target_directory, a_sid=None, s_sid=None, special_rules=None, language=
     if language and target_directory:
         try:
             from rules.tamper._loader import detect_frameworks, merge_framework_config, load_base_config
-            detected = detect_frameworks(language.lower(), target_directory)
-            if detected:
-                repair_tmp, controlled_tmp = load_base_config(language.lower())
-                for fw_mod in detected:
-                    extra = merge_framework_config(repair_tmp, controlled_tmp, fw_mod)
-                    if extra:
-                        for pattern, svids in extra.items():
-                            if pattern not in extra_sinks:
-                                extra_sinks[pattern] = set()
-                            extra_sinks[pattern] |= svids
+            # language may be a list (e.g. ['php', 'javascript'])
+            languages = language if isinstance(language, list) else [language]
+            for lang in languages:
+                lang_lower = lang.lower() if isinstance(lang, str) else str(lang).lower()
+                detected = detect_frameworks(lang_lower, target_directory)
+                if detected:
+                    repair_tmp, controlled_tmp = load_base_config(lang_lower)
+                    for fw_mod in detected:
+                        extra = merge_framework_config(repair_tmp, controlled_tmp, fw_mod)
+                        if extra:
+                            for pattern, svids in extra.items():
+                                if pattern not in extra_sinks:
+                                    extra_sinks[pattern] = set()
+                                extra_sinks[pattern] |= svids
         except Exception as e:
             logger.debug('[SCAN] extra_sinks pre-load error: {e}'.format(e=e))
 
