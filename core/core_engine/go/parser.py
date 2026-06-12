@@ -1716,18 +1716,22 @@ def _trace_variable_in_lines_impl(file_path, var_name, from_line, to_line,
 
     # 在函数体内查找 var_name 的赋值
     # 找到函数体的 block 节点
-    func_node = None
+    candidates = []
+
     def _find_func(node):
-        nonlocal func_node
-        if node.type in ('function_declaration', 'method_declaration'):
-            if node.start_point[0] + 1 <= to_line <= node.end_point[0] + 1:
-                func_node = node
-                return
+        if node.type in ('function_declaration', 'method_declaration', 'func_literal'):
+            start = node.start_point[0] + 1
+            end = node.end_point[0] + 1
+            if start <= to_line <= end:
+                candidates.append(node)
         for child in node.children:
             _find_func(child)
-            if func_node:
-                return
+
     _find_func(tree.root_node)
+    if candidates:
+        func_node = min(candidates, key=lambda n: n.end_point[0] - n.start_point[0])
+    else:
+        func_node = None
 
     if not func_node:
         return (-1, 0)

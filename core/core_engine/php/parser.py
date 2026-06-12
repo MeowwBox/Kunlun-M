@@ -3249,6 +3249,61 @@ def analysis(nodes, vul_function, back_node, vul_lineno, file_path=None, functio
 
         back_node.append(node)
 
+    # ---- 闭包体递归搜索 ----
+    # 顶层 analysis 找不到 sink 时，搜索 Closure/匿名函数 内部
+    # 框架路由中的闭包（如 Route::get('/path', function() { ... })）是最常见的场景
+    if not scan_results:
+        _search_closures_for_analysis(nodes, vul_function, back_node, vul_lineno, file_path, function_params)
+
+
+def _search_closures_for_analysis(nodes, vul_function, back_node, vul_lineno, file_path, function_params):
+    """在 AST 节点中搜索 Closure，对其 body 运行 analysis()"""
+    if scan_results:
+        return
+    for node in nodes:
+        if not node or scan_results:
+            continue
+        # 检查函数调用的参数中是否有 Closure（如 Route::get('/path', function() { ... })）
+        if hasattr(node, 'params'):
+            for param in node.params:
+                if isinstance(param, php.Closure):
+                    _try_analyze_closure_body(param, vul_function, back_node, vul_lineno, file_path, function_params)
+                    if scan_results:
+                        return
+        # 检查 Assignment 表达式中的 Closure（如 $fn = function() { ... }）
+        if isinstance(node, php.Assignment) and hasattr(node, 'expr'):
+            _try_analyze_closure_body(node.expr, vul_function, back_node, vul_lineno, file_path, function_params)
+            if scan_results:
+                return
+        # 递归搜索嵌套节点（如 if/while 中的 Closure）
+        if isinstance(node, php.If):
+            _search_closures_for_analysis(node.node.nodes if hasattr(node.node, 'nodes') and node.node.nodes else [], vul_function, back_node, vul_lineno, file_path, function_params)
+            if hasattr(node, 'elseifs'):
+                for elif_block in node.elseifs:
+                    _search_closures_for_analysis(elif_block.nodes if hasattr(elif_block, 'nodes') and elif_block.nodes else [], vul_function, back_node, vul_lineno, file_path, function_params)
+            if hasattr(node, 'else_') and node.else_:
+                _search_closures_for_analysis(node.else_.nodes if hasattr(node.else_, 'nodes') and node.else_.nodes else [], vul_function, back_node, vul_lineno, file_path, function_params)
+        elif isinstance(node, (php.While, php.DoWhile, php.For, php.Foreach)):
+            if hasattr(node, 'node') and hasattr(node.node, 'nodes'):
+                _search_closures_for_analysis(node.node.nodes, vul_function, back_node, vul_lineno, file_path, function_params)
+
+
+def _try_analyze_closure_body(closure_node, vul_function, back_node, vul_lineno, file_path, function_params):
+    """如果 closure 的行号范围包含 vul_lineno，对其 body statements 运行 analysis()"""
+    if scan_results:
+        return
+    if not isinstance(closure_node, php.Closure):
+        return
+    start = int(getattr(closure_node, 'lineno', 0))
+    end = int(getattr(closure_node, 'end_lineno', start))
+    if start <= int(vul_lineno) <= end:
+        body = getattr(closure_node, 'nodes', None)
+        if body:
+            # 闭包参数作为 function_params 传入，使闭包参数被识别为局部变量
+            closure_params = get_function_params(closure_node.params) if hasattr(closure_node, 'params') else None
+            analysis(body, vul_function, back_node, vul_lineno, file_path,
+                     function_params=closure_params or function_params)
+
 
 def _init_function_summaries(file_path):
     """初始化 PHP 文件的函数摘要"""
