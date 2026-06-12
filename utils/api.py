@@ -83,7 +83,8 @@ class VirtualRule(SingleRuleMixin):
         self.description = self.vulnerability
         self.level = 0
         self.match_mode = "function-param-regex"
-        self.match = pattern
+        # fpc 模板会自动补 \s*\((.*)(?:\)），pattern 不应带末尾括号
+        self.match = pattern.strip().rstrip('(')
 
 
 __all__ = (
