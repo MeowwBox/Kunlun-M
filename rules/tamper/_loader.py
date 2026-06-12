@@ -153,7 +153,9 @@ def _parse_pom(dep_path):
             # Try without namespace
             deps = root.findall('.//dependency')
         for dep in deps:
-            artifact = dep.find('m:artifactId', ns) or dep.find('artifactId')
+            artifact = dep.find('m:artifactId', ns)
+            if artifact is None:
+                artifact = dep.find('artifactId')
             if artifact is not None and artifact.text:
                 pkgs.append(artifact.text)
         return {'pom': pkgs} if pkgs else {}
