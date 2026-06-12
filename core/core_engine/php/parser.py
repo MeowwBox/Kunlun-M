@@ -2482,6 +2482,16 @@ def anlysis_function(node, back_node, vul_function, function_params, vul_lineno,
 
         if node_typename in BASE_FUNCTIONCALL_LIST:
             function_name = node.name
+            # 对 StaticMethodCall / MethodCall 拼接完整限定名（Class::method / $obj->method）
+            # 用于匹配 EXTRA_SINKS 等带类名前缀的 vul_function
+            if node_typename == 'StaticMethodCall':
+                cls_name = getattr(node, 'class_', None)
+                if cls_name and function_name:
+                    function_name = '{}::{}'.format(cls_name, function_name)
+            elif node_typename == 'MethodCall' and hasattr(node, 'expr'):
+                expr_text = getattr(node.expr, 'name', str(getattr(node.expr, 'value', None)))
+                if expr_text and function_name:
+                    function_name = '{}->{}'.format(expr_text, function_name)
         else:
             function_name = node_typename.lower()
 
