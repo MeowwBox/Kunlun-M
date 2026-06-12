@@ -1425,7 +1425,8 @@ def _text_trace_variable(file_path, var_name, vul_lineno,
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             lines = f.readlines()
-    except Exception:
+    except Exception as e:
+        logger.warning('[AST][Go] _text_trace_variable failed to read {}: {}'.format(file_path, e))
         return (-1, 0)
 
     # 向上查找赋值

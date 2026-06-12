@@ -3532,7 +3532,7 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
                     scan_results = cross_result
                     break
 
-    except SyntaxError as e:
+    except Exception as e:
         logger.warning('[AST] [ERROR]:{e}'.format(e=traceback.format_exc()))
 
     return scan_results

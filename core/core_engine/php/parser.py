@@ -2350,7 +2350,7 @@ def deep_parameters_back(param, back_node, function_params, count, file_path, li
 
                     all_nodes = ast_object.get_nodes(file_path_name)
 
-                except:
+                except Exception as e:
                     logger.warning("[Deep AST] error to open new file...continue")
                     continue
 
@@ -3672,7 +3672,7 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
                 logger.debug("[AST] Scan parser end for {}".format(scan_results))
                 break
 
-    except SyntaxError as e:
+    except Exception as e:
         logger.warning('[AST] [ERROR]:{e}'.format(e=traceback.format_exc()))
 
     return scan_results

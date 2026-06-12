@@ -1533,9 +1533,10 @@ def _build_global_method_map(ast_obj, current_filepath):
                     if key not in global_methods:
                         global_methods[key] = []
                     global_methods[key].append((ast_tree, node, filepath))
-        except Exception:
+        except Exception as e:
+            logger.warning('[AST][Java] _build_global_method_map failed for {}: {}'.format(filepath, e))
             continue
-    
+
     return global_methods
 
 
@@ -2109,8 +2110,8 @@ def find_sinks(sink_names, files):
                             # init 是字符串变量名
                             elif isinstance(init, str) and init in assignment_map:
                                 assignment_map[decl.name] = assignment_map[init]
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning('[AST][Java] find_sinks indirect assignment analysis error: {}'.format(e))
         except Exception:
             pass
 
@@ -2210,9 +2211,10 @@ def find_sinks(sink_names, files):
                                     'matched_sink': sink,
                                 })
                                 break
-            except Exception:
-                pass
-        except Exception:
+            except Exception as e:
+                logger.warning('[AST][Java] find_sinks indirect call analysis error: {}'.format(e))
+        except Exception as e:
+            logger.warning('[AST][Java] find_sinks file-level error in {}: {}'.format(file_path, e))
             continue
 
     return results
