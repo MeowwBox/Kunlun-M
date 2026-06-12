@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-    demo_java
-    ~~~~~~~~~
-    Java 修复函数和可控输入源配置
+    Java base config (standard library)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Java 修复函数和可控输入源配置（基础配置，非框架配置）
 
     CVI 编号分类：
     - 6001/6021/6039/6043/6048: SQL注入
@@ -49,9 +49,9 @@
     :license:   MIT, see LICENSE for more details.
 """
 
-JAVA_IS_REPAIR_DEFAULT = {
+# 修复函数 → 可防御的 CVI 编号
+IS_REPAIR = {
     # ---- SQL 注入防御 ----
-    # PreparedStatement 参数化查询
     "prepareStatement": [6001, 6021, 6031, 6039, 6043, 6048],
     "PreparedStatement": [6001, 6021, 6031, 6039, 6043, 6048],
     "setString": [6001, 6021, 6031, 6039, 6043, 6048],
@@ -59,15 +59,12 @@ JAVA_IS_REPAIR_DEFAULT = {
     "setLong": [6001, 6021, 6031, 6039, 6043, 6048],
     "setObject": [6001, 6021, 6031, 6039, 6043, 6048],
     "setNull": [6001, 6021, 6031, 6039, 6043, 6048],
-    # JdbcTemplate 参数化
     "jdbcTemplate.query": [6043],
     "jdbcTemplate.update": [6043],
     "JdbcTemplate.query": [6043],
     "JdbcTemplate.update": [6043],
-    # Hibernate 参数化
     "createQuery": [6048],
     "setParameter": [6048],
-    # 通用类型转换
     "Integer.parseInt": [6001, 6021, 6031, 6039, 6043, 6048],
     "Long.parseLong": [6001, 6021, 6031, 6039, 6043, 6048],
     "Integer.valueOf": [6001, 6021, 6031, 6039, 6043, 6048],
@@ -79,9 +76,7 @@ JAVA_IS_REPAIR_DEFAULT = {
     "encodeForJavaScript": [6002, 6022],
     "encodeForURL": [6002, 6022],
     "encodeForCSS": [6002, 6022],
-    # Spring HTML 转义
     "HtmlUtils.htmlEscape": [6002, 6022],
-    # OWASP ESAPI
     "ESAPI.encoder().encodeForHTML": [6002, 6022],
 
     # ---- 命令注入防御 ----
@@ -93,7 +88,6 @@ JAVA_IS_REPAIR_DEFAULT = {
     "getCanonicalPath": [6004, 6025, 6033],
     "getAbsoluteFile": [6004, 6025, 6033],
     "toAbsolutePath": [6004, 6025, 6033],
-    # 限制文件名
     "getFileName": [6004, 6025, 6033, 6011],
 
     # ---- SSRF 防御 ----
@@ -102,14 +96,12 @@ JAVA_IS_REPAIR_DEFAULT = {
     "URI.create": [6006, 6024, 6034],
     "URL.getHost": [6006, 6024, 6034],
     "InetAddress.getByName": [6006, 6024, 6034],
-    # 类型转换（数字参数不能是 URL）
     "Integer.parseInt": [6006, 6024, 6034],
 
     # ---- XXE 防御 ----
     "XMLInputFactory.setProperty": [6007],
     "setFeature": [6007],
     "disallowDoctypeDecl": [6007],
-    # 安全 XML 工厂配置
     "SAXParserFactory.newInstance": [6007],
     "DocumentBuilderFactory.newInstance": [6007],
     "TransformerFactory.newInstance": [6007],
@@ -121,7 +113,6 @@ JAVA_IS_REPAIR_DEFAULT = {
     "ObjectInputFilter": [6005, 6035],
     "resolveClass": [6005, 6035],
     "ObjectInputStream": [6005, 6035],
-    # 安全替代：JSON
     "ObjectMapper": [6005, 6035, 6037, 6040, 6045, 6047, 6061, 6062, 6063, 6066],
     "JSONObject": [6005, 6035],
     "JSON.parseObject": [6005, 6035, 6037, 6040, 6045, 6061, 6062, 6063],
@@ -153,7 +144,8 @@ JAVA_IS_REPAIR_DEFAULT = {
     "allowedOrigins": [6019],
 }
 
-JAVA_IS_CONTROLLED_DEFAULT = [
+# 可控输入源
+IS_CONTROLLED = [
     # Servlet API
     "request",
     "request.getParameter",

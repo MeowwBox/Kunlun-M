@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-    demo
-    ~~~~
-    PHP 修复函数和可控输入源配置
+    PHP base config (standard library)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    PHP 标准库修复函数和可控输入源配置（基础配置，非框架配置）
 
     CVI 编号对照：
     - 1000: SQL注入 (PDO/mysqli)
@@ -30,7 +30,7 @@
     :copyright: Copyright (c) 2017 LoRexxar. All rights reserved.
 """
 
-PHP_IS_REPAIR_DEFAULT = {
+IS_REPAIR = {
     # ---- XSS / SSTI 防御 ----
     # HTML 实体转义
     "htmlspecialchars": [1000, 10001, 10002, 1012],
@@ -97,7 +97,7 @@ PHP_IS_REPAIR_DEFAULT = {
     # 主要靠代码规范，没有运行时修复函数
 }
 
-PHP_IS_CONTROLLED_DEFAULT = [
+IS_CONTROLLED = [
     # Superglobals
     "$_GET",
     "$_POST",

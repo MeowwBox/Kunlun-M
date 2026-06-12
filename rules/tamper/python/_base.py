@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-    demo_python
-    ~~~~~~~~~~~
-    Python 修复函数和可控输入源配置
+    Python base config (standard library)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Python 标准库修复函数和可控输入源配置（基础配置，非框架配置）
 
     修复函数绑定说明：
     - 键：精确函数名（用于 is_repair 精确匹配）
@@ -16,7 +16,7 @@
 """
 
 # 修复函数 → 可防御的 CVI 编号
-PYTHON_IS_REPAIR_DEFAULT = {
+IS_REPAIR = {
     # ---- XSS 防御 (7008) ----
     # HTML 转义，防止 XSS
     "html.escape": [7008],
@@ -90,7 +90,7 @@ PYTHON_IS_REPAIR_DEFAULT = {
 }
 
 # 可控输入源
-PYTHON_IS_CONTROLLED_DEFAULT = [
+IS_CONTROLLED = [
     # Flask / Django / Tornado
     "request.args",
     "request.form",

@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-    demo_go
-    ~~~~~~~
-    Go 修复函数和可控输入源配置
+    Go base config (standard library)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Go 修复函数和可控输入源配置（基础配置，非框架配置）
 
     CVI 编号对照：
     - 8001: 命令注入
@@ -21,31 +21,26 @@
 """
 
 # 修复函数 → 可防御的 CVI 编号
-GO_IS_REPAIR_DEFAULT = {
+IS_REPAIR = {
     # ---- XSS 防御 (8003, 8008) ----
-    # HTML 转义
     "html.EscapeString": [8003, 8008],
     "html.Escape": [8003, 8008],
     "template.HTMLEscapeString": [8003, 8008],
     "template.JSEscapeString": [8003, 8008],
     "template.HTML": [8003, 8008],
-    # JSON 序列化
     "json.Marshal": [8003, 8008],
     "json.MarshalIndent": [8003, 8008],
     "json.HTMLEscape": [8003, 8008],
-    # 第三方 HTML sanitizer
     "bluemonday.StrictPolicy.Sanitize": [8003, 8008],
     "bluemonday.UGCPolicy.Sanitize": [8003, 8008],
     "bluemonday.Sanitize": [8003, 8008],
     "sanitizer.Sanitize": [8003, 8008],
 
     # ---- 命令注入防御 (8001) ----
-    # Shell 参数转义
     "shellescape.Quote": [8001],
     "strconv.Quote": [8001],
 
     # ---- SQL 注入防御 (8002) ----
-    # 参数化查询 / ORM（不直接拼接 SQL）
     "db.Query": [8002],
     "db.QueryRow": [8002],
     "db.Exec": [8002],
@@ -68,13 +63,11 @@ GO_IS_REPAIR_DEFAULT = {
     "gorm.DB.Take": [8002],
 
     # ---- 文件操作防御 (8004) / 路径穿越防御 (8006) ----
-    # 路径规范化
     "filepath.Base": [8004, 8006],
     "filepath.Dir": [8004, 8006],
     "filepath.Clean": [8004, 8006],
     "path.Base": [8004, 8006],
     "path.Clean": [8004, 8006],
-    # URL 解析
     "url.Parse": [8005, 8006],
 
     # ---- SSRF 防御 (8005) ----
@@ -85,8 +78,6 @@ GO_IS_REPAIR_DEFAULT = {
     "json.Unmarshal": [8007],
     "json.NewDecoder": [8007],
     "encoding/gob.NewDecoder": [8007],
-    # 注：gob 是 Go 内部安全序列化，不含任意代码执行风险
-    # encoding/json 本身安全（不会执行代码）
 
     # ---- 通用类型转换（多漏洞防御）----
     "strconv.Atoi": [8001, 8002, 8005],
@@ -95,15 +86,13 @@ GO_IS_REPAIR_DEFAULT = {
     "strconv.ParseFloat": [8001, 8002, 8005],
     "strconv.Itoa": [8001, 8002, 8005],
     "strconv.FormatInt": [8001, 8002, 8005],
-    # 正则转义
     "regexp.QuoteMeta": [8001, 8002, 8005],
-    # URL 转义
     "url.QueryEscape": [8001, 8002, 8005, 8006],
     "url.PathEscape": [8001, 8005, 8006],
 }
 
 # 可控输入源
-GO_IS_CONTROLLED_DEFAULT = [
+IS_CONTROLLED = [
     # net/http - http.Request
     "r.URL.Query()",
     "r.FormValue",
@@ -202,7 +191,6 @@ GO_IS_CONTROLLED_DEFAULT = [
     # Beego framework
     "beego.Input",
     "beego.GetString",
-    "beego.GetStrings",
     "beego.GetStrings",
     "beego.Ctx.Input.Query",
     "beego.Ctx.Input.Param",

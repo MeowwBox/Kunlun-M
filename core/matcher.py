@@ -104,70 +104,53 @@ class VulnerabilityMatcher(object):
 
     def init_php_repair(self):
         """
-        初始化修复函数规则
-        同时将 repair_dict 注册到 filter_functions 三层体系的 L1 层
+        初始化修复函数和可控源配置
+
+        加载顺序：
+        1. 加载该语言的基础配置 (_base.py)
+        2. 自动识别项目框架并合并框架配置
+        3. 如果指定了 -tp 参数，加载指定 tamper 作为 override
+        4. 注册到 filter_functions L1 层
         :return:
         """
         # 清除上一次的运行时数据（L2/L3），保留 L1
         clear_runtime()
 
-        if self.lan == "php":
-            a = __import__('rules.tamper.demo', fromlist=['PHP_IS_REPAIR_DEFAULT'])
-            self.repair_dict = getattr(a, 'PHP_IS_REPAIR_DEFAULT')
+        # Step 1: 加载基础配置
+        from rules.tamper._loader import load_base_config, detect_frameworks, merge_framework_config
+        self.repair_dict, self.controlled_list = load_base_config(self.lan)
 
-            b = __import__('rules.tamper.demo', fromlist=['PHP_IS_CONTROLLED_DEFAULT'])
-            self.controlled_list = getattr(b, 'PHP_IS_CONTROLLED_DEFAULT')
+        # Step 2: 自动识别框架
+        if self.target_directory:
+            detected = detect_frameworks(self.lan, self.target_directory)
+            for fw_mod in detected:
+                merge_framework_config(self.repair_dict, self.controlled_list, fw_mod)
 
-        elif self.lan == "java":
-            a = __import__('rules.tamper.demo_java', fromlist=['JAVA_IS_REPAIR_DEFAULT'])
-            self.repair_dict = getattr(a, 'JAVA_IS_REPAIR_DEFAULT')
-
-            b = __import__('rules.tamper.demo_java', fromlist=['JAVA_IS_CONTROLLED_DEFAULT'])
-            self.controlled_list = getattr(b, 'JAVA_IS_CONTROLLED_DEFAULT')
-
-        elif self.lan == "python":
-            a = __import__("rules.tamper.demo_python", fromlist=["PYTHON_IS_REPAIR_DEFAULT"])
-            self.repair_dict = getattr(a, "PYTHON_IS_REPAIR_DEFAULT")
-
-            b = __import__("rules.tamper.demo_python", fromlist=["PYTHON_IS_CONTROLLED_DEFAULT"])
-            self.controlled_list = getattr(b, "PYTHON_IS_CONTROLLED_DEFAULT")
-
-        elif self.lan == "go":
-            a = __import__("rules.tamper.demo_go", fromlist=["GO_IS_REPAIR_DEFAULT"])
-            self.repair_dict = getattr(a, "GO_IS_REPAIR_DEFAULT")
-
-            b = __import__("rules.tamper.demo_go", fromlist=["GO_IS_CONTROLLED_DEFAULT"])
-            self.controlled_list = getattr(b, "GO_IS_CONTROLLED_DEFAULT")
-
-        elif self.lan == "javascript":
-            a = __import__("rules.tamper.demo_nodejs", fromlist=["JS_IS_REPAIR_DEFAULT"])
-            self.repair_dict = getattr(a, "JS_IS_REPAIR_DEFAULT")
-
-            b = __import__("rules.tamper.demo_nodejs", fromlist=["JS_IS_CONTROLLED_DEFAULT"])
-            self.controlled_list = getattr(b, "JS_IS_CONTROLLED_DEFAULT")
-
-        elif self.lan == "c":
-            self.repair_dict = {}
-            self.controlled_list = []
-
-        # 如果指定加载某个tamper，那么无视语言
+        # Step 3: 手动指定 tamper (-tp 参数, override)
         if self.tamper_name is not None:
             try:
-                # 首先加载修复函数指定
-                a = __import__('rules.tamper.' + self.tamper_name, fromlist=[self.tamper_name])
-                a = getattr(a, self.tamper_name)
-                self.repair_dict = self.repair_dict.copy()
-                self.repair_dict.update(a.items())
-
-                # 然后加载输入函数
-                b = __import__('rules.tamper.' + self.tamper_name, fromlist=[self.tamper_name + "_controlled"])
-                b = getattr(b, self.tamper_name + "_controlled")
-                self.controlled_list += b
-
+                # 尝试新版框架配置路径: rules.tamper.{language}.{name}
+                import importlib
+                # 先在对应语言目录下找
+                lang_prefix = 'rules.tamper.{}'.format(self.lan)
+                try:
+                    mod = importlib.import_module('{}.{}'.format(lang_prefix, self.tamper_name))
+                    if hasattr(mod, 'FILTER_FUNCTIONS'):
+                        merge_framework_config(self.repair_dict, self.controlled_list, mod)
+                    elif hasattr(mod, 'FRAMEWORK_NAME'):
+                        merge_framework_config(self.repair_dict, self.controlled_list, mod)
+                except ImportError:
+                    # 回退到旧版格式: rules.tamper.{name}
+                    a = __import__('rules.tamper.' + self.tamper_name, fromlist=[self.tamper_name])
+                    a = getattr(a, self.tamper_name)
+                    self.repair_dict.update(a.items())
+                    b = __import__('rules.tamper.' + self.tamper_name, fromlist=[self.tamper_name + "_controlled"])
+                    b = getattr(b, self.tamper_name + "_controlled")
+                    self.controlled_list += b
             except ImportError:
                 logger.warning('[AST][INIT] tamper_name init error... No module named {}'.format(self.tamper_name))
 
-        # 注册到 filter_functions L1（仅首次）
+        # Step 4: 注册到 filter_functions L1（仅首次）
         from core.filter_functions import stats, register_rule_functions
         if not stats().get(self.lan, {}).get("L1_builtin", 0):
             load_builtin(self.lan, self.repair_dict)
