@@ -147,10 +147,10 @@ def score2level(score):
 
 
 def scan_single(target_directory, single_rule, files=None, language=None, tamper_name=None, is_unconfirm=False,
-                newcore_function_list=None):
+                newcore_function_list=None, extra_sinks=None):
     try:
         return SingleRule(target_directory, single_rule, files, language, tamper_name, is_unconfirm,
-                          newcore_function_list).process()
+                          newcore_function_list, extra_sinks).process()
     except Exception:
         raise
 
@@ -162,6 +162,24 @@ def scan(target_directory, a_sid=None, s_sid=None, special_rules=None, language=
     rules = r.rules(special_rules)
     find_vulnerabilities = []
     newcore_function_list = {}
+    extra_sinks = {}
+
+    # 预加载框架 extra_sinks
+    if language and target_directory:
+        try:
+            from rules.tamper._loader import detect_frameworks, merge_framework_config, load_base_config
+            detected = detect_frameworks(language.lower(), target_directory)
+            if detected:
+                repair_tmp, controlled_tmp = load_base_config(language.lower())
+                for fw_mod in detected:
+                    extra = merge_framework_config(repair_tmp, controlled_tmp, fw_mod)
+                    if extra:
+                        for pattern, svids in extra.items():
+                            if pattern not in extra_sinks:
+                                extra_sinks[pattern] = set()
+                            extra_sinks[pattern] |= svids
+        except Exception as e:
+            logger.debug('[SCAN] extra_sinks pre-load error: {e}'.format(e=e))
 
     def store(result):
         if result is not None and isinstance(result, list) is True:
@@ -172,7 +190,7 @@ def scan(target_directory, a_sid=None, s_sid=None, special_rules=None, language=
             logger.debug('[SCAN] [STORE] Not found vulnerabilities on this rule!')
 
     async def start_scan(target_directory, rule, files, language, tamper_name):
-        result = scan_single(target_directory, rule, files, language, tamper_name, is_unconfirm, newcore_function_list)
+        result = scan_single(target_directory, rule, files, language, tamper_name, is_unconfirm, newcore_function_list, extra_sinks)
         store(result)
 
     if len(rules) == 0:
@@ -269,7 +287,7 @@ def scan(target_directory, a_sid=None, s_sid=None, special_rules=None, language=
 
 class SingleRule(object):
     def __init__(self, target_directory, single_rule, files, language=None, tamper_name=None, is_unconfirm=False,
-                 newcore_function_list=None):
+                 newcore_function_list=None, extra_sinks=None):
         self.target_directory = target_directory
         self.sr = single_rule
         self.files = files
@@ -287,6 +305,9 @@ class SingleRule(object):
 
         # new core function list
         self.newcore_function_list = newcore_function_list or {}
+
+        # 框架特有 sink 的额外 grep 模式
+        self.extra_sinks = extra_sinks or {}
 
         logger.info("[!] Start scan [CVI-{sr_id}]".format(sr_id=self.sr.svid))
 
@@ -409,6 +430,35 @@ class SingleRule(object):
                 logger.debug('match exception ({e})'.format(e=e))
                 logger.debug(traceback.format_exc())
                 return None
+
+            # EXTRA_SINKS: 框架特有 sink 的额外 grep
+            if self.extra_sinks:
+                current_svid = self.sr.svid
+                for pattern, svids in self.extra_sinks.items():
+                    if current_svid in svids:
+                        try:
+                            extra_result = f.grep(pattern)
+                            if extra_result:
+                                if result is None:
+                                    result = []
+                                if isinstance(extra_result, list):
+                                    # 去重
+                                    existing_set = set(tuple(x) if isinstance(x, tuple) else x for x in result)
+                                    for item in extra_result:
+                                        key = tuple(item) if isinstance(item, tuple) else item
+                                        if key not in existing_set:
+                                            result.append(item)
+                                            existing_set.add(key)
+                                else:
+                                    try:
+                                        extra_decoded = extra_result.decode('utf-8')
+                                        result.extend(extra_decoded)
+                                    except (AttributeError, UnicodeDecodeError):
+                                        pass
+                                logger.debug('[CVI-{cvi}] [EXTRA_SINK] matched: {p}'.format(
+                                    cvi=current_svid, p=pattern))
+                        except Exception as e:
+                            logger.debug('extra_sinks grep exception ({e})'.format(e=e))
 
             # AST-based sink finding for indirect call detection
             try:

@@ -287,7 +287,8 @@ def merge_framework_config(repair_dict, controlled_list, framework_module):
 
     :param repair_dict: existing repair dict (modified in-place)
     :param controlled_list: existing controlled list (modified in-place)
-    :param framework_module: framework module with FILTER_FUNCTIONS and CONTROLLED_SOURCES
+    :param framework_module: framework module with FILTER_FUNCTIONS, CONTROLLED_SOURCES, EXTRA_SINKS
+    :return: dict of {pattern_str: set_of_svids} for EXTRA_SINKS
     """
     # Merge FILTER_FUNCTIONS into repair_dict
     fw_repair = getattr(framework_module, 'FILTER_FUNCTIONS', {})
@@ -311,3 +312,18 @@ def merge_framework_config(repair_dict, controlled_list, framework_module):
         for src in fw_controlled:
             if src not in existing_set:
                 controlled_list.append(src)
+
+    # 收集 EXTRA_SINKS
+    extra_sinks = {}
+    fw_extra_sinks = getattr(framework_module, 'EXTRA_SINKS', [])
+    if fw_extra_sinks:
+        for sink_item in fw_extra_sinks:
+            if isinstance(sink_item, (list, tuple)) and len(sink_item) >= 2:
+                pattern = sink_item[0]
+                svids = sink_item[1]
+                if isinstance(svids, list):
+                    if pattern not in extra_sinks:
+                        extra_sinks[pattern] = set()
+                    extra_sinks[pattern] |= set(svids)
+
+    return extra_sinks

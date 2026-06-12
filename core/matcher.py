@@ -47,6 +47,7 @@ class VulnerabilityMatcher(object):
         self.repair_dict = {}
         self.repair_functions = []
         self.controlled_list = []
+        self.extra_sinks = {}  # {pattern_str: set_of_svids}
 
         self.target_directory = os.path.normpath(target_directory)
 
@@ -124,7 +125,12 @@ class VulnerabilityMatcher(object):
         if self.target_directory:
             detected = detect_frameworks(self.lan, self.target_directory)
             for fw_mod in detected:
-                merge_framework_config(self.repair_dict, self.controlled_list, fw_mod)
+                extra = merge_framework_config(self.repair_dict, self.controlled_list, fw_mod)
+                if extra:
+                    for pattern, svids in extra.items():
+                        if pattern not in self.extra_sinks:
+                            self.extra_sinks[pattern] = set()
+                        self.extra_sinks[pattern] |= svids
 
         # Step 3: 手动指定 tamper (-tp 参数, override)
         if self.tamper_name is not None:
@@ -136,9 +142,19 @@ class VulnerabilityMatcher(object):
                 try:
                     mod = importlib.import_module('{}.{}'.format(lang_prefix, self.tamper_name))
                     if hasattr(mod, 'FILTER_FUNCTIONS'):
-                        merge_framework_config(self.repair_dict, self.controlled_list, mod)
+                        extra = merge_framework_config(self.repair_dict, self.controlled_list, mod)
+                        if extra:
+                            for pattern, svids in extra.items():
+                                if pattern not in self.extra_sinks:
+                                    self.extra_sinks[pattern] = set()
+                                self.extra_sinks[pattern] |= svids
                     elif hasattr(mod, 'FRAMEWORK_NAME'):
-                        merge_framework_config(self.repair_dict, self.controlled_list, mod)
+                        extra = merge_framework_config(self.repair_dict, self.controlled_list, mod)
+                        if extra:
+                            for pattern, svids in extra.items():
+                                if pattern not in self.extra_sinks:
+                                    self.extra_sinks[pattern] = set()
+                                self.extra_sinks[pattern] |= svids
                 except ImportError:
                     # 回退到旧版格式: rules.tamper.{name}
                     a = __import__('rules.tamper.' + self.tamper_name, fromlist=[self.tamper_name])
