@@ -3342,7 +3342,7 @@ def _walk_php_ast_nodes(node, callback):
 def find_sinks(sink_names, files):
     """
     AST-based sink 查找。遍历所有文件的 AST 节点，查找匹配的函数调用。
-    支持直接调用匹配和间接调用检测。
+    支持直接调用匹配、间接调用检测和多层间接调用追踪（var_to_sink）。
 
     :param sink_names: list of SinkName(class_, method) from parse_sink_names()
     :param files: 文件路径列表
@@ -3358,6 +3358,9 @@ def find_sinks(sink_names, files):
     """
     results = []
 
+    # 构建 sink method 集合，用于快速判断字符串值是否为 sink
+    sink_method_set = {s.method for s in sink_names}
+
     for file_path in files:
         # 将文件路径规范化为 pretreatment 中使用的完整路径
         file_path = ast_object.get_path(file_path)
@@ -3367,11 +3370,33 @@ def find_sinks(sink_names, files):
         if not all_nodes:
             continue
 
+        # 第一遍：构建 var_to_sink_str 字典，追踪函数名赋值链
+        var_to_sink_str = {}
+
+        def _build_var_to_sink(node):
+            if isinstance(node, php.Assignment):
+                if isinstance(node.node, php.Variable):
+                    left_name = node.node.name  # e.g. '$fn'
+                    right = node.expr
+                    if isinstance(right, php.Variable):
+                        # $b = $a → 如果 $a 在映射中，继承
+                        if right.name in var_to_sink_str:
+                            var_to_sink_str[left_name] = var_to_sink_str[right.name]
+                    elif isinstance(right, str):
+                        # $fn = 'system' → 记录字符串值（去掉引号）
+                        val = right.strip("'\"")
+                        if val in sink_method_set:
+                            var_to_sink_str[left_name] = val
+
+        for top_node in all_nodes:
+            _walk_php_ast_nodes(top_node, _build_var_to_sink)
+
+        # 第二遍：匹配调用节点，使用 var_to_sink_str 解析间接调用
         def _on_call_node(node):
             if not isinstance(node, _FUNCTION_CALL_TYPES):
                 return
 
-            matched = _match_call_node(node, sink_names)
+            matched = _match_call_node(node, sink_names, var_to_sink_str)
             if matched:
                 results.append({
                     'file_path': file_path,
@@ -3390,18 +3415,23 @@ def find_sinks(sink_names, files):
     return results
 
 
-def _match_call_node(node, sink_names):
+def _match_call_node(node, sink_names, var_to_sink_str=None):
     """
     匹配单个调用节点与 sink_names 列表。
 
     :param node: FunctionCall / MethodCall / StaticMethodCall 节点
     :param sink_names: list of SinkName
+    :param var_to_sink_str: dict {变量名: sink函数名字符串}，用于多层间接调用追踪
     :return: dict with match info, or None if no match
     """
+    if var_to_sink_str is None:
+        var_to_sink_str = {}
+
     is_indirect = False
     callee_name = None
     class_name = None
     callback_callee = None
+    var_sink_match = None  # var_to_sink 解析出的匹配结果
 
     if isinstance(node, php.FunctionCall):
         if isinstance(node.name, str):
@@ -3433,6 +3463,24 @@ def _match_call_node(node, sink_names):
     if not callee_name:
         return None
 
+    # 多层间接调用追踪：检查 var_to_sink_str 解析变量对应的 sink
+    if isinstance(node, php.FunctionCall) and isinstance(node.name, php.Variable):
+        var_name = node.name.name  # e.g. '$b'
+        if var_name in var_to_sink_str:
+            sink_func_name = var_to_sink_str[var_name]
+            for sink in sink_names:
+                if sink.class_ is None and sink_func_name == sink.method:
+                    var_sink_match = sink
+                    break
+    elif isinstance(node, php.MethodCall) and isinstance(node.name, php.Variable):
+        var_name = node.name.name  # e.g. '$method'
+        if var_name in var_to_sink_str:
+            sink_func_name = var_to_sink_str[var_name]
+            for sink in sink_names:
+                if sink.class_ is None and sink_func_name == sink.method:
+                    var_sink_match = sink
+                    break
+
     # 回调间接调用检测 (call_user_func($func, $arg) 等)
     if not is_indirect and isinstance(node, php.FunctionCall) and isinstance(node.name, str):
         callback_funcs = {'call_user_func', 'call_user_func_array', 'array_map',
@@ -3453,6 +3501,16 @@ def _match_call_node(node, sink_names):
                 if callback_func_name and any(s.method == callback_func_name for s in sink_names):
                     is_indirect = True
                     callback_callee = callback_func_name  # 字符串值（如 'system'）
+
+    # var_to_sink 匹配优先返回：变量通过赋值链解析到具体 sink
+    if var_sink_match:
+        return {
+            'is_indirect': True,
+            'callee_name': callee_name,
+            'class_name': class_name,
+            'matched_sink': var_sink_match,
+            'callback_callee': None,
+        }
 
     # 匹配 sink_names
     for sink in sink_names:
