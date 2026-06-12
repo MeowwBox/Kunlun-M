@@ -359,9 +359,10 @@ class VulnerabilityMatcher(object):
 
     def _scan_javascript(self):
         try:
+            self.init_php_repair()
             ast = CAST(self.rule_match, self.target_directory, self.file_path, self.line_number,
                        self.code_content, files=self.files, rule_class=self.single_rule,
-                       repair_functions=self.repair_functions)
+                       repair_functions=self.repair_functions, controlled_params=self.controlled_list)
 
             # only match
             if self.rule_match_mode == const.mm_regex_only_match:

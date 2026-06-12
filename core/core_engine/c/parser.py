@@ -2257,6 +2257,10 @@ def scan_parser(rule_match, vul_lineno, file_path,
     ast_tree = _parse_c_ast(file_path)
     # ---- Source Discovery 预处理 ----
     global _sd_registry
+    # 将 tamper 框架的 controlled_params 注入到 C_CONTROLLED_SOURCES
+    for cp in controlled_params:
+        if cp not in C_CONTROLLED_SOURCES:
+            C_CONTROLLED_SOURCES.append(cp)
     _sd_registry = discover_sources(os.path.dirname(os.path.abspath(file_path)), ast_tree, file_path,
                                      extra_sources=C_CONTROLLED_SOURCES)
     # 注入 user source producers 到 C_CONTROLLED_SOURCES

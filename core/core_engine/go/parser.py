@@ -1871,6 +1871,10 @@ def scan_parser(rule_match, vul_lineno, file_path,
 
     # ---- Source Discovery 预处理 ----
     global _sd_registry
+    # 将 tamper 框架的 controlled_params 注入到 GO_CONTROLLED_SOURCES
+    for cp in controlled_params:
+        if cp not in GO_CONTROLLED_SOURCES:
+            GO_CONTROLLED_SOURCES.append(cp)
     _sd_registry = discover_sources(file_path, ast_tree, file_path, extra_sources=GO_CONTROLLED_SOURCES)
     # 注入 user source producers 到 GO_CONTROLLED_SOURCES
     for func_name in _sd_registry.user_source_functions:

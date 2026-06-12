@@ -346,12 +346,13 @@ def _walk_for_functions(nodes, filepath: str, registry: SourceRegistry):
 # ── Main Entry Point ────────────────────────────────────────────────────
 
 
-def discover_sources(project_dir: str, ast_object) -> SourceRegistry:
+def discover_sources(project_dir: str, ast_object, controlled_list=None) -> SourceRegistry:
     """Run source discovery for a JavaScript project.
 
     Args:
         project_dir: The project root directory.
         ast_object:  The Pretreatment singleton with .pre_result populated.
+        controlled_list: Optional list of extra controllable source names from tamper framework.
 
     Returns:
         A SourceRegistry with all discovered sources.
@@ -389,6 +390,11 @@ def discover_sources(project_dir: str, ast_object) -> SourceRegistry:
     if registry.user_source_functions:
         logger.info('[SourceDiscovery] User source producers: {0}'.format(
             sorted(registry.user_source_functions.keys())))
+
+    # 注入 tamper 框架的 controlled_list 作为额外的 source members
+    if controlled_list:
+        for src in controlled_list:
+            registry.source_members.add(src)
 
     logger.info('[SourceDiscovery] Summary: {0}'.format(registry.summary()))
     return registry

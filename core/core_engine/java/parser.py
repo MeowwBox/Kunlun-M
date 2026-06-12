@@ -2407,7 +2407,7 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
         if _source_registry is None:
             target_dir = os.path.dirname(os.path.abspath(file_path))
             try:
-                _source_registry = discover_sources(target_dir, _nodes, file_path)
+                _source_registry = discover_sources(target_dir, _nodes, file_path, controlled_list=controlled_params)
                 if _source_registry.source_members or _source_registry.annotated_param_names:
                     extra_sources = _source_registry.get_all_source_names()
                     controlled_params = list(controlled_params) + extra_sources

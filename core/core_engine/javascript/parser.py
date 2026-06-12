@@ -3489,7 +3489,7 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
         if _source_registry is None:
             project_dir = os.path.dirname(os.path.abspath(file_path))
             try:
-                _source_registry = discover_sources(project_dir, ast_object)
+                _source_registry = discover_sources(project_dir, ast_object, controlled_list=controlled_params)
             except Exception as e:
                 logger.debug('[AST] Source Discovery init error: {0}'.format(e))
         scan_results = []

@@ -3645,7 +3645,7 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
         if _source_registry is None:
             target_dir = ast_object.target_directory if hasattr(ast_object, 'target_directory') else ''
             if target_dir:
-                _source_registry = discover_sources(target_dir, ast_object)
+                _source_registry = discover_sources(target_dir, ast_object, controlled_list=controlled_params)
 
         # 间接调用快速路径
         if indirect_map and isinstance(indirect_map, dict):
