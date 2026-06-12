@@ -21,6 +21,15 @@ def detect(project_dir, language='go'):
 
 FILTER_FUNCTIONS = {}
 
+EXTRA_SINKS = [
+    ("c.HTML(", [8008]),
+    ("c.File(", [8006]),
+    ("c.ServeFile(", [8006]),
+    ("c.FileAttachment(", [8006]),
+    ("c.Redirect(", [8013]),
+    ("c.JSONP(", [8008]),
+]
+
 CONTROLLED_SOURCES = [
     'c.Query',
     'c.Param',

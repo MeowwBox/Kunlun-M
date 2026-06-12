@@ -22,6 +22,11 @@ def detect(project_dir, language='javascript'):
 
 FILTER_FUNCTIONS = {}
 
+EXTRA_SINKS = [
+    ("res.render(", [3005]),
+    ("res.redirect(", [3004]),
+]
+
 CONTROLLED_SOURCES = [
     'req.query',
     'req.body',

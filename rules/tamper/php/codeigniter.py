@@ -13,6 +13,11 @@ def detect(project_dir, language='php'):
 
 FILTER_FUNCTIONS = {}
 
+EXTRA_SINKS = [
+    ("$this->db->query(", [1004]),
+    ("->query(", [1004]),
+]
+
 CONTROLLED_SOURCES = [
     '$this->input->get',
     '$this->input->post',

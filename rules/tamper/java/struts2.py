@@ -14,4 +14,7 @@ FILTER_FUNCTIONS = {}
 
 CONTROLLED_SOURCES = []
 
-EXTRA_SINKS = []
+EXTRA_SINKS = [
+    ("ActionContext.getContext()", [6002]),
+    ("ServletActionContext.getRequest()", [6002]),
+]

@@ -23,4 +23,7 @@ CONTROLLED_SOURCES = [
     'Yii::$app->request->getBodyParam',
 ]
 
-EXTRA_SINKS = []
+EXTRA_SINKS = [
+    ("->createCommand(", [1004]),
+    ("Yii::\$app->db->createCommand(", [1004]),
+]

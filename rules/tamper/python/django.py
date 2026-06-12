@@ -14,6 +14,12 @@ def detect(project_dir, language='python'):
 
 FILTER_FUNCTIONS = {}
 
+EXTRA_SINKS = [
+    (".objects.raw(", [7002]),
+    (".objects.extra(", [7002]),
+    ("cursor().execute(", [7002]),
+]
+
 CONTROLLED_SOURCES = [
     'request.GET',
     'request.POST',

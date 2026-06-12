@@ -20,4 +20,7 @@ CONTROLLED_SOURCES = [
     'c.Ctx.Input.Query',
 ]
 
-EXTRA_SINKS = []
+EXTRA_SINKS = [
+    ("beego.AppConfig.String(", []),
+    ("c.Ctx.Output.Body(", [8008]),
+]

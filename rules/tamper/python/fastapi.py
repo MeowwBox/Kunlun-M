@@ -15,4 +15,7 @@ FILTER_FUNCTIONS = {}
 
 CONTROLLED_SOURCES = []
 
-EXTRA_SINKS = []
+EXTRA_SINKS = [
+    ("Jinja2Templates(", [7006]),
+    ("TemplateResponse(", [7006]),
+]

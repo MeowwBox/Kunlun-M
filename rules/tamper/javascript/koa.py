@@ -21,4 +21,7 @@ CONTROLLED_SOURCES = [
     'ctx.request.header',
 ]
 
-EXTRA_SINKS = []
+EXTRA_SINKS = [
+    ("ctx.render(", [3005]),
+    ("ctx.redirect(", [3004]),
+]

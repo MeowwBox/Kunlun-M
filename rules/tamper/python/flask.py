@@ -18,4 +18,8 @@ def detect(project_dir, language='python'):
 
 FILTER_FUNCTIONS = {}
 
+EXTRA_SINKS = [
+    ("render_template_string(", [7006]),
+]
+
 CONTROLLED_SOURCES = ['flask.request']

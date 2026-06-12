@@ -14,4 +14,7 @@ FILTER_FUNCTIONS = {}
 
 CONTROLLED_SOURCES = []
 
-EXTRA_SINKS = []
+EXTRA_SINKS = [
+    ("res.render(", [3005]),
+    ("res.redirect(", [3004]),
+]

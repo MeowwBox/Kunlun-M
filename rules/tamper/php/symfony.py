@@ -24,4 +24,8 @@ CONTROLLED_SOURCES = [
     'Request::get',
 ]
 
-EXTRA_SINKS = []
+EXTRA_SINKS = [
+    ("->createQuery(", [1004]),
+    ("->executeQuery(", [1004]),
+    ("Connection::executeQuery(", [1004]),
+]

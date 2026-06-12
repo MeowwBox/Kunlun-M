@@ -20,4 +20,8 @@ CONTROLLED_SOURCES = [
     'c.QueryString',
 ]
 
-EXTRA_SINKS = []
+EXTRA_SINKS = [
+    ("c.HTML(", [8008]),
+    ("c.File(", [8006]),
+    ("c.Redirect(", [8013]),
+]

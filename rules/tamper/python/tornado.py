@@ -20,4 +20,6 @@ CONTROLLED_SOURCES = [
     'self.get_cookie',
 ]
 
-EXTRA_SINKS = []
+EXTRA_SINKS = [
+    ("self.render(", [7006]),
+]

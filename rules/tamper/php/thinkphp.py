@@ -13,4 +13,9 @@ def detect(project_dir, language='php'):
 
 FILTER_FUNCTIONS = {}
 
+EXTRA_SINKS = [
+    ("Db::query(", [1004]),
+    ("Db::execute(", [1004]),
+]
+
 CONTROLLED_SOURCES = ['Input', 'request', 'I', 'input']

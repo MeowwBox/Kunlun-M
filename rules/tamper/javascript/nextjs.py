@@ -15,4 +15,6 @@ FILTER_FUNCTIONS = {}
 
 CONTROLLED_SOURCES = []
 
-EXTRA_SINKS = []
+EXTRA_SINKS = [
+    ("next/redirect(", [3004]),
+]

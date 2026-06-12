@@ -19,4 +19,7 @@ CONTROLLED_SOURCES = [
     'request.headers',
 ]
 
-EXTRA_SINKS = []
+EXTRA_SINKS = [
+    ("reply.view(", [3005]),
+    ("reply.redirect(", [3004]),
+]

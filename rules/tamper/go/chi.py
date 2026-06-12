@@ -18,4 +18,6 @@ CONTROLLED_SOURCES = [
     'chi.URLParamFromCtx',
 ]
 
-EXTRA_SINKS = []
+EXTRA_SINKS = [
+    ("http.Redirect(", [8013]),
+]
