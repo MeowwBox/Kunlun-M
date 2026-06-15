@@ -178,8 +178,7 @@
                     {% else %}
                       <td>
                         <div class="km-cell-config" title="{{ taskresult.vulfile_path|escape }}">
-                          {{ taskresult.vulfile_path }}
-                          <a href="{% url 'dashboard:task_code_view' task.id %}?file={{ taskresult.vulfile_path|urlencode }}" class="btn btn-xs btn-default" style="margin-left:6px;" title="查看代码"><i class="fa fa-code"></i></a>
+                          <a class="km-link-strong" href="{% url 'dashboard:project_files' project.id %}?file={{ taskresult.vulfile_path|urlencode }}" title="在源码中查看">{{ taskresult.vulfile_path }}</a>
                         </div>
                       </td>
                     {% endif %}

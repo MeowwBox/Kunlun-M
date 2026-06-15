@@ -9,7 +9,7 @@ from django.urls import path
 from django.contrib.auth.decorators import login_required
 
 from web.dashboard import views
-from web.dashboard.controller import tasks, rules, tampers, project, vendor
+from web.dashboard.controller import tasks, rules, tampers, project, vendor, files
 from web.dashboard.interface import scanresult
 
 app_name = "dashboard"
@@ -26,6 +26,9 @@ urlpatterns = [
     # projects
     path('projects/list', login_required(project.ProjectListView.as_view()), name='projects_list'),
     path('projects/detail/<int:project_id>', project.ProjectDetailView.as_view(), name="project_detail"),
+    path('projects/<int:project_id>/files', login_required(files.ProjectFilesView.as_view()), name='project_files'),
+    path('projects/<int:project_id>/files/api', files.ProjectFilesApiView.as_view(), name='project_files_api'),
+    path('projects/<int:project_id>/files/content', files.ProjectFileContentApiView.as_view(), name='project_files_content'),
 
     # rule
     path('rules/list', login_required(rules.RuleListView.as_view()), name='rules_list'),

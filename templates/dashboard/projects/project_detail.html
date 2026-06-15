@@ -9,6 +9,9 @@
 <div class="box-header with-border
 ">
   <h3 class="box-title">项目详情</h3>
+  <div class="box-tools pull-right">
+    <a class="btn btn-sm btn-primary" href="{% url 'dashboard:project_files' project.id %}"><i class="fa fa-code"></i> 源码浏览</a>
+  </div>
 </div>
 <div class="box-body">
   <!-- Date -->
@@ -126,7 +129,7 @@
                       {% if taskresult.cvi_id == '9999' %}
                         <div class="km-cell-title"><a class="km-link-strong" href="{% url 'dashboard:vendor_vulns_details' taskresult.vid %}" title="{{ taskresult.vulfile_path|escape }}">{{ taskresult.vulfile_path }}</a></div>
                       {% else %}
-                        <div class="km-cell-config" title="{{ taskresult.vulfile_path|escape }}">{{ taskresult.vulfile_path }}</div>
+                        <a class="km-link-strong" href="{% url 'dashboard:project_files' project.id %}?file={{ taskresult.vulfile_path|urlencode }}" title="{{ taskresult.vulfile_path|escape }}">{{ taskresult.vulfile_path }}</a>
                       {% endif %}
                     </td>
 
