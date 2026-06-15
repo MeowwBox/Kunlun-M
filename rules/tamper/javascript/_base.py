@@ -58,8 +58,6 @@ IS_REPAIR = {
     # 编码/加密
     "encodeURIComponent": [3100, 3102, 3106],
     "encodeURI": [3100, 3102, 3106],
-    "crypto.createHash": [3100, 3103],
-    "Buffer.from": [3100],
 
     # 反序列化防护
     "JSON.parse": [3105],

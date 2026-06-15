@@ -13,8 +13,23 @@ def detect(project_dir, language='javascript'):
 
 FILTER_FUNCTIONS = {}
 
-CONTROLLED_SOURCES = []
+CONTROLLED_SOURCES = [
+    'req.query',
+    'req.headers',
+    'req.body',
+    'req.cookies',
+    'context.query',
+    'context.params',
+    'searchParams',
+    'cookies()',
+]
 
 EXTRA_SINKS = [
     ("next/redirect(", [3004]),
+    ("dangerouslySetInnerHTML", [3100, 3110]),
+    ("router.push(", [3109]),
+    ("router.replace(", [3109]),
+    ("redirect(", [3109]),
+    ("fetch(", [3105]),
+    ("prisma.$queryRaw(", [3104]),
 ]

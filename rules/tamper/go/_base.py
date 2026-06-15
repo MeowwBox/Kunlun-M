@@ -27,7 +27,6 @@ IS_REPAIR = {
     "html.Escape": [8003, 8008],
     "template.HTMLEscapeString": [8003, 8008],
     "template.JSEscapeString": [8003, 8008],
-    "template.HTML": [8003, 8008],
     "json.Marshal": [8003, 8008],
     "json.MarshalIndent": [8003, 8008],
     "json.HTMLEscape": [8003, 8008],

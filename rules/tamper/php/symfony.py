@@ -13,6 +13,8 @@ def detect(project_dir, language='php'):
 FILTER_FUNCTIONS = {
     'escape': {'safe_for': [1000, 10001, 10002]},
     'htmlspecialchars': {'safe_for': [1000]},
+    'twig_escape': {'safe_for': [1000, 1010]},
+    'format_html': {'safe_for': [1000, 1010]},
 }
 
 CONTROLLED_SOURCES = [
@@ -22,10 +24,18 @@ CONTROLLED_SOURCES = [
     '$request->headers->get',
     '$request->getContent',
     'Request::get',
+    '$request->request->all',
+    '$request->query->all',
+    '$request->headers->all',
+    '$request->cookies->all',
 ]
 
 EXTRA_SINKS = [
     ("->createQuery(", [1004]),
     ("->executeQuery(", [1004]),
     ("Connection::executeQuery(", [1004]),
+    ("->render(", [1000]),
+    ("->renderView(", [1000]),
+    ("->redirect(", [1009]),
+    ("->redirectToRoute(", [1009]),
 ]

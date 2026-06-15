@@ -14,6 +14,9 @@ def detect(project_dir, language='php'):
 FILTER_FUNCTIONS = {
     'Html::encode': {'safe_for': [1000, 10001, 10002]},
     'HtmlPurifier::process': {'safe_for': [1000, 10001, 10002]},
+    'Html::tag': {'safe_for': [1000, 1010]},
+    'Yii::$app->db->quoteValue': {'safe_for': [1004]},
+    'Yii::$app->security->hashData': {'safe_for': [1008]},
 }
 
 CONTROLLED_SOURCES = [
@@ -21,9 +24,19 @@ CONTROLLED_SOURCES = [
     'Yii::$app->request->post',
     'Yii::$app->request->getQueryParam',
     'Yii::$app->request->getBodyParam',
+    'Yii::$app->request->getQueryParams',
+    'Yii::$app->request->getBodyParams',
+    'Yii::$app->request->getHeaders',
+    'Yii::$app->request->getCookies',
+    'Yii::$app->request->getRawBody',
 ]
 
 EXTRA_SINKS = [
     ("->createCommand(", [1004]),
     ("Yii::\$app->db->createCommand(", [1004]),
+    ("->render(", [1000]),
+    ("->renderPartial(", [1000]),
+    ("->renderAjax(", [1000]),
+    ("->redirect(", [1009]),
+    ("Yii::\$app->response->redirect(", [1009]),
 ]

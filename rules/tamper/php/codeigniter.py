@@ -11,11 +11,17 @@ def detect(project_dir, language='php'):
             or os.path.isdir(os.path.join(project_dir, 'app', 'Controllers')))
 
 
-FILTER_FUNCTIONS = {}
+FILTER_FUNCTIONS = {
+    '$this->security->xss_clean': {'safe_for': [1000, 1010]},
+    '$this->db->escape': {'safe_for': [1004]},
+    '$this->db->escape_str': {'safe_for': [1004]},
+}
 
 EXTRA_SINKS = [
     ("$this->db->query(", [1004]),
     ("->query(", [1004]),
+    ("view(", [1000]),
+    ("redirect(", [1009]),
 ]
 
 CONTROLLED_SOURCES = [
@@ -25,4 +31,6 @@ CONTROLLED_SOURCES = [
     '$this->request->getVar',
     '$this->request->getPost',
     '$this->request->getGet',
+    '$this->request->getJSON',
+    '$this->input->ip_address',
 ]

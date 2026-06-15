@@ -20,11 +20,28 @@ def detect(project_dir, language='javascript'):
     return False
 
 
-FILTER_FUNCTIONS = {}
+FILTER_FUNCTIONS = {
+    'express-validator': [3100, 3101, 3102, 3104],
+}
 
 EXTRA_SINKS = [
     ("res.render(", [3005]),
     ("res.redirect(", [3004]),
+    ("res.json(", [3100, 3110]),
+    ("res.send(", [3100, 3110]),
+    ("res.sendFile(", [3102, 3106]),
+    ("res.download(", [3102, 3106]),
+    ("child_process.exec(", [3101]),
+    ("child_process.spawn(", [3101]),
+    ("child_process.execSync(", [3101]),
+    ("fs.readFile(", [3102, 3106]),
+    ("fs.writeFile(", [3102]),
+    ("fs.readFileSync(", [3102, 3106]),
+    ("fetch(", [3105]),
+    ("axios.get(", [3105]),
+    ("axios.post(", [3105]),
+    ("eval(", [3103]),
+    ("new Function(", [3103]),
 ]
 
 CONTROLLED_SOURCES = [
@@ -39,4 +56,9 @@ CONTROLLED_SOURCES = [
     'req.ip',
     'req.get',
     'req.param',
+    'req.signedCookies',
+    'req.hostname',
+    'req.originalUrl',
+    'req.subdomains',
+    'req.user',
 ]

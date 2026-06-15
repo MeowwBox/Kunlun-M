@@ -11,11 +11,28 @@ def detect(project_dir, language='php'):
             or os.path.isfile(os.path.join(project_dir, 'tp5.php')))
 
 
-FILTER_FUNCTIONS = {}
+FILTER_FUNCTIONS = {
+    'think\\facade\\Validate': {'safe_for': [1000, 1001, 1004]},
+    'Db::where': {'safe_for': [1004]},  # param binding
+}
 
 EXTRA_SINKS = [
     ("Db::query(", [1004]),
     ("Db::execute(", [1004]),
+    ("->fetch(", [1000]),
+    ("->display(", [1000]),
+    ("redirect(", [1009]),
+    ("Db::name(", [1004]),
+    ("Cache::", [1004]),
 ]
 
-CONTROLLED_SOURCES = ['Input', 'request', 'I', 'input']
+CONTROLLED_SOURCES = [
+    'Input', 'request', 'I', 'input',
+    '$this->request->param',
+    '$this->request->get',
+    '$this->request->post',
+    '$this->request->header',
+    'request()->param',
+    'request()->get',
+    'request()->post',
+]

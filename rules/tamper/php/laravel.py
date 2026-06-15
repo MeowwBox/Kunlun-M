@@ -7,7 +7,7 @@ DEPENDENCIES = {'composer': ['laravel/framework']}
 
 def detect(project_dir, language='php'):
     """检测是否为 Laravel 项目"""
-    return (os.path.isfile(os.path.join(project_dir, 'app', 'Http', 'Kernel.py'))
+    return (os.path.isfile(os.path.join(project_dir, 'app', 'Http', 'Kernel.php'))
             or os.path.isfile(os.path.join(project_dir, 'routes', 'web.php'))
             or os.path.isfile(os.path.join(project_dir, 'artisan')))
 
@@ -16,6 +16,13 @@ FILTER_FUNCTIONS = {
     'e()': {'safe_for': [1000, 10001, 10002]},
     'csrf_field': {'safe_for': []},
     'csrf_token': {'safe_for': []},
+    # HTMLPurifier integration
+    'Purifier::clean': {'safe_for': [1000, 1010]},
+    'strip_tags': {'safe_for': [1000, 1010]},
+    # URL encoding
+    'urlencode': {'safe_for': [1005, 1006]},
+    # signed redirect is safe
+    'redirect()->signedRoute': {'safe_for': [1009]},
 }
 
 EXTRA_SINKS = [
@@ -23,6 +30,11 @@ EXTRA_SINKS = [
     ("DB::select", [1004]),
     ("DB::statement", [1004]),
     ("DB::unprepared", [1004]),
+    ("redirect(", [1009]),
+    ("view(", [1000]),
+    ("Response::json(", [1000]),
+    ("Storage::download(", [1002]),
+    ("Storage::get(", [1002]),
 ]
 
 CONTROLLED_SOURCES = [
@@ -49,4 +61,9 @@ CONTROLLED_SOURCES = [
     '$request',
     'input()',
     'old()',
+    'request()->all',
+    'request()->file',
+    'request()->bearerToken',
+    '$request->all',
+    '$request->files',
 ]
