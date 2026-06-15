@@ -155,7 +155,12 @@
                     {% if taskresult.cvi_id == '9999' %}
                       <td><div class="km-cell-title"><a class="km-link-strong" href="{% url 'dashboard:vendor_vulns_details' taskresult.vid %}" title="{{ taskresult.vulfile_path|escape }}">{{ taskresult.vulfile_path }}</a></div></td>
                     {% else %}
-                      <td><div class="km-cell-config" title="{{ taskresult.vulfile_path|escape }}">{{ taskresult.vulfile_path }}</div></td>
+                      <td>
+                        <div class="km-cell-config" title="{{ taskresult.vulfile_path|escape }}">
+                          {{ taskresult.vulfile_path }}
+                          <a href="{% url 'dashboard:task_code_view' task.id %}?file={{ taskresult.vulfile_path|urlencode }}" class="btn btn-xs btn-default" style="margin-left:6px;" title="查看代码"><i class="fa fa-code"></i></a>
+                        </div>
+                      </td>
                     {% endif %}
 
                     {% if taskresult.result_type == 'vendor_source_match' %}

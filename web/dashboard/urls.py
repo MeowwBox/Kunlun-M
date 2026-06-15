@@ -53,6 +53,7 @@ urlpatterns = [
     path("userinfo", views.userinfo, name="userinfo"),
     path('user/token/create', views.userinfo_token_create, name='userinfo_token_create'),
     path('user/token/delete/<int:token_id>', views.userinfo_token_delete, name='userinfo_token_delete'),
+    path("tasks/<int:task_id>/code", views.code_view, name='task_code_view'),
     path("overview", views.overview, name="overview"),
 
     # interface

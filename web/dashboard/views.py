@@ -11,6 +11,7 @@ from django.shortcuts import render, redirect
 from django.http import JsonResponse, HttpResponse
 from django.utils import timezone
 from django.conf import settings
+import os
 from web.index.models import ScanTask, Project
 from web.index.models import get_and_check_scantask_project_id
 
@@ -191,6 +192,89 @@ def userinfo_token_delete(req, token_id):
 
     ApiToken.objects.filter(id=token_id, user=req.user).update(is_active=False)
     return redirect('dashboard:userinfo')
+
+
+@login_required
+def code_view(req, task_id):
+    """查看任务关联的源代码文件"""
+    from web.index.models import ScanTask
+
+    task = ScanTask.objects.filter(id=task_id).first()
+    if not task:
+        return redirect('dashboard:tasks_list')
+
+    scan_dir = task.source_dir or task.target_path or ''
+
+    # 安全检查：路径必须在 PACKAGE_PATH 下
+    scan_dir = os.path.normpath(scan_dir)
+    allowed_base = os.path.normpath(settings.PACKAGE_PATH)
+    if not scan_dir.startswith(allowed_base + os.sep) and scan_dir != allowed_base:
+        return JsonResponse({"error": "Path not allowed"}, status=403)
+
+    req_file = req.GET.get('file', '')
+    req_lineno = req.GET.get('lineno', '')
+
+    # 默认展示目录树或指定文件
+    file_content = None
+    rel_path = ''
+    highlight_line = None
+    error = None
+
+    if req_file:
+        rel_path = req_file
+        abs_path = os.path.normpath(os.path.join(scan_dir, req_file))
+        # 防路径遍历
+        if not abs_path.startswith(scan_dir + os.sep) and abs_path != scan_dir:
+            error = "Invalid file path"
+        elif not os.path.isfile(abs_path):
+            error = "File not found"
+        else:
+            try:
+                with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
+                    file_content = f.readlines()
+            except Exception as e:
+                error = str(e)
+            if req_lineno:
+                try:
+                    highlight_line = int(req_lineno)
+                except ValueError:
+                    pass
+
+    # 构建目录树（最多 3 层）
+    tree = _build_file_tree(scan_dir, max_depth=3)
+
+    data = {
+        "task": task,
+        "tree": tree,
+        "file_content": file_content,
+        "rel_path": rel_path,
+        "highlight_line": highlight_line,
+        "error": error,
+    }
+    return render(req, 'dashboard/tasks/code_view.html', data)
+
+
+def _build_file_tree(root, max_depth=3, current_depth=0):
+    """构建目录树供前端展示"""
+    if not os.path.isdir(root) or current_depth >= max_depth:
+        return []
+    result = []
+    try:
+        entries = sorted(os.listdir(root))
+    except PermissionError:
+        return result
+    for name in entries:
+        if name.startswith('.') or name == '__pycache__':
+            continue
+        full = os.path.join(root, name)
+        is_dir = os.path.isdir(full)
+        result.append({
+            'name': name,
+            'path': os.path.relpath(full, root),
+            'is_dir': is_dir,
+            'children': _build_file_tree(full, max_depth, current_depth + 1) if is_dir else [],
+        })
+    return result
 
 
 @login_required

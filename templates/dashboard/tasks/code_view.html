@@ -1,0 +1,117 @@
+{% extends "dashboard/base.html" %}
+{% block title %}代码查看 - {{ task.task_name }}{% endblock %}
+
+{% block body %}
+<div class="row">
+  <!-- 目录树 -->
+  <div class="col-md-3">
+    <div class="box box-solid">
+      <div class="box-header with-border">
+        <h3 class="box-title"><i class="fa fa-folder-open"></i> 文件树</h3>
+      </div>
+      <div class="box-body" style="padding:0; max-height:80vh; overflow-y:auto;">
+        <ul class="nav nav-pills nav-stacked" id="fileTree">
+          {% if tree %}
+          {% for item in tree %}
+          <li class="tree-item" data-path="{{ item.path }}" data-dir="{{ item.is_dir }}">
+            <a href="#" style="word-break:break-all;">
+              <i class="fa {% if item.is_dir %}fa-folder{% else %}fa-file-code-o{% endif %}"></i>
+              {{ item.name }}
+            </a>
+            {% if item.children %}
+            <ul class="nav nav-pills nav-stacked" style="margin-left:16px; display:none;">
+              {% for child in item.children %}
+              <li class="tree-item" data-path="{{ item.path }}/{{ child.path }}" data-dir="{{ child.is_dir }}">
+                <a href="#" style="word-break:break-all;">
+                  <i class="fa {% if child.is_dir %}fa-folder{% else %}fa-file-code-o{% endif %}"></i>
+                  {{ child.name }}
+                </a>
+              </li>
+              {% endfor %}
+            </ul>
+            {% endif %}
+          </li>
+          {% endfor %}
+          {% else %}
+          <li><span style="color:#999; padding:8px; display:block;">无文件（任务可能使用本地路径扫描）</span></li>
+          {% endif %}
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- 代码展示 -->
+  <div class="col-md-9">
+    {% if error %}
+    <div class="alert alert-danger"><i class="fa fa-exclamation-circle"></i> {{ error }}</div>
+    {% elif file_content %}
+    <div class="box">
+      <div class="box-header with-border">
+        <h3 class="box-title"><i class="fa fa-code"></i> {{ rel_path }}</h3>
+        <div class="box-tools pull-right">
+          <span class="badge bg-gray">{{ file_content|length }} 行</span>
+        </div>
+      </div>
+      <div class="box-body" style="padding:0;">
+        <pre style="margin:0; padding:12px; font-size:12px; line-height:1.6; background:#1e1e1e; color:#d4d4d4; overflow-x:auto; max-height:80vh;"><code>{% for line in file_content %}
+<span class="line-num" style="display:inline-block; width:40px; text-align:right; color:#6e7681; margin-right:16px; user-select:none;{% if forloop.counter == highlight_line %} background:#6e2c00; color:#fff; font-weight:bold;{% endif %}">{{ forloop.counter }}</span><span{% if forloop.counter == highlight_line %} style="background:#6e2c00;"{% endif %}>{{ line|force_escape }}</span>{% endfor %}
+</code></pre>
+      </div>
+    </div>
+    {% else %}
+    <div class="box">
+      <div class="box-body">
+        <p style="color:#999; text-align:center; padding:60px 0;">
+          <i class="fa fa-hand-pointer" style="font-size:32px;"></i><br>
+          <br>从左侧文件树选择文件查看
+        </p>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+$(document).ready(function(){
+  $("#dashboard").removeClass("active menu-open");
+  $("#dashboard").find("ul li").removeClass("active");
+  $("#tasks").addClass("menu-open");
+  $("#tasks").find("ul").css("display","block");
+
+  var taskId = {{ task.id }};
+  var $tree = $("#fileTree");
+
+  // 文件夹展开/折叠
+  $tree.on("click", "li[data-dir='True'] > a", function(e){
+    e.preventDefault();
+    var $sub = $(this).siblings("ul");
+    var $icon = $(this).find("i");
+    if ($sub.is(":visible")) {
+      $sub.slideUp(200);
+      $icon.removeClass("fa-folder-open").addClass("fa-folder");
+    } else {
+      $sub.slideDown(200);
+      $icon.removeClass("fa-folder").addClass("fa-folder-open");
+    }
+  });
+
+  // 文件点击
+  $tree.on("click", "li[data-dir='False'] > a", function(e){
+    e.preventDefault();
+    var path = $(this).parent().data("path");
+    window.location.href = "{% url 'dashboard:task_code_view' task.id %}?file=" + encodeURIComponent(path);
+  });
+
+  // 高亮当前选中文件
+  $tree.find("li[data-dir='False']").each(function(){
+    if ($(this).data("path") === "{{ rel_path }}") {
+      $(this).addClass("active");
+      // 展开父目录
+      $(this).closest("ul").slideDown(0);
+    }
+  });
+});
+</script>
+{% endblock %}
