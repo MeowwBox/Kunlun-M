@@ -603,48 +603,11 @@ class VulnerabilityMatcher(object):
                 logger.debug("[CVI-{cvi}] [REGEX-RETURN-REGEX]".format(cvi=self.cvi))
                 return True, 'Regex-return-regex'
 
-            elif self.rule_match_mode == const.mm_function_param_controllable:
-                # 优先使用 vul_function（干净的函数名列表），避免 rstrip('(') 破坏正则模式
-                if (hasattr(self, 'vul_function') and
-                    isinstance(self.vul_function, list) and
-                    len(self.vul_function) > 0):
-                    rule_match = self.vul_function
-                else:
-                    rule_match = self.rule_match.strip('()').split('|')
-                    # 清理正则转义
-                    rule_match = [r.replace('\\\\.', '.').replace('\\\\(', '(').replace('\\\\)', ')').rstrip('(') for r in rule_match]
+            elif self.rule_match_mode in (const.mm_function_param_controllable,
+                                           const.mm_go_function_param_controllable):
+                # Go function-param-regex 模式（含 Go 专用 AST 污点追踪）
+                rule_match = self.vul_function
                 logger.debug('[RULE_MATCH] {r}'.format(r=rule_match))
-                try:
-                    result = go_scan_parser(rule_match, self.line_number, self.file_path,
-                                            repair_functions=self.repair_functions,
-                                            controlled_params=self.controlled_list, svid=self.cvi,
-                                            indirect_map=self.indirect_map)
-                    logger.debug('[AST] [RET] {c}'.format(c=result))
-                    if len(result) > 0:
-                        parsed = self._parse_ast_result(result)
-                        if parsed is not None:
-                            return parsed
-                    else:
-                        logger.debug(
-                            '[AST] Parser failed / vulnerability parameter is not controllable {r}'.format(
-                                r=result))
-                        return False, "Can't parser"
-                except Exception:
-                    exc_msg = traceback.format_exc()
-                    logger.warning(exc_msg)
-                    raise
-
-            elif self.rule_match_mode in (const.mm_go_function_param_controllable,):
-                # Go 专用 AST 模式：使用 Go AST 解析器 + 污点追踪
-                # 优先使用 vul_function（干净的函数名列表）
-                if (hasattr(self, 'vul_function') and
-                    isinstance(self.vul_function, list) and
-                    len(self.vul_function) > 0):
-                    rule_match = self.vul_function
-                else:
-                    rule_match = self.rule_match.strip('()').split('|')
-                    rule_match = [r.replace('\\\\\\\\.', '.').replace('\\\\\\\\(', '(').replace('\\\\\\\\)', ')').rstrip('(') for r in rule_match]
-                logger.debug('[RULE_MATCH][Go-AST] {r}'.format(r=rule_match))
                 try:
                     result = go_scan_parser(rule_match, self.line_number, self.file_path,
                                             repair_functions=self.repair_functions,

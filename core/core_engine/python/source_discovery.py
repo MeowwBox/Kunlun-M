@@ -304,11 +304,23 @@ def _expr_to_str_simple(node):
     return None
 
 
+def _function_returns_source(func_def, registry):
+    """检查函数定义的 return 语句值是否包含已知 source
+
+    只分析 return 语句的表达式，不检查函数体内其他位置的 source 访问。
+    """
+    for child in ast.walk(func_def):
+        if isinstance(child, ast.Return) and child.value:
+            if _node_contains_source(child.value, registry):
+                return True
+    return False
+
+
 def _walk_for_functions(tree, file_path, registry):
-    """遍历 AST 找函数定义，检查函数体是否直接访问已知 source
-    
-    只做一层分析：检查函数体的 return 语句或顶层表达式是否直接引用已知 source。
-    不做递归追踪（留给扫描引擎的污点分析）。
+    """遍历 AST 找函数定义，检查 return 语句的值是否直接引用已知 source
+
+    只标记 return 值包含 source 的函数为 source producer，
+    而非函数体内任何位置碰过 source 就标记。
     """
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -318,18 +330,20 @@ def _walk_for_functions(tree, file_path, registry):
             if func_name.startswith('_') and func_name != '__init__':
                 continue
 
-            # 检查函数体是否包含已知 source
-            if _node_contains_source(node, registry):
-                if func_name not in registry.user_source_functions:
-                    source_info = SourceInfo(
-                        source_type='user_defined',
-                        origin='{}:{}'.format(os.path.basename(file_path), getattr(node, 'lineno', '?')),
-                        is_safe=False,
-                        passthrough=True,
-                    )
-                    registry.user_source_functions[func_name] = source_info
-                    logger.debug('[SourceDiscovery] User source producer: {} in {}'.format(
-                        func_name, file_path))
+            # 只检查 return 语句的值是否包含 source
+            if not _function_returns_source(node, registry):
+                continue
+
+            if func_name not in registry.user_source_functions:
+                source_info = SourceInfo(
+                    source_type='user_defined',
+                    origin='{}:{}'.format(os.path.basename(file_path), getattr(node, 'lineno', '?')),
+                    is_safe=False,
+                    passthrough=True,
+                )
+                registry.user_source_functions[func_name] = source_info
+                logger.debug('[SourceDiscovery] User source producer: {} in {}'.format(
+                    func_name, file_path))
 
 
 # ---------------------------------------------------------------------------

@@ -299,16 +299,56 @@ def _node_contains_source(node: Any, registry: SourceRegistry) -> bool:
     return False
 
 
+def _find_return_nodes(body_nodes: list):
+    """从函数体中收集所有 Return 节点"""
+    returns = []
+    if not body_nodes:
+        return returns
+
+    def _walk(nodes):
+        if isinstance(nodes, list):
+            for node in nodes:
+                _walk(node)
+        elif isinstance(nodes, php.Return):
+            returns.append(nodes)
+        elif isinstance(nodes, php.Node):
+            node_type = type(nodes)
+            if hasattr(node_type, 'fields'):
+                for field_name in node_type.fields:
+                    child = getattr(nodes, field_name, None)
+                    if child is None:
+                        continue
+                    if isinstance(child, list):
+                        _walk(child)
+                    elif isinstance(child, php.Node):
+                        _walk(child)
+
+    _walk(body_nodes)
+    return returns
+
+
 def _function_body_contains_source(body_nodes: list, registry: SourceRegistry) -> bool:
-    """Check if a function body directly accesses any known source."""
+    """Check if any return statement's value contains or depends on a known source.
+
+    Previously this checked if ANY node in the function body referenced a source,
+    which over-marked functions whose return values had nothing to do with user input.
+    Now only marks a function as source producer when at least one return statement's
+    value directly references a source variable (or a framework request method call).
+    """
     if not body_nodes:
         return False
-    if isinstance(body_nodes, list):
-        for node in body_nodes:
-            if _node_contains_source(node, registry):
-                return True
-    else:
-        return _node_contains_source(body_nodes, registry)
+
+    return_nodes = _find_return_nodes(body_nodes)
+
+    # 没有 return 语句 → 返回值不携带 source
+    if not return_nodes:
+        return False
+
+    for ret in return_nodes:
+        ret_value = getattr(ret, 'node', None)
+        if ret_value and _node_contains_source(ret_value, registry):
+            return True
+
     return False
 
 

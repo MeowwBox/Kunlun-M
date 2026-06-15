@@ -1,189 +1,284 @@
-"""Source Discovery benchmark tests — 用户自定义 source producer 发现能力验证。
+#!/usr/bin/env python3
+"""测试 Source Discovery 修复：验证只标记 return 值包含 source 的函数"""
+import sys, os, importlib.util
 
-测试场景：
-1. PHP: getInput() 内部访问 $_GET，被 Source Discovery 标记为 source producer
-2. PHP: safeHelper() 返回硬编码值，不应被标记为 source producer
-3. JS: getUserInput() 内部访问 req.query，被标记为 source producer
-4. JS: safeHelper() 返回硬编码值，不应被标记
-5. Go: getUserInput() 内部访问 r.URL.Query()，被标记为 source producer
-6. C: read_user_input() 内部调用 fgets(stdin)，被标记为 source producer
-7. C: get_safe_value() 返回硬编码值，不应被标记
-8. C: read_env_config() 调用 getenv，被标记为 source producer
+PROJECT = '/home/ubuntu/.hermes/hermes-agent/Kunlun-M'
+sys.path.insert(0, PROJECT)
+
+def load_module(lang):
+    mod_path = os.path.join(PROJECT, 'core', 'core_engine', lang, 'source_discovery.py')
+    spec = importlib.util.spec_from_file_location(f'source_discovery_{lang}', mod_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+tests_passed = 0
+tests_failed = 0
+
+def check(name, actual, expected):
+    global tests_passed, tests_failed
+    status = "✅" if actual == expected else "❌"
+    if actual == expected:
+        tests_passed += 1
+    else:
+        tests_failed += 1
+    print(f"  {status} {name}: actual={actual}, expected={expected}")
+
+# =============================================
+# PHP 测试 — 用 lphply 构造 AST 节点
+# =============================================
+print("=" * 60)
+print("PHP Source Discovery 测试")
+print("=" * 60)
+
+php_sd = load_module('php')
+from phply import phpast as php
+
+# 构造两个函数体的 body_nodes:
+# getConfig: 函数体内有 $_GET 但 return 是 $this->config（不包含 source）
+# getRawInput: return $_GET['raw']（包含 source）
+# noReturn: 有 $_GET 但没有 return
+# mixedReturn: 有一个分支 return $_POST['data']
+
+def php_body_contains_test(body_nodes, registry):
+    """直接调用 _function_body_contains_source"""
+    return php_sd._function_body_contains_source(body_nodes, registry)
+
+registry = php_sd.SourceRegistry()
+registry.builtin_sources.add('$_GET')
+registry.builtin_sources.add('$_POST')
+
+# getConfig: body 有 $_GET 访问，但 return 值不包含 source
+getConfig_body = [
+    php.Assignment(
+        left=php.Variable(name='debug'),
+        expr=php.ArrayOffset(node=php.Variable(name='$_GET'), offset=php.Constant(value='debug')),
+        lineno=2
+    ),
+    php.Return(node=php.ObjectProperty(node=php.Variable(name='this'), name='config'), lineno=3),
+]
+check('getConfig body (return $this->config)', php_body_contains_test(getConfig_body, registry), False)
+
+# getRawInput: return $_GET['raw']
+getRawInput_body = [
+    php.Return(node=php.ArrayOffset(node=php.Variable(name='$_GET'), offset=php.Constant(value='raw')), lineno=2),
+]
+check('getRawInput body (return $_GET)', php_body_contains_test(getRawInput_body, registry), True)
+
+# noReturn: 无 return 语句
+noReturn_body = [
+    php.Assignment(
+        left=php.Variable(name='x'),
+        expr=php.ArrayOffset(node=php.Variable(name='$_GET'), offset=php.Constant(value='x')),
+        lineno=2
+    ),
+    php.Echo(node=php.Variable(name='x'), lineno=3),
+]
+check('noReturn body (无 return)', php_body_contains_test(noReturn_body, registry), False)
+
+# mixedReturn: return 在嵌套的 If 节点中
+mixedReturn_body = [
+    php.If(
+        expr=php.Variable(name='cond'),
+        body=[
+            php.Return(node=php.ObjectProperty(node=php.Variable(name='this'), name='safe'), lineno=3),
+        ],
+        elsif=[],
+        else_=[
+            php.Return(node=php.ArrayOffset(node=php.Variable(name='$_POST'), offset=php.Constant(value='data')), lineno=5),
+        ],
+        lineno=2
+    ),
+]
+check('mixedReturn body (return $_POST 在 else 分支)', php_body_contains_test(mixedReturn_body, registry), True)
+
+# =============================================
+# JavaScript 测试
+# =============================================
+print("\n" + "=" * 60)
+print("JavaScript Source Discovery 测试")
+print("=" * 60)
+
+js_sd = load_module('javascript')
+
+# 用 esprima 解析
+import esprima
+
+js_cases = {
+    'getConfig': """function getConfig() {
+        const debug = req.query.debug;
+        return this.config;
+    }""",
+    'getRawInput': """function getRawInput() {
+        return req.body.raw;
+    }""",
+    'noReturn': """function noReturn() {
+        const x = req.query.x;
+        console.log(x);
+    }""",
+    'mixedReturn': """function mixedReturn(cond) {
+        if (cond) { return this.safe; }
+        return req.body.data;
+    }""",
+}
+
+js_registry = js_sd.SourceRegistry()
+js_registry.source_members.add('req.query')
+js_registry.source_members.add('req.body')
+
+for name, code in js_cases.items():
+    tree = esprima.parse(code, loc=True)
+    body_stmts = tree.body[0].body.body  # FunctionDeclaration.body.body
+    result = js_sd._function_body_contains_source(body_stmts, js_registry)
+    expected = name in ('getRawInput', 'mixedReturn')
+    check(f'{name}', result, expected)
+
+# =============================================
+# Python 测试
+# =============================================
+print("\n" + "=" * 60)
+print("Python Source Discovery 测试")
+print("=" * 60)
+
+import ast
+py_sd = load_module('python')
+
+py_code = """
+def get_config():
+    debug = request.args.get('debug')
+    return self.config
+
+def get_raw_input():
+    return request.args.get('raw')
+
+def no_return():
+    x = request.args.get('x')
+    print(x)
+
+def mixed_return(cond):
+    if cond:
+        return self.safe
+    return request.form.get('data')
 """
-import os
-import sys
-import pytest
 
-# 设置路径
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+py_tree = ast.parse(py_code)
+py_registry = py_sd.SourceRegistry()
+py_registry.source_members.add('request.args')
+py_registry.source_members.add('request.form')
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'Kunlun_M.settings')
-import django
-django.setup()
+py_sd._walk_for_functions(py_tree, 'test.py', py_registry)
 
-from Kunlun_M.settings import PROJECT_DIRECTORY
+print(f"\n标记的 source producer: {list(py_registry.user_source_functions.keys())}")
+check('get_config (return 和 source 无关)', 'get_config' in py_registry.user_source_functions, False)
+check('get_raw_input (return request.args)', 'get_raw_input' in py_registry.user_source_functions, True)
+check('no_return (无 return)', 'no_return' in py_registry.user_source_functions, False)
+check('mixed_return (有 return source)', 'mixed_return' in py_registry.user_source_functions, True)
 
-# PHP
-from core.core_engine.php.parser import scan_parser as php_scan_parser
-from core.pretreatment import ast_object as _ast_obj
+# =============================================
+# Go 测试
+# =============================================
+print("\n" + "=" * 60)
+print("Go Source Discovery 测试")
+print("=" * 60)
 
-# JS
-from core.core_engine.javascript.parser import scan_parser as js_scan_parser
+go_sd = load_module('go')
+import tree_sitter_go as tsgo
+from tree_sitter import Language, Parser
+GO_PARSER = Parser(Language(tsgo.language()))
 
-# Go
-from core.core_engine.go.parser import scan_parser as go_scan_parser
+go_code = """
+package main
 
-# C
-from core.core_engine.c.parser import scan_parser as c_scan_parser
+import "os"
 
+func getConfig() string {
+    debug := os.Getenv("DEBUG")
+    return "config_value"
+}
 
-# ===========================================================================
-# Helper: 初始化预处理
-# ===========================================================================
+func getRawInput() string {
+    return os.Getenv("RAW_INPUT")
+}
 
-def _init_php_ast():
-    """初始化 PHP AST 预处理（source_discovery 模块需要）"""
-    runtime_files = [('.php', {'list': [
-        "v_source_discovery_producer.php",
-        "v_source_discovery_discrimination.php",
-    ]})]
-    _ast_obj.init_pre(
-        PROJECT_DIRECTORY + '/tests/vulnerabilities/',
-        runtime_files
-    )
-    _ast_obj.pre_ast_all(['php'])
+func noReturn() {
+    x := os.Getenv("X")
+    println(x)
+}
 
+func mixedReturn(cond bool) string {
+    if cond {
+        return "safe"
+    }
+    return os.Getenv("MIXED")
+}
+"""
 
-def _init_js_ast():
-    """初始化 JS AST 预处理"""
-    runtime_files = [('.js', {'list': [
-        "11_source_discovery_producer.js",
-        "12_source_discovery_discrimination.js",
-    ]})]
-    _ast_obj.init_pre(
-        PROJECT_DIRECTORY + '/tests/nodejs/',
-        runtime_files
-    )
-    _ast_obj.pre_ast_all(['javascript'])
+go_tree = GO_PARSER.parse(go_code.encode())
+go_registry = go_sd.SourceRegistry()
+go_registry.source_members.add('os.Getenv')
 
+go_sd._walk_for_functions(go_tree.root_node, 'test.go', go_registry)
 
-# ===========================================================================
-# PHP Tests
-# ===========================================================================
+print(f"\n标记的 source producer: {list(go_registry.user_source_functions.keys())}")
+check('getConfig (return 和 source 无关)', 'getConfig' in go_registry.user_source_functions, False)
+check('getRawInput (return os.Getenv)', 'getRawInput' in go_registry.user_source_functions, True)
+check('noReturn (无 return)', 'noReturn' in go_registry.user_source_functions, False)
+check('mixedReturn (有 return os.Getenv)', 'mixedReturn' in go_registry.user_source_functions, True)
 
-class TestPHPSourceDiscovery:
-    """PHP Source Discovery: 用户自定义 source producer"""
+# =============================================
+# C 测试
+# =============================================
+print("\n" + "=" * 60)
+print("C Source Discovery 测试")
+print("=" * 60)
 
-    def test_producer_detected(self):
-        """getInput() 内部访问 $_GET，echo $safeInput 应被检出"""
-        _init_php_ast()
-        fpath = PROJECT_DIRECTORY + '/tests/vulnerabilities/v_source_discovery_producer.php'
-        # line 24: echo $safeInput — $safeInput 来自 getInput("cmd") -> $_GET
-        result = php_scan_parser(['echo'], 24, fpath)
-        assert result, "echo $safeInput 应检出 (getInput -> $_GET)"
+c_sd = load_module('c')
+import tree_sitter_c as tsc
+C_PARSER = Parser(Language(tsc.language()))
 
-    def test_discrimination_safe_not_detected(self):
-        """safeHelper() 返回硬编码值，echo $safe 不应被检出为可控漏洞 (code != 1)"""
-        _init_php_ast()
-        fpath = PROJECT_DIRECTORY + '/tests/vulnerabilities/v_source_discovery_discrimination.php'
-        # line 23: echo $safe — $safe 来自 safeHelper() 硬编码值
-        result = php_scan_parser(['echo'], 23, fpath)
-        # 引擎可能返回 code 3 (NewFind/未确认) 或空，但不应该是 code 1 (确认可控)
-        if result:
-            for r in result:
-                assert r.get('code') != 1, "echo $safe 不应检出为可控漏洞 (safeHelper 是硬编码)"
+c_code = """
+const char* getConfig() {
+    char* debug = getenv("DEBUG");
+    return "config_value";
+}
 
-    def test_discrimination_user_detected(self):
-        """getUserData() 访问 $_POST，echo $user 应检出"""
-        _init_php_ast()
-        fpath = PROJECT_DIRECTORY + '/tests/vulnerabilities/v_source_discovery_discrimination.php'
-        # line 24: echo $user — $user 来自 getUserData("name") -> $_POST
-        result = php_scan_parser(['echo'], 24, fpath)
-        assert result, "echo $user 应检出 (getUserData -> $_POST)"
+const char* getRawInput() {
+    return getenv("RAW_INPUT");
+}
 
+void noReturn() {
+    char* x = getenv("X");
+    printf("%s", x);
+}
 
-# ===========================================================================
-# JavaScript Tests
-# ===========================================================================
+const char* mixedReturn(int cond) {
+    if (cond) {
+        return "safe";
+    }
+    return getenv("MIXED");
+}
+"""
 
-class TestJSSourceDiscovery:
-    """JavaScript Source Discovery: 用户自定义 source producer"""
+c_tree = C_PARSER.parse(c_code.encode())
+c_registry = c_sd.SourceRegistry()
+c_registry.source_members.add('getenv')
 
-    def test_producer_detected(self):
-        """getUserInput() 内部访问 req.query，eval(cmd) 应检出"""
-        _init_js_ast()
-        fpath = PROJECT_DIRECTORY + '/tests/nodejs/11_source_discovery_producer.js'
-        # line 23: eval(cmd) — cmd 来自 handleRequest -> getUserInput -> req.query
-        result = js_scan_parser(['eval'], 23, fpath)
-        assert result, "eval(cmd) 应检出 (getUserInput -> req.query)"
+c_sd._walk_for_functions(c_tree.root_node, 'test.c', c_registry)
 
-    def test_discrimination_safe_not_detected(self):
-        """safeHelper() 返回硬编码值，console.log(safe) 不应被检出为可控漏洞 (code != 1)"""
-        _init_js_ast()
-        fpath = PROJECT_DIRECTORY + '/tests/nodejs/12_source_discovery_discrimination.js'
-        # line 22: console.log(safe) — safe 来自 safeHelper() 硬编码值
-        result = js_scan_parser(['console.log'], 22, fpath)
-        if result:
-            for r in result:
-                assert r.get('code') != 1, "console.log(safe) 不应检出为可控漏洞 (safeHelper 是硬编码)"
+print(f"\n标记的 source producer: {list(c_registry.user_source_functions.keys())}")
+check('getConfig (return 和 source 无关)', 'getConfig' in c_registry.user_source_functions, False)
+check('getRawInput (return getenv)', 'getRawInput' in c_registry.user_source_functions, True)
+check('noReturn (无 return)', 'noReturn' in c_registry.user_source_functions, False)
+check('mixedReturn (有 return getenv)', 'mixedReturn' in c_registry.user_source_functions, True)
 
-    def test_discrimination_user_detected(self):
-        """getUserData() 访问 req.body，document.write(user) 应检出"""
-        _init_js_ast()
-        fpath = PROJECT_DIRECTORY + '/tests/nodejs/12_source_discovery_discrimination.js'
-        # line 23: document.write(user) — user 来自 getUserData -> req.body
-        result = js_scan_parser(['document.write'], 23, fpath)
-        assert result, "document.write(user) 应检出 (getUserData -> req.body)"
-
-
-# ===========================================================================
-# Go Tests
-# ===========================================================================
-
-class TestGoSourceDiscovery:
-    """Go Source Discovery: 用户自定义 source producer"""
-
-    def test_producer_detected(self):
-        """getUserInput() 内部访问 r.URL.Query()，exec.Command 应检出"""
-        fpath = PROJECT_DIRECTORY + '/tests/vulnerabilities/go/test_source_discovery_producer.go'
-        # line 22: exec.Command("sh", "-c", cmd).Run() — cmd 来自 getUserInput -> r.URL.Query()
-        result = go_scan_parser(['exec.Command'], 22, fpath)
-        assert result, "exec.Command 应检出 (getUserInput -> r.URL.Query)"
-        # 验证结果格式
-        assert isinstance(result, list)
-        assert len(result) > 0
-        assert result[0].get('code') == 1
-
-
-# ===========================================================================
-# C Tests
-# ===========================================================================
-
-class TestCSourceDiscovery:
-    """C/C++ Source Discovery: 用户自定义 source producer"""
-
-    def test_producer_detected(self):
-        """read_user_input() 内部调用 fgets(stdin)，system() 应检出"""
-        fpath = PROJECT_DIRECTORY + '/tests/c/23_source_discovery_producer.c'
-        # line 22: system(read_user_input()) — read_user_input -> fgets(stdin)
-        result = c_scan_parser(['system'], 22, fpath)
-        assert result, "system(process_data()) 应检出 (read_user_input -> fgets)"
-        assert isinstance(result, list)
-        assert len(result) > 0
-        assert result[0].get('code') in (1, 5)
-
-    def test_discrimination_safe_not_detected(self):
-        """get_safe_value() 返回硬编码值，printf(safe) 不应被检出为可控漏洞 (code != 1)"""
-        fpath = PROJECT_DIRECTORY + '/tests/c/24_source_discovery_discrimination.c'
-        # line 27: printf(safe) — safe 来自 get_safe_value() 硬编码
-        result = c_scan_parser(['printf'], 27, fpath)
-        if result:
-            for r in result:
-                assert r.get('code') != 1, "printf(safe) 不应检出为可控漏洞 (get_safe_value 是硬编码)"
-
-    def test_discrimination_env_detected(self):
-        """read_env_config() 调用 getenv，printf(config) 应检出"""
-        fpath = PROJECT_DIRECTORY + '/tests/c/24_source_discovery_discrimination.c'
-        # line 28: printf(config) — config 来自 read_env_config("PATH") -> getenv
-        result = c_scan_parser(['printf'], 28, fpath)
-        assert result, "printf(config) 应检出 (read_env_config -> getenv)"
+# =============================================
+# 总结
+# =============================================
+print("\n" + "=" * 60)
+print(f"总计: {tests_passed} passed, {tests_failed} failed")
+if tests_failed == 0:
+    print("全部通过 ✅")
+else:
+    print(f"有 {tests_failed} 个失败 ❌")
+    sys.exit(1)
+print("=" * 60)

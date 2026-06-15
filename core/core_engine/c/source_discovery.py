@@ -257,6 +257,38 @@ def _node_contains_source(node, registry, _depth=0):
     return False
 
 
+def _function_returns_source_c(func_node, registry):
+    """检查 C 函数定义的 return 语句值是否包含已知 source
+
+    只分析 return 语句的表达式，不检查函数体内其他位置的 source。
+    """
+    if func_node is None:
+        return False
+
+    def _walk_return(node):
+        if node is None or not hasattr(node, 'type'):
+            return False
+        if node.type == 'return_statement':
+            for child in node.children:
+                if hasattr(child, 'type') and child.type != 'return':
+                    if _node_contains_source(child, registry):
+                        return True
+            return False
+        # 不进入嵌套函数定义
+        if node.type == 'function_definition':
+            return False
+        for child in node.children:
+            if _walk_return(child):
+                return True
+        return False
+
+    # 从子节点开始遍历，避免 func_node 自身（function_definition）被跳过
+    for child in func_node.children:
+        if _walk_return(child):
+            return True
+    return False
+
+
 def _walk_for_functions(root_node, file_path, registry):
     """遍历 tree-sitter C AST 找函数定义，检查函数体是否直接访问已知 source
 
@@ -280,19 +312,21 @@ def _walk_for_functions(root_node, file_path, registry):
             if not func_name:
                 continue
 
-            # 检查函数体是否包含已知 source
-            if _node_contains_source(child, registry):
-                if func_name not in registry.user_source_functions:
-                    lineno = child.start_point[0] + 1 if hasattr(child, 'start_point') else '?'
-                    source_info = SourceInfo(
-                        source_type='user_defined',
-                        origin='{}:{}'.format(os.path.basename(file_path), lineno),
-                        is_safe=False,
-                        passthrough=True,
-                    )
-                    registry.user_source_functions[func_name] = source_info
-                    logger.debug('[SourceDiscovery][C] User source producer: {} in {}'.format(
-                        func_name, file_path))
+            # 检查 return 语句的值是否包含已知 source
+            if not _function_returns_source_c(child, registry):
+                continue
+
+            if func_name not in registry.user_source_functions:
+                lineno = child.start_point[0] + 1 if hasattr(child, 'start_point') else '?'
+                source_info = SourceInfo(
+                    source_type='user_defined',
+                    origin='{}:{}'.format(os.path.basename(file_path), lineno),
+                    is_safe=False,
+                    passthrough=True,
+                )
+                registry.user_source_functions[func_name] = source_info
+                logger.debug('[SourceDiscovery][C] User source producer: {} in {}'.format(
+                    func_name, file_path))
 
 
 def _extract_func_name(declarator_node):

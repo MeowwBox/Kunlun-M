@@ -76,12 +76,12 @@ class VirtualRule(SingleRuleMixin):
     EXTRA_SINKS 动态生成的虚拟规则。
     match_mode = function-param-regex，走 grep → AST → CAST 完整链路。
     """
-    def __init__(self, pattern, svid, language, vulnerability_desc=""):
+    def __init__(self, pattern, svid, language, vulnerability_desc="", level=0):
         self.svid = svid
         self.language = language
         self.vulnerability = vulnerability_desc or f"Framework sink: {pattern}"
         self.description = self.vulnerability
-        self.level = 0
+        self.level = level
         self.match_mode = "function-param-regex"
         # fpc 模板会自动补 \s*\((.*)(?:\))，pattern 不应带末尾括号
         self.match = pattern.strip().rstrip('(')

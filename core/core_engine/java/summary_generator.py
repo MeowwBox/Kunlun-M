@@ -29,8 +29,18 @@ _summary_registry: Dict[str, FunctionSummary] = {}
 
 
 def lookup_summary(func_name: str) -> Optional[FunctionSummary]:
-    """查询已生成的函数摘要（短名匹配）。"""
-    short_name = func_name.split(".")[-1] if "." in func_name else func_name
+    """Query function summary. Try exact match first, then fallback to short name."""
+    # Exact match first (caller may pass qualified name like ClassName.methodName)
+    result = _summary_registry.get(func_name)
+    if result:
+        return result
+    # Extract short name for fallback
+    if "::" in func_name:
+        short_name = func_name.split("::")[-1]
+    elif "." in func_name:
+        short_name = func_name.split(".")[-1]
+    else:
+        short_name = func_name
     return _summary_registry.get(short_name)
 
 

@@ -863,7 +863,7 @@ def function_back_java(call_node, stmts, vul_lineno, file_path,
         return (2, full_name, vul_lineno)
 
     # 4. 查函数摘要
-    callee_summary = lookup_summary(func_name)
+    callee_summary = lookup_summary(full_name)
     if callee_summary and callee_summary.return_flow:
         result = _judge_from_summary_java(callee_summary, call_node, controlled_params)
         if result is not None:
@@ -875,10 +875,16 @@ def function_back_java(call_node, stmts, vul_lineno, file_path,
         # 从全局方法索引中查找
         global_methods = _build_global_method_map(_ast_object_singleton, file_path)
         method_def = None
+        method_tree = None
+        method_filepath = None
 
-        for (mf, mn, mp_count), mdata in global_methods.items():
-            if mn == func_name:
-                method_def = mdata.get('method_node')
+        param_count = len(call_node.arguments or [])
+        gkey = (func_name, param_count)
+        if gkey in global_methods:
+            for ast_tree, method_node, mfp in global_methods[gkey]:
+                method_def = method_node
+                method_tree = ast_tree
+                method_filepath = mfp
                 break
 
         if method_def and hasattr(method_def, 'body') and method_def.body:

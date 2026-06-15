@@ -279,18 +279,58 @@ def _node_contains_source(node, registry: SourceRegistry) -> bool:
     return False
 
 
+def _find_return_statements(body_stmts: list):
+    """从函数体语句列表中收集所有 ReturnStatement 节点的 argument"""
+    returns = []
+    if not body_stmts:
+        return returns
+
+    def _walk(nodes):
+        if isinstance(nodes, list):
+            for node in nodes:
+                _walk(node)
+        elif hasattr(nodes, 'type'):
+            if nodes.type == 'ReturnStatement':
+                arg = getattr(nodes, 'argument', None)
+                if arg:
+                    returns.append(arg)
+            # 不递归进入函数嵌套（如内部函数定义）
+            elif nodes.type not in ('FunctionDeclaration', 'FunctionExpression',
+                                     'ArrowFunctionExpression'):
+                for attr_name, val in vars(nodes).items():
+                    if attr_name in _METADATA_FIELDS:
+                        continue
+                    if isinstance(val, list):
+                        _walk(val)
+                    elif hasattr(val, 'type'):
+                        _walk(val)
+
+    _walk(body_stmts)
+    return returns
+
+
 def _function_body_contains_source(body_stmts: list, registry: SourceRegistry) -> bool:
-    """Walk a list of statements; return True if any node accesses a known source."""
+    """Check if any return statement's value contains or depends on a known source.
+
+    Previously this walked all nodes in the function body, which over-marked
+    functions whose return values had nothing to do with user input.
+    Now only marks a function as source producer when at least one return
+    statement's argument directly references a source.
+    """
     if not body_stmts:
         return False
-    found = [False]
 
-    def _check(node):
-        if not found[0] and _node_contains_source(node, registry):
-            found[0] = True
+    return_args = _find_return_statements(body_stmts)
 
-    _walk_esprima(body_stmts, _check)
-    return found[0]
+    # 没有 return 语句 → 返回值不携带 source
+    if not return_args:
+        return False
+
+    for arg in return_args:
+        if _node_contains_source(arg, registry):
+            return True
+
+    return False
 
 
 # ── Function Discovery ─────────────────────────────────────────────────
