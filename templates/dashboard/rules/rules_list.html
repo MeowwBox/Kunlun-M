@@ -13,10 +13,22 @@
           <div class="box">
             <div class="box-header">
               <h3 class="box-title">规则列表</h3>
+              <div class="box-tools pull-right">
+                <div class="btn-group">
+                  <button class="btn btn-xs btn-default lang-filter active" data-lang="all">全部</button>
+                  <button class="btn btn-xs btn-default lang-filter" data-lang="php">PHP</button>
+                  <button class="btn btn-xs btn-default lang-filter" data-lang="python">Python</button>
+                  <button class="btn btn-xs btn-default lang-filter" data-lang="javascript">JS</button>
+                  <button class="btn btn-xs btn-default lang-filter" data-lang="java">Java</button>
+                  <button class="btn btn-xs btn-default lang-filter" data-lang="go">Go</button>
+                  <button class="btn btn-xs btn-default lang-filter" data-lang="c">C</button>
+                </div>
+                <input type="text" id="ruleSearch" class="form-control input-sm pull-right" style="width:200px;" placeholder="搜索规则名/CVI/描述...">
+              </div>
             </div>
             <!-- /.box-header -->
             <div class="box-body table-responsive no-padding">
-              <table class="table table-hover km-table km-table-wide">
+              <table class="table table-hover km-table km-table-wide" id="ruleTable">
                 <thead>
                   <tr>
                     <th class="km-col-id">ID</th>
@@ -31,7 +43,7 @@
                 </thead>
                 <tbody>
                   {% for rule in rules %}
-                  <tr>
+                  <tr data-lang="{{ rule.language|lower }}">
                     <td class="km-td-nowrap">{{ rule.id }}</td>
                     <td>
                       <div class="km-cell-title">
@@ -71,6 +83,28 @@
           $("#rules").addClass("menu-open");
           $("#rules").find("ul").find("li#rule_list").addClass("active");
           $("#rules").find("ul").css("display","block");
+
+          // 规则筛选
+          var curLang = 'all', curSearch = '';
+          function filterRules(){
+            $("#ruleTable tbody tr").each(function(){
+              var $r = $(this);
+              var t = $r.text().toLowerCase();
+              var m1 = curLang==='all' || $r.data('lang')===curLang;
+              var m2 = !curSearch || t.indexOf(curSearch)>=0;
+              $r.toggle(m1 && m2);
+            });
+          }
+          $(".lang-filter").click(function(){
+            $(".lang-filter").removeClass("active btn-primary").addClass("btn-default");
+            $(this).addClass("active btn-primary").removeClass("btn-default");
+            curLang = $(this).data('lang');
+            filterRules();
+          });
+          $("#ruleSearch").on("input", function(){
+            curSearch = $(this).val().toLowerCase().trim();
+            filterRules();
+          });
       });
 </script>
 
