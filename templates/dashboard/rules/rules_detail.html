@@ -9,24 +9,28 @@
       <div class="box">
         <div class="box-header">
             <h3 class="box-title">规则详情<small> {{ rule.rule_name }}.py</small></h3>
+            {% if rule.language %}
+            <span class="label label-default">{{ rule.language }}</span>
+            {% endif %}
+            {% if rule.level == 1 %}<span class="label label-danger">高危</span>
+            {% elif rule.level == 2 %}<span class="label label-warning">中危</span>
+            {% elif rule.level == 3 %}<span class="label label-primary">低危</span>
+            {% else %}<span class="label label-info">信息</span>{% endif %}
         </div>
-        <!-- /.box-header -->
         <div class="box box-solid">
-            <!-- /.box-header -->
             <div class="box-body">
-<pre class="language-python line-numbers">
-<code class="language-python">
+{% if source_code %}
+<pre class="language-python line-numbers"><code class="language-python">{{ source_code|force_escape }}</code></pre>
+{% else %}
+<pre class="language-python line-numbers"><code class="language-python">
 {% include "dashboard/rules/rule_temp.html" %}
-</code>
-</pre>
+</code></pre>
+{% endif %}
             </div>
-            <!-- /.box-body -->
           </div>
-        <!-- /.box-body -->
       </div>
-      <!-- /.box -->
     </div>
-    </div>
+</div>
 {% endblock %}
 
 {% block script %}

@@ -36,11 +36,22 @@ class RuleDetailView(View):
     def get(request, rule_id):
         row = Rules.objects.filter(id=rule_id).first()
 
-        # 这里有模板注入，真是个令人悲伤的故事
         if not row:
             return HttpResponseNotFound('Rule Not Found.')
-        else:
-            data = {
-                'rule': row,
-            }
-            return render(request, 'dashboard/rules/rules_detail.html', data)
+
+        source_code = None
+        # 优先从源文件读取真实代码
+        if row.language and row.svid:
+            rule_file = os.path.join(settings.RULES_PATH, row.language, 'CVI_{}.py'.format(row.svid))
+            if os.path.isfile(rule_file):
+                try:
+                    with open(rule_file, 'r', encoding='utf-8', errors='replace') as f:
+                        source_code = f.read()
+                except Exception:
+                    pass
+
+        data = {
+            'rule': row,
+            'source_code': source_code,
+        }
+        return render(request, 'dashboard/rules/rules_detail.html', data)

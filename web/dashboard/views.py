@@ -205,11 +205,11 @@ def code_view(req, task_id):
 
     scan_dir = task.source_dir or task.target_path or ''
 
-    # 安全检查：路径必须在 PACKAGE_PATH 下
-    scan_dir = os.path.normpath(scan_dir)
-    allowed_base = os.path.normpath(settings.PACKAGE_PATH)
-    if not scan_dir.startswith(allowed_base + os.sep) and scan_dir != allowed_base:
-        return JsonResponse({"error": "Path not allowed"}, status=403)
+    if not scan_dir or not os.path.isdir(scan_dir):
+        return render(req, 'dashboard/tasks/code_view.html', {
+            "task": task, "tree": [], "file_content": None,
+            "rel_path": "", "highlight_line": None, "error": "源码目录不存在",
+        })
 
     req_file = req.GET.get('file', '')
     req_lineno = req.GET.get('lineno', '')

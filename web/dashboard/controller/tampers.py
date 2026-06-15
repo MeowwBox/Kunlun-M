@@ -66,17 +66,45 @@ class TamperListView(TemplateView):
 
 
 class TamperDetailView(View):
-    """展示当前任务细节"""
+    """展示 tamper 详情及源码"""
 
     @staticmethod
     @login_required
-    def get(request, task_id):
-        tampers = Tampers.objects.all()
+    def get(request, tamper_id):
+        from Kunlun_M.settings import RULES_PATH
 
-        if not tampers:
-            return HttpResponseNotFound('Task Not Found.')
-        else:
-            data = {
-                'tampers': tampers
-            }
-            return render(request, 'dashboard/tasks/task_detail.html', data)
+        # tamper_id 是数据表 id，回溯到 tamper 名称
+        tamper_record = Tampers.objects.filter(id=tamper_id).first()
+        if not tamper_record:
+            return HttpResponseNotFound('Tamper Not Found.')
+
+        tamper_name = tamper_record.tam_name
+        all_records = Tampers.objects.filter(tam_name=tamper_name)
+
+        source_code = None
+        source_path = None
+
+        # 从文件系统搜索真实源文件
+        tamper_base = os.path.join(RULES_PATH, 'tamper')
+        if os.path.isdir(tamper_base):
+            for lang_dir in os.listdir(tamper_base):
+                full_dir = os.path.join(tamper_base, lang_dir)
+                if os.path.isdir(full_dir) and not lang_dir.startswith('_') and lang_dir != '__pycache__':
+                    candidate = os.path.join(full_dir, tamper_name + '.py')
+                    if os.path.isfile(candidate):
+                        try:
+                            with open(candidate, 'r', encoding='utf-8', errors='replace') as f:
+                                source_code = f.read()
+                            source_path = os.path.relpath(candidate, RULES_PATH)
+                        except Exception:
+                            pass
+                        break
+
+        data = {
+            'tamper_name': tamper_name,
+            'tamper_id': tamper_id,
+            'records': all_records,
+            'source_code': source_code,
+            'source_path': source_path,
+        }
+        return render(request, 'dashboard/tampers/tamper_detail.html', data)

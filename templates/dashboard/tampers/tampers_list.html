@@ -36,6 +36,7 @@
             <div class="km-tamper-detail">
               <div class="km-tamper-detail-toolbar">
                 <div id="tamperDetailTitle" class="km-tamper-detail-title">选择一个拓展插件查看详情</div>
+                <a id="tamperSourceLink" href="#" class="btn btn-default btn-xs" style="display:none"><i class="fa fa-file-code-o"></i> 查看源码</a>
                 <button id="tamperCopyBtn" type="button" class="btn btn-default btn-xs">复制</button>
               </div>
               <pre class="language-python"><code id="tamperDetailCode" class="language-python"></code></pre>
@@ -86,6 +87,12 @@
               detailCodeEl.textContent = code;
               if (window.Prism) {
                   Prism.highlightElement(detailCodeEl);
+              }
+              // 更新源码链接
+              if (id) {
+                  $("#tamperSourceLink").attr("href", "{% url 'dashboard:tamper_detail' 0 %}".replace("/0/", "/" + id + "/")).show();
+              } else {
+                  $("#tamperSourceLink").hide();
               }
           }
 
