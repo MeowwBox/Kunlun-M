@@ -18,13 +18,18 @@
               </div>
               <div id="tamperList" class="km-tamper-items">
                 {% for tamper in tampers.items %}
-                  <button type="button" class="km-tamper-item" data-name="{{ tamper.0|lower }}" data-id="{{ tamper.1.id }}">
+                  <button type="button" class="km-tamper-item" data-name="{{ tamper.0|lower }}" data-lang="{{ tamper.1.language }}" data-id="{{ tamper.1.id }}">
                     <span class="km-tamper-item-name">{{ tamper.0 }}</span>
+                    {% if tamper.1.language %}
+                    <span class="label label-default">{{ tamper.1.language }}</span>
+                    {% endif %}
                     <span class="km-muted">#{{ tamper.1.id }}</span>
                   </button>
                   <textarea id="tamperName{{ tamper.1.id }}" class="km-tamper-source">{{ tamper.0 }}</textarea>
+                  <textarea id="tamperLang{{ tamper.1.id }}" class="km-tamper-source">{{ tamper.1.language }}</textarea>
                   <textarea id="tamperFilter{{ tamper.1.id }}" class="km-tamper-source">{{ tamper.1.FilterFunction }}</textarea>
-                  <textarea id="tamperInput{{ tamper.1.id }}" class="km-tamper-source">{{ tamper.1.InputControl }}</textarea>
+                  <textarea id="tamperCS{{ tamper.1.id }}" class="km-tamper-source">{{ tamper.1.ControlledSources }}</textarea>
+                  <textarea id="tamperES{{ tamper.1.id }}" class="km-tamper-source">{{ tamper.1.ExtraSinks }}</textarea>
                 {% endfor %}
               </div>
             </div>
@@ -68,10 +73,17 @@
           function showDetail($btn) {
               var id = String($btn.attr("data-id") || "").trim();
               var name = $("#tamperName" + id).val() || "";
+              var lang = $("#tamperLang" + id).val() || "";
               var filterText = $("#tamperFilter" + id).val() || "";
-              var inputText = $("#tamperInput" + id).val() || "";
+              var csText = $("#tamperCS" + id).val() || "";
+              var esText = $("#tamperES" + id).val() || "";
               $detailTitle.text(name + (id ? ("  #" + id) : ""));
-              detailCodeEl.textContent = 'tamper_name = "' + name + '"\n' + 'filter_function = ' + filterText + '\n' + 'input_control = ' + inputText;
+              var code = 'FRAMEWORK_NAME = "' + name + '"\n'
+                  + 'LANGUAGE = "' + lang + '"\n\n'
+                  + 'FILTER_FUNCTIONS = ' + filterText + '\n\n'
+                  + 'CONTROLLED_SOURCES = ' + csText + '\n\n'
+                  + 'EXTRA_SINKS = ' + esText;
+              detailCodeEl.textContent = code;
               if (window.Prism) {
                   Prism.highlightElement(detailCodeEl);
               }
@@ -101,7 +113,8 @@
                   var $btn = $(this);
                   var name = ($btn.attr("data-name") || "");
                   var id = String($btn.attr("data-id") || "");
-                  var ok = !q || name.indexOf(q) > -1 || id.indexOf(q) > -1;
+                  var lang = ($btn.attr("data-lang") || "");
+                  var ok = !q || name.indexOf(q) > -1 || id.indexOf(q) > -1 || lang.indexOf(q) > -1;
                   $btn.toggle(ok);
               });
               pickFirstVisible();

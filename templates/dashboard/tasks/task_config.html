@@ -68,7 +68,12 @@
 
               <div class="form-group">
                 <label>拓展插件（可选）</label>
-                <input type="text" class="form-control" name="tamper_name" value="{{ options.tamper_name }}" placeholder="例如：wordpress">
+                <input type="text" class="form-control" name="tamper_name" value="{{ options.tamper_name }}" placeholder="输入或选择拓展插件" list="tamperList">
+                <datalist id="tamperList">
+                  {% for name in tamper_names %}
+                  <option value="{{ name }}">{{ name }}</option>
+                  {% endfor %}
+                </datalist>
               </div>
 
               <div class="form-group">

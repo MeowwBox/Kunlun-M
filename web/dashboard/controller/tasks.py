@@ -215,12 +215,16 @@ class TaskConfigView(View):
         project_des = project.project_des if project and project.project_des else ""
         vendor_globally_off = not bool(getattr(settings, "WITH_VENDOR", False))
 
+        # 获取可用 tamper 列表供下拉选择
+        tamper_names = list(Tampers.objects.values_list('tam_name', flat=True).distinct().order_by('tam_name'))
+
         data = {
             "task": task,
             "options": options,
             "archive_name": archive_name,
             "project_des": project_des,
             "vendor_globally_off": vendor_globally_off,
+            "tamper_names": tamper_names,
             "error_message": "",
         }
         return render(request, "dashboard/tasks/task_config.html", data)

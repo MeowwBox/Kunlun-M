@@ -4,6 +4,8 @@
 # @Author  : LoRexxar
 # @File    : tamper.py
 # @Contact : lorexxar@gmail.com
+import os
+
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse, HttpResponseNotFound
 from django.views.generic import TemplateView
@@ -11,6 +13,7 @@ from django.views import View
 from django.shortcuts import render, redirect
 from django.db.models import Q
 
+from Kunlun_M.settings import RULES_PATH
 from web.index.models import Tampers
 
 
@@ -26,19 +29,36 @@ class TamperListView(TemplateView):
         i = 1
 
         for t in ts:
-            if t.tam_name in tampers_details:
-                if t.tam_type == 'Filter-Function':
-                    tampers_details[t.tam_name]['FilterFunction'][t.tam_key] = t.tam_value
-                elif t.tam_type == 'Input-Control':
-                    tampers_details[t.tam_name]['InputControl'].append(t.tam_value)
-
-            else:
+            if t.tam_name not in tampers_details:
                 tampers_details[t.tam_name] = {
                     'id': i,
                     'FilterFunction': {},
-                    'InputControl': []
+                    'ControlledSources': [],
+                    'ExtraSinks': [],
+                    'language': '',
                 }
                 i += 1
+
+            if t.tam_type == 'Filter-Function':
+                tampers_details[t.tam_name]['FilterFunction'][t.tam_key] = t.tam_value
+            elif t.tam_type == 'Controlled-Sources':
+                tampers_details[t.tam_name]['ControlledSources'].append(t.tam_value)
+            elif t.tam_type == 'Extra-Sinks':
+                tampers_details[t.tam_name]['ExtraSinks'].append((t.tam_key, t.tam_value))
+            elif t.tam_type == 'Input-Control':  # 旧数据兼容
+                tampers_details[t.tam_name]['ControlledSources'].append(t.tam_value)
+
+        # 从文件系统获取语言映射
+        tamper_base = os.path.join(RULES_PATH, 'tamper')
+        if os.path.isdir(tamper_base):
+            for lang_dir in os.listdir(tamper_base):
+                full = os.path.join(tamper_base, lang_dir)
+                if os.path.isdir(full) and not lang_dir.startswith('_') and lang_dir != '__pycache__':
+                    for fname in os.listdir(full):
+                        if fname.endswith('.py') and not fname.startswith('_'):
+                            name = fname[:-3]
+                            if name in tampers_details:
+                                tampers_details[name]['language'] = lang_dir
 
         context['tampers'] = tampers_details
 
