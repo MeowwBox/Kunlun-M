@@ -7,22 +7,16 @@
 
 from utils.api import *
 
-
-class CVI_6015():
+class CVI_6015(SingleRuleMixin):
     def __init__(self):
         self.svid = 6015
         self.language = "java"
-        self.author = "KunLun-M"
         self.vulnerability = "Open Redirect"
         self.description = "用户可控的重定向URL可能导致开放重定向攻击"
         self.level = 2
 
-        self.status = True
         self.match_mode = "function-param-regex"
         self.match = r"\.sendRedirect\s*\(|redirect:"
-        self.match_name = None
-        self.black_list = None
-        self.keyword = None
         self.unmatch = [r"isValidRedirect", r"whitelist", r"allowedDomains"]
         self.vul_function = ["sendRedirect"]
 

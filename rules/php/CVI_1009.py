@@ -11,8 +11,7 @@
 
 from utils.api import *
 
-
-class CVI_1009():
+class CVI_1009(SingleRuleMixin):
     """
     rule class
     """
@@ -26,24 +25,9 @@ class CVI_1009():
         self.description = "参数可控会导致远程命令执行"
         self.level = 10
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "function-param-regex"
         self.match = r"(array_map|create_function|call_user_func|call_user_func_array|assert|eval|dl|register_tick_function|register_shutdown_function)"
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
-        # for regex
-        self.unmatch = None
-
-        self.vul_function = None
 
     def main(self, regex_string):
         """

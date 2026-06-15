@@ -11,8 +11,7 @@
 
 from utils.api import *
 
-
-class CVI_3011():
+class CVI_3011(SingleRuleMixin):
     """
     rule class
     """
@@ -21,24 +20,13 @@ class CVI_3011():
 
         self.svid = 3011
         self.language = "javascript"
-        self.author = "LoRexxar"
         self.vulnerability = "executeScript中参数拼接"
         self.description = "executeScript中code或者file出现参数拼接，可能导致跨域XSS漏洞等"
         self.level = 8
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "only-regex"
         self.match = ['(chrome\\.tabs\\.executeScript\\([^,]+,\\s*{[^}]*(\'|")?(code|file)(\'|")?\\s*:\\s*((`[^`]*\\${[^`]*`)|("[^"]*"\\s*\\+)|(\'[^\']*\'\\s*\\+)|\\w+))']
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
 
         # for regex
         self.unmatch = ['JSON\\.stringify\\(']

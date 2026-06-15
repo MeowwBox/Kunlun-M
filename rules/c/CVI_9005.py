@@ -12,8 +12,7 @@
 import re
 from utils.api import *
 
-
-class CVI_9005():
+class CVI_9005(SingleRuleMixin):
     """
     C/C++ 整数溢出（堆溢出）规则
     匹配 malloc、calloc、realloc、alloca 等内存分配函数
@@ -23,27 +22,13 @@ class CVI_9005():
     def __init__(self):
         self.svid = 9005
         self.language = "c"
-        self.author = "KunLun-M"
         self.vulnerability = "整数溢出"
         self.description = "使用了内存分配函数（malloc、calloc、realloc、alloca等），且分配大小参数可能受用户控制，可能导致整数溢出从而分配过小的内存，引发堆溢出。建议对用户输入的大小参数进行校验，使用安全的整数运算。"
         self.level = 7
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "function-param-regex"
         self.match = r"\bmalloc\s*\(|\bcalloc\s*\(|\brealloc\s*\(|\balloca\s*\("
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
-        # for regex
-        self.unmatch = None
 
         self.vul_function = ["malloc", "calloc", "realloc", "alloca"]
 

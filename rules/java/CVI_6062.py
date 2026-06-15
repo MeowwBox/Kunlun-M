@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 from utils.api import *
 
-
-class CVI_6062():
+class CVI_6062(SingleRuleMixin):
     """
     Fastjson 1.2.25-1.2.47 autoType 绕过
     """
@@ -10,9 +9,7 @@ class CVI_6062():
         self.svid = 6062
         self.language = "java"
         self.vulnerability = "Fastjson autoType 绕过 RCE"
-        self.author = "Kunlun-M"
         self.level = 8
-        self.status = True
         self.description = "Fastjson 1.2.25-1.2.47 autoType黑名单可被多次绕过,包括缓存投毒、expectClass等多种bypass"
 
         self.match_mode = "framework-dependency"
@@ -31,9 +28,4 @@ class CVI_6062():
         self.config_patterns = []
         self.exclude_patterns = []
 
-        self.match_name = None
-        self.black_list = None
-        self.keyword = None
-        self.unmatch = None
-        self.vul_function = None
         self.main = None

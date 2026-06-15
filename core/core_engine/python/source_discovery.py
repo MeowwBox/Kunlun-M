@@ -336,12 +336,13 @@ def _walk_for_functions(tree, file_path, registry):
 # 主入口
 # ---------------------------------------------------------------------------
 
-def discover_sources(project_dir, tree, file_path=None):
+def discover_sources(project_dir, tree, file_path=None, controlled_list=None):
     """发现 Python 项目中的 source
-    
+
     :param project_dir: 项目目录路径
     :param tree: ast.Module AST 树
     :param file_path: 当前文件路径（用于日志）
+    :param controlled_list: Optional list of extra controllable source names from tamper framework
     :return: SourceRegistry 实例
     """
     registry = SourceRegistry()
@@ -369,5 +370,10 @@ def discover_sources(project_dir, tree, file_path=None):
         names = sorted(registry.user_source_functions.keys())
         logger.debug('[SourceDiscovery] User source producers ({}): {}'.format(
             len(names), names))
+
+    # 注入 tamper 框架的 controlled_list 作为额外的 source members
+    if controlled_list:
+        for src in controlled_list:
+            registry.add_source_member(src)
 
     return registry

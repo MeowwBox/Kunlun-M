@@ -12,8 +12,7 @@
 import re
 from utils.api import *
 
-
-class CVI_8005():
+class CVI_8005(SingleRuleMixin):
     """
     Go SSRF 规则
     匹配 http.Get/http.Post/http.NewRequest/http.DefaultClient.Get/net.Dial 等
@@ -22,27 +21,13 @@ class CVI_8005():
     def __init__(self):
         self.svid = 8005
         self.language = "go"
-        self.author = "KunLun-M"
         self.vulnerability = "SSRF"
         self.description = "使用了HTTP请求函数（http.Get、http.Post、http.NewRequest、http.DefaultClient.Get等），如果请求URL来自用户输入，可能导致服务端请求伪造(SSRF)攻击。建议对URL进行白名单校验，禁止访问内网地址和敏感端口。"
         self.level = 8
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "function-param-regex"
         self.match = r"http\.Get\s*\(|http\.Post\s*\(|http\.NewRequest\s*\(|http\.Head\s*\(|http\.PostForm\s*\(|\.Get\s*\(|\.Post\s*\(|\.Do\s*\(|net\.Dial\s*\(|net\.DialTimeout\s*\("
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
-        # for regex
-        self.unmatch = None
 
         self.vul_function = [
             "http.Get", "http.Post", "http.NewRequest", "http.Head",

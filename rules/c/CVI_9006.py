@@ -12,8 +12,7 @@
 import re
 from utils.api import *
 
-
-class CVI_9006():
+class CVI_9006(SingleRuleMixin):
     """
     C/C++ 环境变量注入规则
     匹配 setenv、putenv、unsetenv 等环境变量操作函数
@@ -22,27 +21,13 @@ class CVI_9006():
     def __init__(self):
         self.svid = 9006
         self.language = "c"
-        self.author = "KunLun-M"
         self.vulnerability = "环境变量注入"
         self.description = "使用了环境变量操作函数（setenv、putenv、unsetenv等），且参数可能受用户控制，可能导致环境变量注入。攻击者可通过注入恶意环境变量影响程序行为或利用 LD_PRELOAD 等机制执行代码。建议对用户输入进行严格校验，避免直接传递给环境变量操作函数。"
         self.level = 7
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "function-param-regex"
         self.match = r"\bsetenv\s*\(|\bputenv\s*\(|\bunsetenv\s*\("
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
-        # for regex
-        self.unmatch = None
 
         self.vul_function = ["setenv", "putenv", "unsetenv"]
 

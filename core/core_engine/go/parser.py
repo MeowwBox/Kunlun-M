@@ -240,8 +240,7 @@ def _init_function_summaries(file_path):
 
         _summaries_initialized = True
     except Exception as e:
-        logger.debug(f"[AST][Go] 摘要初始化失败: {e}")
-        _summaries_initialized = True
+        logger.warning(f"[AST][Go] 摘要初始化失败: {e}")
 
 
 # ---- tree-sitter AST 辅助函数 ----
@@ -615,7 +614,8 @@ def _parse_go_ast(file_path):
         tree = _ts_parser.parse(source)
         _ast_cache[file_path] = tree
         return tree
-    except Exception:
+    except Exception as e:
+        logger.warning(f"[AST][Go] Go AST 解析失败: file={file_path}, error={e}")
         return None
 
 
@@ -821,10 +821,10 @@ def _collect_identifiers_from_ast(node):
             if n.children and n.children[0].type == 'identifier':
                 base_name = n.children[0].text.decode('utf-8', errors='ignore')
                 identifiers.append(base_name)
-            # 也收集完整表达式文本（如 r.URL.Query）
+            # 也收集完整表达式文本（如 os.Args, r.URL.Query）
             full_text = n.text.decode('utf-8', errors='ignore')
             if full_text not in identifiers:
-                pass  # 不收集完整链式表达式，只收集基础变量
+                identifiers.append(full_text)
             # 递归处理子节点（可能包含 call_expression）
             for child in n.children:
                 _walk(child)
@@ -1153,12 +1153,19 @@ def _is_controllable_source(expr_str, controlled_params=None):
 
 
 def _is_repair_function(expr_str, repair_functions=None):
-    """检查表达式是否包含修复函数"""
+    """
+    检查表达式是否包含修复函数 — 精确匹配函数名。
+    Go 修复函数名格式为 "pkg.Func"（如 "html.EscapeString"）。
+    """
     if repair_functions is None:
         repair_functions = is_repair_functions
 
+    if not repair_functions:
+        return False
+
     for rf in repair_functions:
-        if rf in expr_str:
+        # 精确匹配：expr_str 就是函数名、或以 "func_name(" 开头
+        if expr_str == rf or expr_str.startswith(rf + "("):
             return True
     return False
 
@@ -1418,7 +1425,8 @@ def _text_trace_variable(file_path, var_name, vul_lineno,
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             lines = f.readlines()
-    except Exception:
+    except Exception as e:
+        logger.warning('[AST][Go] _text_trace_variable failed to read {}: {}'.format(file_path, e))
         return (-1, 0)
 
     # 向上查找赋值
@@ -1708,18 +1716,22 @@ def _trace_variable_in_lines_impl(file_path, var_name, from_line, to_line,
 
     # 在函数体内查找 var_name 的赋值
     # 找到函数体的 block 节点
-    func_node = None
+    candidates = []
+
     def _find_func(node):
-        nonlocal func_node
-        if node.type in ('function_declaration', 'method_declaration'):
-            if node.start_point[0] + 1 <= to_line <= node.end_point[0] + 1:
-                func_node = node
-                return
+        if node.type in ('function_declaration', 'method_declaration', 'func_literal'):
+            start = node.start_point[0] + 1
+            end = node.end_point[0] + 1
+            if start <= to_line <= end:
+                candidates.append(node)
         for child in node.children:
             _find_func(child)
-            if func_node:
-                return
+
     _find_func(tree.root_node)
+    if candidates:
+        func_node = min(candidates, key=lambda n: n.end_point[0] - n.start_point[0])
+    else:
+        func_node = None
 
     if not func_node:
         return (-1, 0)
@@ -1778,6 +1790,23 @@ def scan_parser(rule_match, vul_lineno, file_path,
     :param indirect_map: 间接调用映射 {变量名: sink函数名}，用于替换行文本中的变量名做匹配
     :return: 扫描结果列表
     """
+    # 清除上次扫描残留，重建 GO_CONTROLLED_SOURCES 初始列表（防止跨项目污染）
+    global GO_CONTROLLED_SOURCES
+    GO_CONTROLLED_SOURCES = [
+        "r.URL.Query()", "r.FormValue", "r.PostFormValue",
+        "r.Header.Get", "r.Header.Get",
+        "r.Body", "r.URL.Path", "r.URL.RawPath",
+        "r.Host", "r.RemoteAddr", "r.UserAgent",
+        "r.Referer", "r.Method",
+        "os.Args", "os.Getenv",
+        "flag.String", "flag.Int", "flag.Bool",
+        "gin.Default", "c.Query", "c.Param", "c.PostForm",
+        "c.ShouldBind", "c.ShouldBindJSON", "c.ShouldBindQuery",
+        "c.GetHeader", "c.GetCookie",
+        "echo.QueryParams", "echo.FormValue",
+        "fiber.Query", "fiber.Params", "fiber.Body",
+        "beego.Input", "beego.GetString", "beego.GetStrings",
+    ]
     _trace_cache.clear()
 
     if repair_functions is None:
@@ -1846,6 +1875,10 @@ def scan_parser(rule_match, vul_lineno, file_path,
 
     # ---- Source Discovery 预处理 ----
     global _sd_registry
+    # 将 tamper 框架的 controlled_params 注入到 GO_CONTROLLED_SOURCES
+    for cp in controlled_params:
+        if cp not in GO_CONTROLLED_SOURCES:
+            GO_CONTROLLED_SOURCES.append(cp)
     _sd_registry = discover_sources(file_path, ast_tree, file_path, extra_sources=GO_CONTROLLED_SOURCES)
     # 注入 user source producers 到 GO_CONTROLLED_SOURCES
     for func_name in _sd_registry.user_source_functions:
@@ -2031,6 +2064,15 @@ def _find_indirect_calls_in_func(block_node, sink_names, file_path):
                 if left_ids and right_sink:
                     for var_name in left_ids:
                         var_to_sink[var_name] = right_sink
+                elif left_ids and not right_sink and right_expr_list:
+                    # 多层间接调用：右侧是 identifier 且在 var_to_sink 中，继承映射
+                    for sub in right_expr_list.children:
+                        if sub.type == 'identifier':
+                            id_text = sub.text.decode('utf-8', errors='ignore')
+                            if id_text in var_to_sink:
+                                for var_name in left_ids:
+                                    var_to_sink[var_name] = var_to_sink[id_text]
+                            break  # 只检查第一个 identifier
 
                 # 检查右侧 expression_list 中嵌套的间接调用
                 if right_expr_list and var_to_sink:
@@ -2080,9 +2122,28 @@ def _find_indirect_calls_in_func(block_node, sink_names, file_path):
                     for var_name in left_ids:
                         var_to_sink[var_name] = right_sink
                 elif left_ids and not right_sink:
-                    # 新的赋值不匹配 sink，清除旧映射
-                    for var_name in left_ids:
-                        var_to_sink.pop(var_name, None)
+                    # 多层间接调用：仅检查右侧 expression_list 的 identifier 是否在 var_to_sink 中
+                    propagated = False
+                    if len(expr_lists) >= 2:
+                        # 左右分离：只检查右侧
+                        right_exprs = expr_lists[1:]
+                    elif len(expr_lists) == 1:
+                        # 只有一个 expr_list（可能是左侧单 identifier 的情况），不检查
+                        right_exprs = []
+                    else:
+                        right_exprs = []
+                    for expr_list in right_exprs:
+                        for sub in expr_list.children:
+                            if sub.type == 'identifier':
+                                id_text = sub.text.decode('utf-8', errors='ignore')
+                                if id_text in var_to_sink:
+                                    for var_name in left_ids:
+                                        var_to_sink[var_name] = var_to_sink[id_text]
+                                    propagated = True
+                                break
+                    if not propagated:
+                        for var_name in left_ids:
+                            var_to_sink.pop(var_name, None)
 
                 # 检查右侧 expression_list 中嵌套的间接调用
                 if right_expr_list and var_to_sink:

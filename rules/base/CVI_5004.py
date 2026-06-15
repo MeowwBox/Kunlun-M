@@ -11,8 +11,7 @@
 
 from utils.api import *
 
-
-class CVI_5004():
+class CVI_5004(SingleRuleMixin):
     """
     rule class
     """
@@ -20,29 +19,16 @@ class CVI_5004():
     def __init__(self):
         self.svid = 5004
         self.language = "base"
-        self.author = "LoRexxar"
         self.vulnerability = "git/svn文件泄露"
         self.description = "要检查开源项目的git/svn文件是否存在内网敏感信息"
         self.level = 2
-
-        # status
-        self.status = True
 
         # 部分配置
         self.match_mode = "file-path-regex-match"
         self.match = ['.git/config']
 
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
         # for regex
         self.unmatch = []
-
-        self.vul_function = None
 
     def main(self, regex_string):
         """

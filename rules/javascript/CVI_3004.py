@@ -11,8 +11,7 @@
 
 from utils.api import *
 
-
-class CVI_3004():
+class CVI_3004(SingleRuleMixin):
     """
     rule class
     """
@@ -21,29 +20,13 @@ class CVI_3004():
 
         self.svid = 3004
         self.language = "javascript"
-        self.author = "LoRexxar"
         self.vulnerability = "URL Redirect"
         self.description = "URL Redirect，url重定向可能导致很多潜在的安全问题"
         self.level = 3
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "function-param-regex"
         self.match = r"document.location.replace|window.location.replace"
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
-        # for regex
-        self.unmatch = None
-
-        self.vul_function = None
 
     def main(self, regex_string):
         """

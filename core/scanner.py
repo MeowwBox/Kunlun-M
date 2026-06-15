@@ -163,6 +163,51 @@ def scan(target_directory, a_sid=None, s_sid=None, special_rules=None, language=
     find_vulnerabilities = []
     newcore_function_list = {}
 
+    # 预加载框架 extra_sinks 并生成虚拟规则注入 rules 队列
+    virtual_rule_count = 0
+    if language and target_directory:
+        try:
+            from rules.tamper._loader import detect_frameworks, merge_framework_config, load_base_config
+            from utils.api import VirtualRule
+            import types as _types
+            # language may be a list (e.g. ['php', 'javascript'])
+            languages = language if isinstance(language, list) else [language]
+            for lang in languages:
+                lang_lower = lang.lower() if isinstance(lang, str) else str(lang).lower()
+                detected = detect_frameworks(lang_lower, target_directory)
+                if detected:
+                    repair_tmp, controlled_tmp = load_base_config(lang_lower)
+                    for fw_mod in detected:
+                        extra = merge_framework_config(repair_tmp, controlled_tmp, fw_mod)
+                        if extra:
+                            for pattern, svids in extra.items():
+                                for svid in svids:
+                                    # 从已有规则获取漏洞描述
+                                    vuln_desc = ""
+                                    for rule_key in rules:
+                                        try:
+                                            r = getattr(rules[rule_key], rule_key)
+                                            rc = r()
+                                            if rc.svid == svid:
+                                                vuln_desc = rc.vulnerability
+                                                break
+                                        except:
+                                            pass
+
+                                    # 生成虚拟规则类（包装为假模块以兼容 getattr 结构）
+                                    vw_name = "VW_{}_{}".format(svid, virtual_rule_count)
+                                    vw_class = type(vw_name, (VirtualRule,), {
+                                        '__init__': lambda self, _p=pattern, _s=svid, _l=lang_lower, _d=vuln_desc: VirtualRule.__init__(self, _p, _s, _l, _d)
+                                    })
+                                    vw_module = _types.ModuleType(vw_name)
+                                    setattr(vw_module, vw_name, vw_class)
+                                    rules[vw_name] = vw_module
+                                    virtual_rule_count += 1
+                                    logger.info('[CVI-{cvi}] [VIRTUAL] EXTRA_SINK: {p} (framework: {fw})'.format(
+                                        cvi=svid, p=pattern, fw=getattr(fw_mod, 'FRAMEWORK_NAME', '?')))
+        except Exception as e:
+            logger.debug('[SCAN] extra_sinks virtual-rule generation error: {e}'.format(e=e))
+
     def store(result):
         if result is not None and isinstance(result, list) is True:
             for res in result:
@@ -179,6 +224,8 @@ def scan(target_directory, a_sid=None, s_sid=None, special_rules=None, language=
         logger.critical('no rules!')
         return False
     logger.info('[PUSH] {rc} Rules'.format(rc=len(rules)))
+    if virtual_rule_count > 0:
+        logger.info('[PUSH] {n} Virtual Rules from EXTRA_SINKS'.format(n=virtual_rule_count))
     push_rules = []
     scan_list = []
 
@@ -699,6 +746,8 @@ class SingleRule(object):
                             cvi=self.sr.svid))
                     self.rule_vulnerabilities.append(vulnerability)
                 else:
+                    if index in indirect_indices:
+                        pass  # 间接调用 CAST 失败，静默跳过
                     if reason == 'New Core':  # 新的规则
 
                         logger.debug('[CVI-{cvi}] [NEW-VUL] New Rules init'.format(cvi=self.sr.svid))

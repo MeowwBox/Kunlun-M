@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 from utils.api import *
 
-
-class CVI_6056():
+class CVI_6056(SingleRuleMixin):
     """
     Apache Struts2 后续 RCE 漏洞 (S2-048~S2-059)
     S2-048(2.3.32), S2-057(2.3.34), S2-059(2.5.16)
@@ -12,8 +11,6 @@ class CVI_6056():
         self.language = "java"
         self.vulnerability = "Struts2 RCE (S2-048/057/059)"
         self.level = 7
-        self.status = True
-        self.author = "Kunlun-M"
         self.description = "Struts2 2.3.x/2.5.x 多个RCE漏洞(S2-048/057/059)"
 
         self.match_mode = "framework-dependency"
@@ -38,9 +35,4 @@ class CVI_6056():
         self.config_patterns = []
         self.exclude_patterns = []
 
-        self.match_name = None
-        self.black_list = None
-        self.keyword = None
-        self.unmatch = None
-        self.vul_function = None
         self.main = None

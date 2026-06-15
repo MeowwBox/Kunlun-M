@@ -1067,12 +1067,12 @@ def _init_function_summaries(file_path):
                     try:
                         with open(fp, 'r', encoding='utf-8', errors='ignore') as f:
                             files_dict[fp] = f.read()
-                    except:
+                    except Exception:
                         pass
         try:
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 files_dict[file_path] = f.read()
-        except:
+        except Exception:
             pass
 
         if files_dict:
@@ -1089,8 +1089,7 @@ def _init_function_summaries(file_path):
 
         _summaries_initialized = True
     except Exception as e:
-        logger.debug(f"[AST][Java] 摘要初始化失败: {e}")
-        _summaries_initialized = True
+        logger.warning(f"[AST][Java] 摘要初始化失败: {e}")
 
 
 def _find_method_at_line(tree, target_line):
@@ -1534,9 +1533,10 @@ def _build_global_method_map(ast_obj, current_filepath):
                     if key not in global_methods:
                         global_methods[key] = []
                     global_methods[key].append((ast_tree, node, filepath))
-        except Exception:
+        except Exception as e:
+            logger.warning('[AST][Java] _build_global_method_map failed for {}: {}'.format(filepath, e))
             continue
-    
+
     return global_methods
 
 
@@ -2094,6 +2094,24 @@ def find_sinks(sink_names, files):
                         var_name = ancestor.declarators[0].name
                         assignment_map[var_name] = method_name
                         break
+
+            # 多层间接调用：收集变量到变量的赋值链
+            # rt2 = rt → assignment_map['rt2'] = assignment_map.get('rt')
+            try:
+                for lvd_path, lvd_node in _nodes.filter(javalang.tree.LocalVariableDeclaration):
+                    for decl in (lvd_node.declarators or []):
+                        if hasattr(decl, 'name') and hasattr(decl, 'initializer') and decl.initializer:
+                            init = decl.initializer
+                            # init 是 MemberReference 时, member 可能是已有映射的变量名
+                            if isinstance(init, javalang.tree.MemberReference):
+                                inner_name = init.member
+                                if inner_name in assignment_map:
+                                    assignment_map[decl.name] = assignment_map[inner_name]
+                            # init 是字符串变量名
+                            elif isinstance(init, str) and init in assignment_map:
+                                assignment_map[decl.name] = assignment_map[init]
+            except Exception as e:
+                logger.warning('[AST][Java] find_sinks indirect assignment analysis error: {}'.format(e))
         except Exception:
             pass
 
@@ -2193,9 +2211,10 @@ def find_sinks(sink_names, files):
                                     'matched_sink': sink,
                                 })
                                 break
-            except Exception:
-                pass
-        except Exception:
+            except Exception as e:
+                logger.warning('[AST][Java] find_sinks indirect call analysis error: {}'.format(e))
+        except Exception as e:
+            logger.warning('[AST][Java] find_sinks file-level error in {}: {}'.format(file_path, e))
             continue
 
     return results
@@ -2388,7 +2407,7 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
         if _source_registry is None:
             target_dir = os.path.dirname(os.path.abspath(file_path))
             try:
-                _source_registry = discover_sources(target_dir, _nodes, file_path)
+                _source_registry = discover_sources(target_dir, _nodes, file_path, controlled_list=controlled_params)
                 if _source_registry.source_members or _source_registry.annotated_param_names:
                     extra_sources = _source_registry.get_all_source_names()
                     controlled_params = list(controlled_params) + extra_sources

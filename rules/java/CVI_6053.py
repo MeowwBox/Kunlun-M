@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 from utils.api import *
 
-
-class CVI_6053():
+class CVI_6053(SingleRuleMixin):
     """
     Apache Shiro 硬编码/弱密钥 (>=1.4.2)
     使用已知弱密钥列表中的密钥配置 CookieRememberMeManager
@@ -12,8 +11,6 @@ class CVI_6053():
         self.language = "java"
         self.vulnerability = "Shiro 弱密钥"
         self.level = 7
-        self.status = True
-        self.author = "Kunlun-M"
         self.description = "Shiro 使用硬编码弱密钥,可被利用构造恶意rememberMe"
 
         self.match_mode = "framework-dependency"
@@ -32,9 +29,4 @@ class CVI_6053():
         self.config_patterns = ["DEFAULT_KEY", "kPH+bIxk5D2deZiIxcaaaA=="]
         self.exclude_patterns = []
 
-        self.match_name = None
-        self.black_list = None
-        self.keyword = None
-        self.unmatch = None
-        self.vul_function = None
         self.main = None

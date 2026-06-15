@@ -363,13 +363,14 @@ def _process_method_declaration(method_node, source_members, annotated_params):
 # discover_sources — 主入口
 # ---------------------------------------------------------------------------
 
-def discover_sources(project_dir, tree, file_path=None):
+def discover_sources(project_dir, tree, file_path=None, controlled_list=None):
     """
     发现 Java 项目中的 source。
 
     :param project_dir: 项目目录（用于框架检测）
     :param tree: javalang AST 树
     :param file_path: 当前文件路径（可选）
+    :param controlled_list: Optional list of extra controllable source names from tamper framework
     :return: SourceRegistry 实例
     """
     registry = SourceRegistry()
@@ -420,6 +421,11 @@ def discover_sources(project_dir, tree, file_path=None):
     if registry.source_members - _BUILTIN_SOURCE_MEMBERS:
         logger.debug('[AST][Java] Source Discovery: extra source members {}'.format(
             list(registry.source_members - _BUILTIN_SOURCE_MEMBERS)))
+
+    # 注入 tamper 框架的 controlled_list 作为额外的 source members
+    if controlled_list:
+        for src in controlled_list:
+            registry.source_members.add(src)
 
     logger.debug('[AST][Java] Source Discovery: {}'.format(registry))
     return registry

@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 from utils.api import *
 
-
-class CVI_6057():
+class CVI_6057(SingleRuleMixin):
     """
     Apache Struts2 S2-061/062 OGNL 远程代码执行
     CVE-2020-17530 (S2-061), CVE-2021-31805 (S2-062)
@@ -12,8 +11,6 @@ class CVI_6057():
         self.language = "java"
         self.vulnerability = "Struts2 S2-061/062 OGNL RCE"
         self.level = 7
-        self.status = True
-        self.author = "Kunlun-M"
         self.description = "Struts2 2.0.0-2.5.29 S2-061/062 OGNL远程代码执行"
 
         self.match_mode = "framework-dependency"
@@ -31,9 +28,4 @@ class CVI_6057():
         self.config_patterns = []
         self.exclude_patterns = []
 
-        self.match_name = None
-        self.black_list = None
-        self.keyword = None
-        self.unmatch = None
-        self.vul_function = None
         self.main = None

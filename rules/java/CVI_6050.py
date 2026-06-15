@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 from utils.api import *
 
-
-class CVI_6050():
+class CVI_6050(SingleRuleMixin):
     """
     Apache Shiro <= 1.2.4 RememberMe 默认密钥反序列化漏洞 (CVE-2016-4437)
     使用 CookieRememberMeManager 且未设置自定义 cipherKey 时，
@@ -13,8 +12,6 @@ class CVI_6050():
         self.language = "java"
         self.vulnerability = "Shiro RememberMe 反序列化 RCE"
         self.level = 7
-        self.status = True
-        self.author = "Kunlun-M"
         self.description = "Shiro <=1.2.4 使用默认密钥 kPH+bIxk5D2deZiIxcaaaA== 的 CookieRememberMeManager，可被利用执行任意代码"
 
         self.match_mode = "framework-dependency"
@@ -38,14 +35,5 @@ class CVI_6050():
         # 注意: setCipherKey(DEFAULT_KEY_BYTES) 仍然是弱密钥，不应排除
         self.exclude_patterns = []
 
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
         # for regex
-        self.unmatch = None
-        self.vul_function = None
         self.main = None

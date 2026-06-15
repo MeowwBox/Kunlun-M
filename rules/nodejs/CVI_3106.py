@@ -12,8 +12,7 @@
 import re
 from utils.api import *
 
-
-class CVI_3106():
+class CVI_3106(SingleRuleMixin):
     """
     Node.js 开放重定向规则
     匹配 res.redirect、ctx.redirect 等重定向函数
@@ -22,27 +21,13 @@ class CVI_3106():
     def __init__(self):
         self.svid = 3106
         self.language = "javascript"
-        self.author = "KunLun-M"
         self.vulnerability = "开放重定向"
         self.description = "使用了重定向函数（res.redirect、ctx.redirect等）且目标URL可能受用户控制，可能导致开放重定向漏洞。建议对重定向目标进行白名单校验。"
         self.level = 5
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "function-param-regex"
         self.match = r"res\.redirect\s*\(|ctx\.redirect\s*\(|response\.redirect\s*\("
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
-        # for regex
-        self.unmatch = None
 
         self.vul_function = [
             "res.redirect", "ctx.redirect", "response.redirect",

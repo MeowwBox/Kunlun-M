@@ -11,8 +11,7 @@
 
 from utils.api import *
 
-
-class CVI_1000():
+class CVI_1000(SingleRuleMixin):
     """
     rule class
     """
@@ -26,24 +25,9 @@ class CVI_1000():
         self.description = "Reflected XSS，用户输入被直接/不完全过滤输出到页面内容当中，可能会导致XSS隐患。"
         self.level = 4
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "function-param-regex"
         self.match = r"print|print_r|exit|die|printf|vprintf|trigger_error|user_error|odbc_result_all|ovrimos_result_all|ifx_htmltbl_result"
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
-        # for regex
-        self.unmatch = None
-
-        self.vul_function = None
 
     def main(self, regex_string):
         """

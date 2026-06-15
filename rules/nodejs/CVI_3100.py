@@ -12,8 +12,7 @@
 import re
 from utils.api import *
 
-
-class CVI_3100():
+class CVI_3100(SingleRuleMixin):
     """
     Node.js 命令注入规则
     匹配 child_process.exec/execSync/execFile/spawn 等命令执行函数
@@ -22,27 +21,13 @@ class CVI_3100():
     def __init__(self):
         self.svid = 3100
         self.language = "javascript"
-        self.author = "KunLun-M"
         self.vulnerability = "命令注入"
         self.description = "使用了可能执行系统命令的函数（child_process.exec、child_process.execSync、child_process.spawn等），可能导致命令注入漏洞。建议对用户输入进行严格校验和转义，避免将用户输入直接传递给命令执行函数。"
         self.level = 8
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "function-param-regex"
         self.match = r"exec\s*\(|execSync\s*\(|execFile\s*\(|execFileSync\s*\(|spawn\s*\(|spawnSync\s*\(|fork\s*\("
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
-        # for regex
-        self.unmatch = None
 
         self.vul_function = [
             "exec", "execSync", "execFile", "execFileSync",

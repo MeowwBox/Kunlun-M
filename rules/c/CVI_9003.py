@@ -12,8 +12,7 @@
 import re
 from utils.api import *
 
-
-class CVI_9003():
+class CVI_9003(SingleRuleMixin):
     """
     C/C++ 缓冲区溢出规则
     匹配 strcpy、strcat、gets、wcscpy、wcscat 等不安全函数
@@ -22,27 +21,13 @@ class CVI_9003():
     def __init__(self):
         self.svid = 9003
         self.language = "c"
-        self.author = "KunLun-M"
         self.vulnerability = "缓冲区溢出"
         self.description = "使用了不安全的字符串操作函数（strcpy、strcat、gets、wcscpy、wcscat等），这些函数不检查目标缓冲区大小，可能导致缓冲区溢出。建议使用 strncpy、strncat、fgets 等带长度限制的安全替代函数。"
         self.level = 9
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "function-param-regex"
         self.match = r"\bstrcpy\s*\(|\bstrcat\s*\(|\bgets\s*\(|\bwcscpy\s*\(|\bwcscat\s*\("
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
-        # for regex
-        self.unmatch = None
 
         self.vul_function = ["strcpy", "strcat", "gets", "wcscpy", "wcscat"]
 

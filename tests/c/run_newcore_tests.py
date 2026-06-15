@@ -33,6 +33,54 @@ test_cases = [
      '跨文件多 sink 封装',
      ['CVI-9001', 'CVI-9002', 'CVI-9004'],
      ['runCommand', 'formatOutput', 'loadFile']),
+
+    # CVI-9008: SQL注入 (C)
+    ('36_sqli_sqlite.c', True,
+     'CVI-9008 sqlite3_exec: sprintf拼接用户输入到SQL',
+     ['CVI-9008'],
+     ['sqlite3_exec']),
+    ('37_sqli_mysql.c', True,
+     'CVI-9008 mysql_query: 用户输入拼接到SQL',
+     ['CVI-9008'],
+     ['mysql_query']),
+    ('38_sqli_safe.c', False,
+     'CVI-9008 sqlite3_exec: 硬编码SQL（不应检出）',
+     [], []),
+
+    # CVI-9009: 任意文件写入
+    ('39_file_write_open.c', True,
+     'CVI-9009 open(O_WRONLY|O_CREAT): 用户控制文件路径',
+     ['CVI-9009'],
+     ['open', 'argv']),
+    ('40_file_write_fopen.c', True,
+     'CVI-9009 fopen("w"): 用户控制文件路径',
+     ['CVI-9009'],
+     ['fopen', 'argv']),
+    ('41_file_write_safe.c', False,
+     'CVI-9009 fopen: 硬编码路径（不应检出）',
+     [], []),
+
+    # CVI-9010: 命令注入增强
+    ('42_cmd_inject_popen.c', True,
+     'CVI-9010 popen: sprintf拼接用户输入到命令',
+     ['CVI-9010'],
+     ['popen']),
+    ('43_cmd_inject_execve.c', True,
+     'CVI-9010 execve: 用户输入作为命令参数',
+     ['CVI-9010'],
+     ['execve']),
+    ('44_cmd_inject_safe.c', False,
+     'CVI-9010 system: 硬编码命令（不应检出）',
+     [], []),
+
+    # CVI-9011: 竞态条件(TOCTOU)
+    ('45_toctou_access.c', True,
+     'CVI-9011 access+open: TOCTOU 竞态条件',
+     ['CVI-9011'],
+     ['access', 'argv']),
+    ('46_toctou_safe.c', False,
+     'CVI-9011 access: 硬编码路径（不应检出）',
+     [], []),
 ]
 
 

@@ -12,8 +12,7 @@
 import re
 from utils.api import *
 
-
-class CVI_8006():
+class CVI_8006(SingleRuleMixin):
     """
     Go 路径穿越规则
     匹配 filepath.Join 与用户输入拼接、os.Open 路径拼接等
@@ -23,27 +22,13 @@ class CVI_8006():
     def __init__(self):
         self.svid = 8006
         self.language = "go"
-        self.author = "KunLun-M"
         self.vulnerability = "路径穿越"
         self.description = "文件路径拼接可能来自用户输入，存在路径穿越(Path Traversal)风险。攻击者可能通过构造包含../的路径访问任意文件。建议使用filepath.Clean清理路径，并校验最终路径是否在允许的目录范围内。"
         self.level = 7
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "function-param-regex"
         self.match = r"filepath\.Join\s*\(|path\.Join\s*\(|os\.Open\s*\(|os\.ReadFile\s*\(|ioutil\.ReadFile\s*\(|os\.Stat\s*\("
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
-        # for regex
-        self.unmatch = None
 
         self.vul_function = [
             "filepath.Join", "path.Join",

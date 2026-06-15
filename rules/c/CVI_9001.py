@@ -12,8 +12,7 @@
 import re
 from utils.api import *
 
-
-class CVI_9001():
+class CVI_9001(SingleRuleMixin):
     """
     C/C++ 命令注入规则
     匹配 system、popen、exec* 等
@@ -22,27 +21,13 @@ class CVI_9001():
     def __init__(self):
         self.svid = 9001
         self.language = "c"
-        self.author = "KunLun-M"
         self.vulnerability = "命令注入"
         self.description = "使用了可能执行系统命令的函数（system、popen、exec*等），可能导致命令注入漏洞。建议对用户输入进行严格校验和转义，或避免将用户输入直接传递给命令执行函数。"
         self.level = 8
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "function-param-regex"
         self.match = r"\bsystem\s*\(|\bpopen\s*\(|\bexecl\s*\(|\bexeclp\s*\(|\bexecle\s*\(|\bexecv\s*\(|\bexecvp\s*\(|\bexecvpe\s*\(|\bfexecve\s*\(|\bposix_spawn|\bposix_spawnp"
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
-        # for regex
-        self.unmatch = None
 
         self.vul_function = ["system", "popen", "execl", "execlp", "execle", "execv", "execvp", "execvpe", "fexecve", "posix_spawn", "posix_spawnp"]
 

@@ -23,6 +23,7 @@ from core.core_engine.branch_constraint import BranchConstraint
 from core.core_engine.python.builtin_knowledge import lookup as lookup_builtin
 from core.core_engine.python.summary_generator import lookup_summary
 from core.core_engine.python.source_discovery import SourceRegistry, discover_sources
+from core.filter_functions import register_summary, get_summary_safe_set
 
 # 全局状态（与 PHP/Java parser 保持一致的模式）
 scan_results = []
@@ -30,6 +31,9 @@ is_repair_functions = []
 is_controlled_params = []
 scan_chain = []
 # 行号通过函数返回值三元组 (code, source, source_lineno) 传递
+
+# 跨文件 import 追踪缓存（scan_parser 设置，_trace_expr 使用）
+_current_import_map = {}
 
 # 函数摘要系统状态
 _summaries_initialized = False
@@ -357,17 +361,34 @@ def is_controllable(expr_str, controlled_params=None):
 
 
 def is_repair(expr_str, repair_functions=None):
-    """检查表达式字符串是否包含修复函数"""
+    """
+    检查表达式是否经过修复函数 — 精确匹配函数名。
+
+    不再使用 'rf in expr_str' 字符串包含匹配（会导致 'int' 误匹配 'parseInt' 等）。
+    改为：repair_functions 是精确函数名列表，检查 expr_str 的最外层调用名是否在列表中。
+    """
     if repair_functions is None:
         repair_functions = is_repair_functions
 
     if not repair_functions:
         return False
 
+    # repair_functions 是 filter_functions 精确函数名集合，直接精确匹配
     for rf in repair_functions:
-        if rf in expr_str:
+        # 精确匹配：要么 expr_str 就是函数名，要么 expr_str 以 "func_name(" 开头
+        if expr_str == rf or expr_str.startswith(rf + "(") or expr_str.startswith(rf + "."):
             return True
     return False
+
+
+def _register_l2_inherit(language, func_name, safe_func_name):
+    """
+    L2 注册：当函数 func_name 的 return 语句调用了 safe_func_name 时，
+    将 func_name 也标记为安全函数，继承 safe_func_name 的 safe_for 集合。
+    """
+    safe_set = get_summary_safe_set(language, safe_func_name)
+    if safe_set:
+        register_summary(language, func_name, safe_set)
 
 
 # ---------------------------------------------------------------------------
@@ -1089,11 +1110,34 @@ def _trace_expr(param_name, expr, lineno, file_path,
     # 3. 如果表达式是函数调用，检查参数
     if isinstance(expr, ast.Call):
         call_name = _get_call_name(expr)
-        # 检查调用参数中是否包含可控变量
+
+        # 3a. 先检查是否是修复函数调用
+        if call_name and is_repair(call_name, repair_functions):
+            return 2, call_name, lineno
+
+        # 3b. 尝试进入函数定义追踪（含跨文件查找）
+        if call_name:
+            func_def = _find_function_def(tree, call_name)
+            if func_def and call_name not in visited_funcs:
+                logger.debug("[AST][Python] Entering function {} for tracing".format(call_name))
+                return _trace_function_return(func_def, expr, lineno, file_path,
+                                               repair_functions, controlled_params,
+                                               visited_funcs, depth, tree)
+            # 跨文件查找：当前文件找不到时，通过 import_map 查找被 import 的模块
+            if not func_def and call_name not in visited_funcs and _current_import_map:
+                cf_result = _find_function_def_cross_file(call_name, _current_import_map, _ast_object_singleton)
+                if cf_result:
+                    cf_func_def, cf_module_tree, cf_module_path = cf_result
+                    logger.debug("[AST][Python] Cross-file trace: {} found in {}".format(call_name, cf_module_path))
+                    return _trace_function_return(cf_func_def, expr, lineno, cf_module_path,
+                                                   repair_functions, controlled_params,
+                                                   visited_funcs, depth, cf_module_tree)
+
+        # 3c. 检查调用参数中是否包含可控变量（fallback：函数定义无法判定时用参数检查）
         for arg in (expr.args or []):
             arg_str = _expr_to_str(arg)
             if is_controllable(arg_str, controlled_params):
-                logger.debug("[AST][Python] Call {} with controllable arg: {}".format(call_name, arg_str))
+                logger.debug("[AST][Python] Call {} with controllable arg: {} (no function def)".format(call_name, arg_str))
                 return 1, arg_str, lineno
 
             # 递归追踪参数
@@ -1105,7 +1149,7 @@ def _trace_expr(param_name, expr, lineno, file_path,
                 if result and result[0] in (1, 2):
                     return result
 
-        # .format() 调用检查: "str".format(x) — x 可控则结果可控
+        # 3d. .format() 调用检查
         if isinstance(expr.func, ast.Attribute) and expr.func.attr == 'format':
             for arg in (expr.args or []):
                 result = _trace_expr(param_name, arg, lineno, file_path,
@@ -1119,19 +1163,6 @@ def _trace_expr(param_name, expr, lineno, file_path,
                                       visited_funcs, depth, tree)
                 if result and result[0] in (1, 2):
                     return result
-
-        # 检查是否是修复函数调用
-        if call_name and is_repair(call_name, repair_functions):
-            return 2, call_name, lineno
-
-        # 尝试进入函数定义追踪
-        if call_name:
-            func_def = _find_function_def(tree, call_name)
-            if func_def and call_name not in visited_funcs:
-                logger.debug("[AST][Python] Entering function {} for tracing".format(call_name))
-                return _trace_function_return(func_def, expr, lineno, file_path,
-                                               repair_functions, controlled_params,
-                                               visited_funcs, depth, tree)
 
     # 4. 如果是二元运算，收集两边变量名并反向追踪
     if isinstance(expr, ast.BinOp):
@@ -1222,6 +1253,53 @@ def _find_function_def(tree, func_name):
     return None
 
 
+def _find_function_def_cross_file(func_name, import_map, ast_object):
+    """跨文件查找函数定义：当当前文件找不到时，用 import_map 查找被 import 的本地模块
+
+    类似 JS 的 _try_cross_file_trace_js，但更轻量——只负责查找函数定义，
+    调用方用返回的 func_def 和 module_tree 继续走 _trace_function_return。
+    
+    返回: (func_def, module_tree, module_file_path) 或 None
+    """
+    # 从 import_map 找可能的模块路径
+    imported_path = None
+    local_func_name = func_name
+
+    # 直接匹配: from helpers import run_command → import_map['run_command'] = 'helpers.py'
+    if func_name in import_map:
+        imported_path = import_map[func_name]
+    else:
+        # 前缀匹配: func_name='helpers.run_cmd' → import_map.get('helpers')
+        parts = func_name.rsplit('.', 1)
+        if len(parts) == 2 and parts[0] in import_map:
+            imported_path = import_map[parts[0]]
+            local_func_name = parts[1]
+
+    if not imported_path:
+        return None
+
+    # 加载被 import 模块的 AST
+    # pretreatment 只解析被扫描的文件，被 import 的文件需要自己解析
+    module_tree = None
+    try:
+        abs_path = imported_path if os.path.isabs(imported_path) else os.path.abspath(imported_path)
+        if os.path.exists(abs_path):
+            with open(abs_path, 'r', encoding='utf-8', errors='replace') as f:
+                module_tree = ast.parse(f.read(), filename=abs_path)
+    except Exception:
+        return None
+    if module_tree is None or not hasattr(module_tree, 'body'):
+        return None
+
+    # 在模块 AST 中查找函数定义
+    for node in ast.walk(module_tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.name == local_func_name:
+                return (node, module_tree, imported_path)
+
+    return None
+
+
 def _judge_from_summary_py(summary, call_node, controlled_params):
     """根据函数摘要判定返回值可控性（Python版）
 
@@ -1273,7 +1351,7 @@ def _trace_function_return(func_def, call_node, lineno, file_path,
                             repair_functions, controlled_params,
                             visited_funcs, depth, tree):
     """追踪函数的返回值是否可控
-    
+
     核心原则：函数体是封闭作用域，只通过形参→实参映射判断可控性。
     不在函数体内再调 parameters_back（避免和调用者的赋值行冲突导致循环）。
     返回值:
@@ -1304,6 +1382,8 @@ def _trace_function_return(func_def, call_node, lineno, file_path,
         knowledge = lookup_builtin(call_func_name)
         if knowledge:
             if knowledge["safe"] and not knowledge["passthrough"] and not knowledge.get("param_flow"):
+                # L2 注册：当前函数 return 了 safe 函数，继承 safe_for
+                _register_l2_inherit("python", func_name, call_func_name)
                 return -1, None, 0
             if knowledge["passthrough"] or knowledge.get("param_flow"):
                 deps = set()
@@ -1380,6 +1460,19 @@ def _trace_function_return(func_def, call_node, lineno, file_path,
 
     for node in ast.walk(func_def):
         if isinstance(node, ast.Return) and node.value:
+            # 先检查返回值外层是否是 safe 函数（如 html.escape, str, int 等）
+            # safe 函数处理后数据不再被视为可控攻击向量
+            if isinstance(node.value, ast.Call):
+                return_call_name = _get_call_name(node.value)
+                if return_call_name:
+                    return_builtin = lookup_builtin(return_call_name)
+                    if return_builtin and return_builtin.get("safe"):
+                        # L2 注册：当前函数 return 了 safe 函数，继承 safe_for
+                        _register_l2_inherit("python", func_name, return_call_name)
+                        logger.debug("[AST][Python] Function {} returns safe function call: {}".format(
+                            func_name, return_call_name))
+                        return -1, None, lineno
+
             # 先检查返回值表达式本身是否是可控源
             return_str = _expr_to_str(node.value)
             if is_controllable(return_str, controlled_params):
@@ -1486,8 +1579,7 @@ def _init_function_summaries(file_path):
 
         _summaries_initialized = True
     except Exception as e:
-        logger.debug(f"[AST][Python] 摘要初始化失败: {e}")
-        _summaries_initialized = True
+        logger.warning(f"[AST][Python] 摘要初始化失败: {e}")
 
 
 def _is_controllable(var_name, controlled_params, file_path, vul_lineno):
@@ -1594,6 +1686,30 @@ def _handle_python_indirect_call(tree, vul_lineno, indirect_map, repair_function
     return None
 
 
+def _resolve_indirect_chain(tree, var_name, sink_names, visited=None):
+    """递归解析间接调用赋值链: func2 = func → func = os.system → 匹配 sink"""
+    if visited is None:
+        visited = set()
+    if var_name in visited:
+        return False
+    visited.add(var_name)
+
+    for assign_node in ast.walk(tree):
+        if not isinstance(assign_node, ast.Assign):
+            continue
+        for target in assign_node.targets:
+            if isinstance(target, ast.Name) and target.id == var_name:
+                value = assign_node.value
+                # 直接匹配: func = os.system
+                result = _check_indirect_assignment(value, sink_names, var_name)
+                if result:
+                    return True
+                # 递归: func = func2 → 查找 func2 的赋值
+                if isinstance(value, ast.Name):
+                    return _resolve_indirect_chain(tree, value.id, sink_names, visited)
+    return False
+
+
 def _check_indirect_assignment(value_node, sink_names, var_name):
     """
     检查赋值右侧是否包含间接调用 sink 的模式。
@@ -1694,6 +1810,12 @@ def find_sinks(sink_names, files):
                                 if indirect_callee_name:
                                     is_indirect = True
                                     break
+                                # 多层间接调用递归: func2 = func → 查找 func = os.system
+                                if isinstance(value, ast.Name):
+                                    resolved = _resolve_indirect_chain(tree, value.id, sink_names)
+                                    if resolved:
+                                        is_indirect = True
+                                        break
                         if is_indirect:
                             break
             elif isinstance(func, ast.Attribute):
@@ -1794,7 +1916,7 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
         if _source_registry is None:
             project_dir = os.path.dirname(os.path.abspath(file_path))
             try:
-                _source_registry = discover_sources(project_dir, tree, file_path)
+                _source_registry = discover_sources(project_dir, tree, file_path, controlled_list=controlled_params)
                 # Inject discovered source members into controlled_params
                 if _source_registry.source_members:
                     extra_sources = _source_registry.get_all_source_names()
@@ -1816,6 +1938,8 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
 
         # 解析 import 语句，用于跨文件追踪
         import_map = _parse_imports(tree, file_path)
+        global _current_import_map
+        _current_import_map = import_map or {}
 
         # 读取源码行用于日志
         source_lines = []
@@ -1892,17 +2016,17 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
             for arg in (node.args or []):
                 arg_str = _expr_to_str(arg)
 
-                # 直接检查参数是否是可控源（含传播后的变量）
-                if is_controllable(arg_str, extended_controlled):
-                    source_ln = target_line
-                    chain = ["{}:{}".format(source_ln, source_lines[source_ln - 1].strip() if source_ln <= len(source_lines) else arg_str)]
-                    scan_results.append({"code": 1, "chain": chain, "source": arg_str})
-                    break
-
-                # 如果参数是函数调用，直接走 _trace_expr 追踪（Source Discovery 支持）
+                # 如果参数是函数调用，先走 _trace_expr 追踪（Source Discovery 支持）
+                # 必须在 is_controllable 之前，否则 safe 修复函数（如 shlex.quote）会被字符串匹配误判为可控
                 if isinstance(arg, ast.Call):
                     call_name = _get_call_name(arg)
                     func_def = _find_function_def(tree, call_name) if call_name else None
+                    # 跨文件查找：当前文件找不到时，通过 import_map 查找被 import 的模块
+                    cross_file_func = None
+                    if not func_def and call_name and import_map:
+                        cross_file_result = _find_function_def_cross_file(call_name, import_map, _ast_object_singleton)
+                        if cross_file_result:
+                            cross_file_func = cross_file_result
                     if func_def:
                         result = _trace_function_return(func_def, arg, target_line, file_path,
                                                      repair_functions, extended_controlled,
@@ -1917,6 +2041,38 @@ def scan_parser(sensitive_func, vul_lineno, file_path, repair_functions=[], cont
                             chain = ["{}:{}".format(source_ln, source_lines[source_ln - 1].strip() if source_ln <= len(source_lines) else arg_str)]
                             scan_results.append({"code": 2, "chain": chain, "source": result[1]})
                             break
+                    elif cross_file_func:
+                        cf_func_def, cf_module_tree, cf_module_path = cross_file_func
+                        result = _trace_function_return(cf_func_def, arg, target_line, cf_module_path,
+                                                     repair_functions, extended_controlled,
+                                                     set(), 0, cf_module_tree)
+                        if result and result[0] == 1:
+                            source_ln = result[2] if result[2] else target_line
+                            chain = ["{}:{}".format(source_ln, source_lines[source_ln - 1].strip() if source_ln <= len(source_lines) else arg_str)]
+                            scan_results.append({"code": 1, "chain": chain, "source": result[1]})
+                            break
+                        elif result and result[0] == 2:
+                            source_ln = result[2] if result[2] else target_line
+                            chain = ["{}:{}".format(source_ln, source_lines[source_ln - 1].strip() if source_ln <= len(source_lines) else arg_str)]
+                            scan_results.append({"code": 2, "chain": chain, "source": result[1]})
+                            break
+                    else:
+                        # 当前文件和跨文件都找不到函数定义，检查 builtin 知识库
+                        if call_name:
+                            builtin_info = lookup_builtin(call_name)
+                            if builtin_info and builtin_info.get('safe'):
+                                logger.debug("[AST][Python] Builtin safe function in arg: {}".format(call_name))
+                                source_ln = target_line
+                                chain = ["{}:{}".format(source_ln, source_lines[source_ln - 1].strip() if source_ln <= len(source_lines) else arg_str)]
+                                scan_results.append({"code": 2, "chain": chain, "source": call_name})
+                                break
+
+                # 直接检查参数是否是可控源（含传播后的变量）
+                if is_controllable(arg_str, extended_controlled):
+                    source_ln = target_line
+                    chain = ["{}:{}".format(source_ln, source_lines[source_ln - 1].strip() if source_ln <= len(source_lines) else arg_str)]
+                    scan_results.append({"code": 1, "chain": chain, "source": arg_str})
+                    break
 
                 # 收集参数中的变量名，反向追踪
                 arg_names = _collect_names(arg)

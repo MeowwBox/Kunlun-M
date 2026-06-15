@@ -33,7 +33,9 @@ def init_match_rule(data):
         if '::' in function_name:
             function_name = function_name.split('::')[-1]
 
-        match = r"(?:^|[\s=,])" + re.escape(function_name) + r"\s*\([^)]*\)"
+        match = r"(?:^|[\s=,.])\w+\." + re.escape(function_name) + r"\s*\([^)]*\)" + \
+               r"|" + \
+               r"(?:^|[\s=,])" + re.escape(function_name) + r"\s*\([^)]*\)"
         match2 = r"(?:void|int|char|long|float|double|short|unsigned|static|extern|struct\s+\w+)\s*\*?\s*" + re.escape(function_name) + r"\s*\("
         logger.debug("[New Rule] C match (from code=5): {}".format(match))
         return match, match2, function_name, 0, origin_func_name
@@ -46,7 +48,9 @@ def init_match_rule(data):
         if '::' in function_name:
             function_name = function_name.split('::')[-1]
 
-        match = r"(?:^|[\s=,])" + re.escape(function_name) + r"\s*\([^)]*\)"
+        match = r"(?:^|[\s=,.])\w+\." + re.escape(function_name) + r"\s*\([^)]*\)" + \
+               r"|" + \
+               r"(?:^|[\s=,])" + re.escape(function_name) + r"\s*\([^)]*\)"
         # match2 排除函数定义/声明行（带返回类型前缀），保留调用行
         match2 = r"(?:void|int|char|long|float|double|short|unsigned|static|extern|struct\s+\w+)\s*\*?\s*" + re.escape(function_name) + r"\s*\("
         logger.debug("[New Rule] C match: {}".format(match))

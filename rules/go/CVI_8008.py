@@ -12,8 +12,7 @@
 import re
 from utils.api import *
 
-
-class CVI_8008():
+class CVI_8008(SingleRuleMixin):
     """
     检测 fmt.Fprintf 写入 http.ResponseWriter 的 XSS 漏洞
     """
@@ -21,27 +20,13 @@ class CVI_8008():
     def __init__(self):
         self.svid = 8008
         self.language = "go"
-        self.author = "KunLun-M"
         self.vulnerability = "XSS"
         self.description = "通过fmt.Fprintf直接向ResponseWriter写入未转义内容，可能导致跨站脚本攻击(XSS)。建议使用html/template包的自动转义功能，或对输出内容进行HTML转义。"
         self.level = 5
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "function-param-regex"
         self.match = r"fmt\.Fprintf\s*\("
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
-        # for regex
-        self.unmatch = None
 
         self.vul_function = [
             "fmt.Fprintf",

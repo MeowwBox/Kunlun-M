@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 from utils.api import *
 
-
-class CVI_6065():
+class CVI_6065(SingleRuleMixin):
     """
     XStream ≤1.4.14 反序列化 RCE
     """
@@ -10,9 +9,7 @@ class CVI_6065():
         self.svid = 6065
         self.language = "java"
         self.vulnerability = "XStream 反序列化 RCE"
-        self.author = "Kunlun-M"
         self.level = 8
-        self.status = True
         self.description = "XStream ≤1.4.14 存在多个反序列化漏洞(CVE-2020-26217等),攻击者可构造恶意XML触发任意代码执行"
 
         self.match_mode = "framework-dependency"
@@ -31,9 +28,4 @@ class CVI_6065():
         self.config_patterns = []
         self.exclude_patterns = []
 
-        self.match_name = None
-        self.black_list = None
-        self.keyword = None
-        self.unmatch = None
-        self.vul_function = None
         self.main = None

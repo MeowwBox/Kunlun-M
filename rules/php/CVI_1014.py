@@ -11,8 +11,7 @@
 
 from utils.api import *
 
-
-class CVI_1014():
+class CVI_1014(SingleRuleMixin):
     """
     rule class
     """
@@ -26,24 +25,9 @@ class CVI_1014():
         self.description = "variable 覆盖可能会导致潜在的安全问题，甚至可能导致远程代码执行漏洞"
         self.level = 8
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "function-param-regex"
         self.match = r"import_request_variables|parse_str|mb_parse_str|extract"
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
-        # for regex
-        self.unmatch = None
-
-        self.vul_function = None
 
     def main(self, regex_string):
         """

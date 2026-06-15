@@ -129,7 +129,8 @@ def _parse_c_ast(file_path):
         tree = _ts_parser.parse(source)
         _ast_cache[file_path] = tree
         return tree
-    except Exception:
+    except Exception as e:
+        logger.warning(f"[AST][C] C AST 解析失败: file={file_path}, error={e}")
         return None
 
 
@@ -1177,18 +1178,24 @@ def _is_controllable_source(expr_str, controlled_params=None):
 
 
 def _is_repair_function(expr_str, repair_functions=None):
-    """检查表达式是否包含修复函数。"""
+    """
+    检查表达式是否包含修复函数 — 精确匹配函数名。
+    """
     if repair_functions is None:
         repair_functions = is_repair_functions
 
+    if not repair_functions:
+        pass  # 继续检查 builtin
+
     for rf in repair_functions:
-        if rf in expr_str:
+        # 精确匹配：expr_str 就是函数名、或以 "func_name(" 开头
+        if expr_str == rf or expr_str.startswith(rf + "("):
             return True
 
-    # 也检查 builtin_knowledge 中标记 safe 的函数
+    # 也检查 builtin_knowledge 中标记 safe 的函数（精确匹配）
     for func_name in _BUILTIN_KNOWLEDGE:
         knowledge = _BUILTIN_KNOWLEDGE[func_name]
-        if knowledge.get("safe") and func_name in expr_str:
+        if knowledge.get("safe") and (expr_str == func_name or expr_str.startswith(func_name + "(")):
             return True
 
     return False
@@ -1297,8 +1304,7 @@ def _init_function_summaries(file_path):
 
         _summaries_initialized = True
     except Exception as e:
-        logger.debug("[AST][C] 摘要初始化失败: {}".format(e))
-        _summaries_initialized = True
+        logger.warning("[AST][C] 摘要初始化失败: {}".format(e))
 
 
 # ---------------------------------------------------------------------------
@@ -1713,11 +1719,30 @@ def _handle_call_expression_rhs(call_node, var_name, file_path, lineno, to_line,
         logger.debug("[AST][C] RHS call {} is controlled source".format(func_text))
         return (1, lineno)
 
-    # 未知函数 → 返回 code=5，交给 NewCore 二次扫描
-    logger.debug("[AST][C] RHS call {} is unknown, return code=5".format(func_text))
-    return (5, func_text)
+    # 查函数摘要
+    callee_summary = lookup_summary(func_text)
+    if callee_summary and callee_summary.return_flow:
+        for rf in callee_summary.return_flow:
+            if rf.origin_type == "param":
+                for param_idx in rf.dep_params:
+                    if param_idx < len(args):
+                        arg_node = args[param_idx]
+                        var_names = _collect_identifiers_from_ast(arg_node)
+                        for vn in var_names:
+                            if _is_controllable_source(vn, controlled_params):
+                                logger.debug("[AST][C] Summary: {} param {} is controllable".format(func_text, param_idx))
+                                return (1, lineno)
+            elif rf.origin_type == "call":
+                if controlled_params and rf.origin in controlled_params:
+                    logger.debug("[AST][C] Summary: {} call origin {} is controllable".format(func_text, rf.origin))
+                    return (1, lineno)
+        # 摘要有 return_flow 但未匹配到可控源 → 不可控
+        logger.debug("[AST][C] Summary: {} has return_flow but no controllable source".format(func_text))
+        return None
 
-    return None
+    # builtin 和 summary 都没有 → 未确认
+    logger.debug("[AST][C] RHS call {} is unknown, return code=3 (unconfirmed)".format(func_text))
+    return (3, func_text)
 
 
 def _handle_binary_expression_rhs(bin_node, var_name, file_path, lineno, to_line,
@@ -2151,6 +2176,17 @@ def scan_parser(rule_match, vul_lineno, file_path,
     code 含义：1=可控, 2=已修复, 3=未确认, 4=NewFunction, -1=不可控
     """
     global scan_results, is_repair_functions, is_controlled_params, scan_chain
+    # 清除上次扫描残留，重建 C_CONTROLLED_SOURCES 初始列表（防止跨项目污染）
+    global C_CONTROLLED_SOURCES
+    C_CONTROLLED_SOURCES = [
+        "argv", "argc",
+        "getenv", "secure_getenv",
+        "scanf", "fscanf", "sscanf",
+        "fgets", "gets", "getline", "getdelim",
+        "read", "fread", "recv", "recvfrom", "recvmsg",
+        "stdin", "STDIN_FILENO", "FILE stdin", "std::cin",
+        "cin",
+    ]
     _trace_cache.clear()
 
     if repair_functions is None:
@@ -2221,6 +2257,10 @@ def scan_parser(rule_match, vul_lineno, file_path,
     ast_tree = _parse_c_ast(file_path)
     # ---- Source Discovery 预处理 ----
     global _sd_registry
+    # 将 tamper 框架的 controlled_params 注入到 C_CONTROLLED_SOURCES
+    for cp in controlled_params:
+        if cp not in C_CONTROLLED_SOURCES:
+            C_CONTROLLED_SOURCES.append(cp)
     _sd_registry = discover_sources(os.path.dirname(os.path.abspath(file_path)), ast_tree, file_path,
                                      extra_sources=C_CONTROLLED_SOURCES)
     # 注入 user source producers 到 C_CONTROLLED_SOURCES
@@ -2647,6 +2687,9 @@ def find_sinks(sink_names, files):
                                     if sink.class_ is None and val_text == sink.method:
                                         var_to_sink[var_name] = sink
                                         break
+                                # 多层间接调用：右侧 identifier 在 var_to_sink 中则继承
+                                if val_text in var_to_sink and var_name not in var_to_sink:
+                                    var_to_sink[var_name] = var_to_sink[val_text]
                             elif value_node.type == 'call_expression':
                                 # cast 赋值: func = (int (*)(const char *))system
                                 # call_expression 的 function 可能是 cast
@@ -2668,7 +2711,7 @@ def find_sinks(sink_names, files):
                         val_text = _node_text(right_node)
                         if right_node.type == 'identifier':
                             # func = printf; -> 重新赋值
-                            # 如果右侧是 sink，更新映射；否则清除映射
+                            # 如果右侧是 sink，更新映射；否则检查多层传播
                             found_sink = None
                             for sink in sink_names:
                                 if sink.class_ is None and val_text == sink.method:
@@ -2676,6 +2719,9 @@ def find_sinks(sink_names, files):
                                     break
                             if found_sink:
                                 var_to_sink[var_name] = found_sink
+                            elif val_text in var_to_sink:
+                                # 多层间接调用：右侧 identifier 在 var_to_sink 中则继承
+                                var_to_sink[var_name] = var_to_sink[val_text]
                             elif var_name in var_to_sink:
                                 # 重新赋值为非 sink，清除映射
                                 del var_to_sink[var_name]

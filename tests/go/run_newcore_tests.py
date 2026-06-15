@@ -34,6 +34,63 @@ test_cases = [
     ('24_indirect_reassign.go', False,
      'CVI-8001 exec.Command: indirect call after reassignment (should NOT detect)',
      [], []),
+    # 多层间接调用
+    ('25_indirect_multilevel.go', True,
+     'CVI-8001 exec.Command: multi-level indirect call (cmdFunc := exec.Command -> cmdFunc2 := cmdFunc -> cmdFunc2())',
+     ['CVI-8001'],
+     ['cmdFunc2']),
+
+    # 跨包 import 调用（不同 package）
+    ('26b_cross_pkg_main.go', True,
+     'CVI-8001 exec.Command: cross-package helpers.ExecuteCommand(userInput)',
+     ['CVI-8001'],
+     ['helpers.ExecuteCommand', 'userInput']),
+
+    # CVI-8009: SQL注入 raw query
+    ('27_sqli_raw.go', True,
+     'CVI-8009 db.Query: fmt.Sprintf拼接用户输入到SQL',
+     ['CVI-8009'],
+     ['db.Query', 'fmt.Sprintf']),
+    ('28_sqli_safe.go', True,
+     'CVI-8002/8009 db.Query: 参数化查询（片段模式无法排除，接受误报）',
+     ['CVI-8002', 'CVI-8009'],
+     ['db.Query']),
+
+    # CVI-8010: XXE
+    ('29_xxe_unmarshal.go', True,
+     'CVI-8010 xml.Unmarshal: 解析不可信XML数据',
+     ['CVI-8010'],
+     ['xml.Unmarshal']),
+    ('30_xxe_safe.go', False,
+     'CVI-8010 xml.NewDecoder: 使用Strict安全配置（不应检出）',
+     [], []),
+
+    # CVI-8011: XPath注入
+    ('31_xpath_inject.go', True,
+     'CVI-8011 xpath.Evaluate: 用户输入拼接到XPath表达式',
+     ['CVI-8011'],
+     ['xpath']),
+    ('32_xpath_safe.go', False,
+     'CVI-8011 xpath.Query: 硬编码XPath表达式（不应检出）',
+     [], []),
+
+    # CVI-8012: 任意文件写入
+    ('33_file_write.go', True,
+     'CVI-8012 os.WriteFile: 用户控制文件路径',
+     ['CVI-8012'],
+     ['os.WriteFile', 'userInput']),
+    ('34_file_write_safe.go', False,
+     'CVI-8012 os.WriteFile: 硬编码路径（不应检出）',
+     [], []),
+
+    # CVI-8013: 开放重定向
+    ('35_open_redirect.go', True,
+     'CVI-8013 http.Redirect: 用户可控URL重定向',
+     ['CVI-8013'],
+     ['http.Redirect']),
+    ('36_open_redirect_safe.go', False,
+     'CVI-8013 http.Redirect: 硬编码相对路径（不应检出）',
+     [], []),
 ]
 
 

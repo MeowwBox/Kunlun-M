@@ -12,8 +12,7 @@
 import re
 from utils.api import *
 
-
-class CVI_8003():
+class CVI_8003(SingleRuleMixin):
     """
     匹配 template.HTML/template.JS/template.URL 类型转换绕过自动转义
     """
@@ -21,27 +20,13 @@ class CVI_8003():
     def __init__(self):
         self.svid = 8003
         self.language = "go"
-        self.author = "KunLun-M"
         self.vulnerability = "XSS"
         self.description = "使用了template.HTML/template.JS/template.URL类型转换绕过Go模板引擎的自动转义机制，可能导致跨站脚本攻击(XSS)。建议避免使用不安全的类型转换，使用html/template的自动转义功能。"
         self.level = 6
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "function-param-regex"
         self.match = r"template\.HTML\s*\(|template\.JS\s*\(|template\.URL\s*\(|template\.HTMLAttr\s*\(|template\.Srcset\s*\("
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
-        # for regex
-        self.unmatch = None
 
         self.vul_function = [
             "template.HTML", "template.JS", "template.URL",

@@ -25,7 +25,11 @@ def init_match_rule(data):
         # strip pkg prefix: pkg.Func → Func
         if '.' in function_name:
             function_name = function_name.split('.')[-1]
-        match = r"(?:^|[\s=,])" + re.escape(function_name) + r"\s*\([^)]*\)"
+        # 匹配 pkg.Func(...) 和 Func(...)
+        match = (r"(?:^|[\s=,.])\w+\." + re.escape(function_name) + r"\s*\([^)]*\)" +
+                 r"|" +
+                 r"(?:^|[\s=,])" + re.escape(function_name) + r"\s*\([^)]*\)")
+        # 匹配函数定义（排除 pkg 前缀）
         match2 = r"func\s+" + re.escape(function_name) + r"\b"
         logger.debug("[New Rule] Go match: {}".format(match))
         return match, match2, function_name, 0, origin_func_name

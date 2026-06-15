@@ -11,8 +11,7 @@
 
 from utils.api import *
 
-
-class CVI_3006():
+class CVI_3006(SingleRuleMixin):
     """
     rule class
     """
@@ -21,27 +20,13 @@ class CVI_3006():
 
         self.svid = 3006
         self.language = "javascript"
-        self.author = "LoRexxar"
         self.vulnerability = "HTML attr injection"
         self.description = "HTML attr injection可能会导致XSS漏洞"
         self.level = 4
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "vustomize-match"
         self.match = r"(\.setAttribute\(\s*[^,]+,([\w_.]*)\s*\))"
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
-        # for regex
-        self.unmatch = None
 
         self.vul_function = r"setAttribute"
 

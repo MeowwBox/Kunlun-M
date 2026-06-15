@@ -1,4 +1,51 @@
 ## 更新日志
+- 2026-06-12
+  - KunLun-M 2.14.0
+  - **tamper 框架化改造（Phase 1/2/3）**
+    - Phase 1：框架配置目录重组（`rules/tamper/configs/{php,go,c,java,js,python}/`）+ 自动框架检测加载器 `_loader.py`（支持目录结构特征、pom.xml、composer.json 等多维度检测）
+    - Phase 2：CONTROLLED_SOURCES 注入 source_discovery，Go `c.Query`/`c.Param` 等 Gin 框架参数源自动标记为可控；JS `req.query`/`req.params` 等 Express 参数源同理
+    - Phase 3：EXTRA_SINKS 机制——框架特有 sink pattern（如 Laravel `DB::raw`、Gin `c.Redirect`）以虚拟规则形式注入扫描队列，走完整 grep → AST/CAST 验证 → 报告流程
+    - 新增 17 个框架配置（Laravel/Symfony/CodeIgniter/Slim/WordPress/ThinkPHP/Roundcube/phpBB、Gin/GORM/Fiber/Echo/Chi、Spring Boot/Struts2、Express/Koa、Django/Flask）
+    - FILTER_FUNCTIONS 统一为 `{safe_for: [svid列表]}` 格式
+  - **PHP 多层间接调用追踪**
+    - `_build_var_to_sink_map()` + `_resolve_var_chain()`：`$a="system"` → `$b=$a` → `$b($cmd)` 成功追踪 3 层链式间接调用
+  - **Go/PHP AST 引擎闭包内变量回溯修复**
+    - Go：`_find_func` 支持 `func_literal`（匿名函数），收集所有候选函数/闭包后选择范围最小的（innermost scope），修复闭包内变量赋值无法被追踪的问题
+    - PHP：`analysis()` 新增 `_search_closures_for_analysis()` 递归搜索 Closure body，支持 `Route::get('/path', function(){...})` 等 Laravel 框架路由闭包内的 sink 检测
+  - **PHP AST StaticMethodCall/MethodCall 函数名匹配修复**
+    - `anlysis_function()` 中对 `StaticMethodCall` 拼接 `node.class_ + "::" + node.name`，对 `MethodCall` 拼接 `node.expr.name + "->" + node.name`
+    - 修复 EXTRA_SINKS 虚拟规则中 `DB::raw` 等 FQN 函数名无法匹配的问题
+  - **VirtualRule（虚拟规则）体系**
+    - `utils/api.py` 新增 `VirtualRule` 类，继承 `SingleRuleMixin`，支持 `match_mode`、`match`、`svid`、`language` 等属性
+    - `scan()` 入口为每个 `(pattern, svid)` 创建 VirtualRule 实例注入 rules 队列
+    - 修复 `main()` 缺失导致 AST 验证 AttributeError、pattern 末尾括号导致 regex 异常等问题
+  - **全语言规则统一继承 SingleRuleMixin**
+    - 114 条 CVI 规则全部从独立 `status=True/False` 改为继承 `SingleRuleMixin`，支持 `main()` 二次筛选
+  - **新增 Go/C 漏洞检测规则**
+    - Go：CVI-8009（XPath 注入）、CVI-8010（路径穿越）、CVI-8011（XML 外部实体注入）、CVI-8012（拒绝服务）、CVI-8013（开放重定向）
+    - C：CVI-9008（XPath 注入）、CVI-9009（命令注入回显）、CVI-9010（路径穿越）、CVI-9011（开放重定向）
+    - 新增 Go benchmark 9 个、C benchmark 8 个，全量回归通过（Go 17/17, C 16/16）
+  - **规则 main() 适配 grep 片段模式**
+    - grep 返回匹配片段而非完整行，`main()` 中 `\)` 截取参数的逻辑需要适配
+    - 修复 CVI-8002/8009/8011/8013/9010 的 `main()` 方法
+  - **三层修复函数体系（filter_functions）**
+    - L1：精确匹配替代字符串包含，避免 `str` 被误匹配为 `stripslashes` 中的子串
+    - L2：Python 函数定义追踪自动注册安全函数（Summary 继承）
+    - L3：规则级自定义修复函数（`extra_repair_functions` 支持）
+  - **全语言多层间接调用支持**
+    - Python：`import_map` 跨文件追踪 + `_trace_function_return` safe 函数检测
+    - JS/Java/C：多层间接调用（变量赋值链式追踪）
+    - Go：多层间接调用支持
+  - **静默异常修复（问题 4）**
+    - 7 处裸 `except:` / `except SyntaxError` → `except Exception as e:` + `logger.warning`
+    - 涉及 PHP（2 处）、Go（1 处）、Java（3 处）、JS（1 处）
+  - **其他修复**
+    - scanner.py：`language` 参数为 list 时 `language.lower()` 崩溃 → 遍历 list 分别处理
+    - `_parse_pom()`：Python 3.11 Element truthy bug（空 Element 被 `or` 短路误判）
+    - Go/C 函数调用返回值场景加入 `lookup_summary`，未确认时返回 code=3 而非 code=5
+    - Python builtin safe 函数包裹的参数不再误报为可控
+    - Go/C NewCore 正则支持 namespace/包前缀跨包调用匹配
+    - Python benchmark 扩充到 9 个测试用例
 - 2026-06-09
   - KunLun-M 2.13.7
   - **修复 multi_grep() 行号 bug（utils/file.py）**

@@ -11,22 +11,16 @@ import re
 
 from utils.api import *
 
-
-class CVI_6044():
+class CVI_6044(SingleRuleMixin):
     def __init__(self):
         self.svid = 6044
         self.language = "java"
-        self.author = "KunLun-M"
         self.vulnerability = "XStream Deserialization"
         self.description = "XStream.fromXML()反序列化用户可控XML可能导致远程代码执行。建议配置XStream安全框架：XStream.addPermission()限制允许的类型。"
         self.level = 9
 
-        self.status = True
         self.match_mode = "java-function-param-regex"
         self.match = r"fromXML"
-        self.match_name = None
-        self.black_list = None
-        self.keyword = None
         self.unmatch = [
             r"XStream\.setupDefaultSecurity",
             r"addPermission",

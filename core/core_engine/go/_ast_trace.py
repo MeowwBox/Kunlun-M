@@ -10,6 +10,7 @@ import re
 from utils.log import logger
 from core.core_engine.branch_constraint import BranchConstraint
 from core.core_engine.go.builtin_knowledge import lookup as lookup_builtin
+from core.core_engine.go.summary_generator import lookup_summary
 
 
 # ---- AST 节点类型常量 ----
@@ -701,10 +702,29 @@ def _trace_call_expr(var_name, call_node, file_path, lineno, to_line,
                     return result
             return (-1, 0)  # 所有参数都安全
 
-    # 未知函数 → NewCore
-    args_str = ', '.join(_get_node_text(a) for a in args)
-    logger.debug("[AST][Go] [ast_trace] Unknown function {} → NewCore".format(func_name))
-    return (5, func_name)
+    # 查函数摘要
+    callee_summary = lookup_summary(func_name)
+    if callee_summary and callee_summary.return_flow:
+        for rf in callee_summary.return_flow:
+            if rf.origin_type == "param":
+                for param_idx in rf.dep_params:
+                    if param_idx < len(args):
+                        arg_node = args[param_idx]
+                        arg_text = _get_node_text(arg_node)
+                        if _is_controlled_source_node(arg_node, controlled_params):
+                            logger.debug("[AST][Go] Summary: {} param {} is controllable".format(func_name, param_idx))
+                            return (1, lineno)
+            elif rf.origin_type == "call":
+                if controlled_params and rf.origin in controlled_params:
+                    logger.debug("[AST][Go] Summary: {} call origin {} is controllable".format(func_name, rf.origin))
+                    return (1, lineno)
+        # 摘要有 return_flow 但未匹配到可控源 → 不可控
+        logger.debug("[AST][Go] Summary: {} has return_flow but no controllable source".format(func_name))
+        return (-1, 0)
+
+    # builtin 和 summary 都没有 → 未确认
+    logger.debug("[AST][Go] [ast_trace] Unknown function {} → unconfirmed".format(func_name))
+    return (3, func_name)
 
 
 def _trace_binary_expr(var_name, bin_node, file_path, lineno, to_line,

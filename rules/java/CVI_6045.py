@@ -12,23 +12,16 @@
 
 from utils.api import *
 
-
-class CVI_6045():
+class CVI_6045(SingleRuleMixin):
     def __init__(self):
         self.svid = 6045
         self.language = "java"
-        self.author = "KunLun-M"
         self.vulnerability = "Fastjson Unsafe Configuration"
         self.description = "Fastjson启用了setAutoTypeSupport(true)，允许任意类反序列化，可能绕过AutoType安全检查导致远程代码执行"
         self.level = 3
 
-        self.status = True
         self.match_mode = "java-function-param-regex"
         self.match = "setAutoTypeSupport"
-        self.match_name = None
-        self.black_list = None
-        self.keyword = None
-        self.unmatch = None
         self.vul_function = ["setAutoTypeSupport"]
         self.is_config_vuln = True
 

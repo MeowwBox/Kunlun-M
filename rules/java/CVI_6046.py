@@ -11,24 +11,17 @@
 
 from utils.api import *
 
-
-class CVI_6046():
+class CVI_6046(SingleRuleMixin):
     def __init__(self):
         self.svid = 6046
         self.language = "java"
-        self.author = "KunLun-M"
         self.vulnerability = "Log4j JNDI Injection (Dataflow)"
         self.description = "Log4j日志方法调用了用户可控的参数，可能通过JNDI Lookup机制触发远程代码执行（Log4Shell CVE-2021-44228）"
         self.level = 10
 
-        self.status = True
         self.match_mode = "java-function-param-regex"
         # 匹配 logger.error/info/debug/warn/trace/fatal 调用
         self.match = r'(?<!\w)(?:error|info|debug|warn|trace|fatal)\s*\('
-        self.match_name = None
-        self.black_list = None
-        self.keyword = None
-        self.unmatch = None
         self.vul_function = ["error", "info", "debug", "warn", "trace", "fatal"]
 
     def main(self, regex_string):

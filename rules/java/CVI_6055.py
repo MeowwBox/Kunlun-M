@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 from utils.api import *
 
-
-class CVI_6055():
+class CVI_6055(SingleRuleMixin):
     """
     Apache Struts2 Jakarta Multipart Parser RCE (S2-045/S2-046)
     CVE-2017-5638 / CVE-2017-5639
@@ -13,8 +12,6 @@ class CVI_6055():
         self.language = "java"
         self.vulnerability = "Struts2 Jakarta Multipart RCE (S2-045)"
         self.level = 7
-        self.status = True
-        self.author = "Kunlun-M"
         self.description = "Struts2 2.3.5-2.3.32 / 2.5.0-2.5.10 Jakarta Multipart OGNL注入(CVE-2017-5638)"
 
         self.match_mode = "framework-dependency"
@@ -32,9 +29,4 @@ class CVI_6055():
         self.config_patterns = []
         self.exclude_patterns = []
 
-        self.match_name = None
-        self.black_list = None
-        self.keyword = None
-        self.unmatch = None
-        self.vul_function = None
         self.main = None

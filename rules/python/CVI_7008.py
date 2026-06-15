@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 from utils.api import *
 
-
-class CVI_7008():
+class CVI_7008(SingleRuleMixin):
     """
     Python XSS (跨站脚本)
     覆盖: Flask/Django 中不转义输出, safe filter, Markup, HttpResponse 直接拼接
@@ -10,17 +9,11 @@ class CVI_7008():
     def __init__(self):
         self.svid = 7008
         self.language = "python"
-        self.author = "LoRexxar"
         self.vulnerability = "XSS"
         self.description = "可能存在XSS跨站脚本风险: 未转义的用户输入直接输出到响应"
         self.level = 5
-        self.status = True
         self.match_mode = "function-param-regex"
         self.match = r"HttpResponse\(|make_response\(|\.write\(|Markup\(|mark_safe\(|\.safe|jsonify\(|Response\("
-        self.match_name = None
-        self.black_list = None
-        self.keyword = None
-        self.unmatch = None
         self.vul_function = ["HttpResponse", "make_response", "write", "Markup", "mark_safe", "jsonify", "Response"]
 
     def main(self, regex_string):

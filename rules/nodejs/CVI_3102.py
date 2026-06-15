@@ -12,8 +12,7 @@
 import re
 from utils.api import *
 
-
-class CVI_3102():
+class CVI_3102(SingleRuleMixin):
     """
     Node.js SSRF 规则
     匹配 http.get/http.request/https.get/https.request 等网络请求函数
@@ -22,27 +21,13 @@ class CVI_3102():
     def __init__(self):
         self.svid = 3102
         self.language = "javascript"
-        self.author = "KunLun-M"
         self.vulnerability = "SSRF"
         self.description = "使用了HTTP请求函数（http.get、http.request、https.get、https.request、axios、fetch等）且URL参数可能受用户控制，可能导致服务端请求伪造（SSRF）漏洞。建议对用户输入的URL进行严格的白名单校验。"
         self.level = 7
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "function-param-regex"
         self.match = r"http\.get\s*\(|http\.request\s*\(|https\.get\s*\(|https\.request\s*\(|net\.connect\s*\(|net\.createConnection\s*\("
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
-        # for regex
-        self.unmatch = None
 
         self.vul_function = [
             "http.get", "http.request", "https.get", "https.request",

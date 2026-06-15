@@ -11,8 +11,7 @@
 
 from utils.api import *
 
-
-class CVI_1004():
+class CVI_1004(SingleRuleMixin):
     """
     rule class
     """
@@ -26,25 +25,10 @@ class CVI_1004():
         self.description = "SQL injection, 用户输入直接被拼接进Sql语句当中，有可能造成SQL注入漏洞。"
         self.level = 9
 
-        # status
-        self.status = True
-
         # 部分配置
         self.match_mode = "vustomize-match"
         # 兼容无分号的写法（例如某些模板/拼接场景），末尾分号改为可选
         self.match = r"([\"']+\s*(select|SELECT|insert|INSERT|update|UPDATE)\s+([^;]\s*)(.*)\$(.+?)['\"]+(.+?)?;?)"
-
-        # for solidity
-        self.match_name = None
-        self.black_list = None
-
-        # for chrome ext
-        self.keyword = None
-
-        # for regex
-        self.unmatch = None
-
-        self.vul_function = None
 
     def main(self, regex_string):
         """

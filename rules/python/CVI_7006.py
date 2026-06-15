@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 from utils.api import *
 
-
-class CVI_7006():
+class CVI_7006(SingleRuleMixin):
     """
     Python SSTI (服务端模板注入)
     覆盖: Flask render_template_string, Jinja2 Template, Django template, Mako, Tornado
@@ -10,17 +9,11 @@ class CVI_7006():
     def __init__(self):
         self.svid = 7006
         self.language = "python"
-        self.author = "LoRexxar"
         self.vulnerability = "SSTI"
         self.description = "使用了可能存在模板注入风险的渲染函数"
         self.level = 8
-        self.status = True
         self.match_mode = "function-param-regex"
         self.match = r"render_template_string|Template\(|jinja2\.Environment|TemplateResponse|render_to_response|mark_safe|Markup\(|mako\.template\.Template|tornado\.template\.Template"
-        self.match_name = None
-        self.black_list = None
-        self.keyword = None
-        self.unmatch = None
         self.vul_function = ["render_template_string", "Template", "Environment", "TemplateResponse", "render_to_response", "mark_safe", "Markup"]
 
     def main(self, regex_string):
