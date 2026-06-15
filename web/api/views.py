@@ -17,6 +17,7 @@ from web.index.controller import login_or_token_required, api_token_required
 from django.views.generic import TemplateView
 from django.views import View
 from django.db.models import Count
+from django.utils import timezone
 
 from web.index.models import ScanTask, VendorVulns, Rules, Tampers, NewEvilFunc, Project, ProjectVendors, ScanResultTask
 from web.index.models import get_and_check_scantask_project_id, get_resultflow_class, get_and_check_scanresult
@@ -334,3 +335,74 @@ class VendorVulStatisticsApiView(View):
                     vn['low'] += 1
 
         return JsonResponse({"code": 200, "status": True, "message":  vn_list})
+
+
+class TaskLogTailApiView(View):
+    """实时获取扫描日志尾部"""
+
+    @staticmethod
+    @login_or_token_required
+    def get(request, task_id):
+        task = ScanTask.objects.filter(id=task_id).first()
+        if not task:
+            return JsonResponse({"code": 404, "status": False, "message": "Task not found."})
+
+        log_path = os.path.join(LOGS_PATH, "ScanTask_{}.log".format(task_id))
+        if not os.path.exists(log_path):
+            return JsonResponse({"code": 200, "data": [], "finished": task.is_finished != 2})
+
+        lines = []
+        try:
+            with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+                lines = f.readlines()
+        except Exception:
+            pass
+
+        return JsonResponse({"code": 200, "data": [l.rstrip() for l in lines[-300:]], "finished": task.is_finished != 2})
+
+
+class TaskCancelApiView(View):
+    """取消运行中的任务"""
+
+    @staticmethod
+    @login_or_token_required
+    def post(request, task_id):
+        task = ScanTask.objects.filter(id=task_id).first()
+        if not task:
+            return JsonResponse({"code": 404, "message": "Task not found."})
+
+        if task.is_finished != 2:
+            return JsonResponse({"code": 400, "message": "Task is not running."})
+
+        # 尝试终止进程
+        if task.pid:
+            try:
+                os.kill(task.pid, 9)
+            except (OSError, ProcessLookupError):
+                pass
+
+        ScanTask.objects.filter(id=task.id).update(
+            is_finished=0, finished_at=timezone.now(),
+            exit_code=-1, error_message="Cancelled by user.", pid=None
+        )
+        return JsonResponse({"code": 200, "message": "Task cancelled."})
+
+
+class TaskRetryApiView(View):
+    """重试失败的任务"""
+
+    @staticmethod
+    @login_or_token_required
+    def post(request, task_id):
+        task = ScanTask.objects.filter(id=task_id).first()
+        if not task:
+            return JsonResponse({"code": 404, "message": "Task not found."})
+
+        if task.is_finished not in (0, 1):
+            return JsonResponse({"code": 400, "message": "Only failed/success tasks can be retried."})
+
+        ScanTask.objects.filter(id=task.id).update(
+            is_finished=3, started_at=None, finished_at=None,
+            exit_code=None, error_message=None, pid=None
+        )
+        return JsonResponse({"code": 200, "message": "Task queued for retry."})

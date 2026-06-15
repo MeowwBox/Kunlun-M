@@ -91,11 +91,36 @@
 
 
 <div class="box-footer">
-    <button id="result" type="button" class="btn btn-primary">查看日志</button>
-    <a class="btn btn-default" href="{% url 'backend:exportresult' task.id %}?format=csv">导出CSV</a>
-    <a class="btn btn-default" href="{% url 'backend:exportresult' task.id %}?format=json">导出JSON</a>
+    {% if task.is_finished == 2 %}
+    <button id="btnLogLive" type="button" class="btn btn-warning"><i class="fa fa-terminal"></i> 实时日志</button>
+    {% endif %}
+    <button id="result" type="button" class="btn btn-primary"><i class="fa fa-file-text-o"></i> 查看完整日志</button>
+    <a class="btn btn-default" href="{% url 'backend:exportresult' task.id %}?format=csv"><i class="fa fa-download"></i> CSV</a>
+    <a class="btn btn-default" href="{% url 'backend:exportresult' task.id %}?format=json"><i class="fa fa-download"></i> JSON</a>
+    {% if task.is_finished == 0 %}
+    <button id="btnRetry" type="button" class="btn btn-warning"><i class="fa fa-redo"></i> 重试</button>
+    {% endif %}
+    {% if task.is_finished == 2 %}
+    <button id="btnCancel" type="button" class="btn btn-danger"><i class="fa fa-stop"></i> 取消任务</button>
+    {% endif %}
 </div>
 </div>
+
+<!-- 实时日志面板（运行中时显示） -->
+{% if task.is_finished == 2 %}
+<div class="box box-default" id="logPanel" style="display:none;">
+  <div class="box-header with-border">
+    <h3 class="box-title"><i class="fa fa-terminal"></i> 实时日志</h3>
+    <div class="box-tools pull-right">
+      <button type="button" class="btn btn-box-tool" id="btnLogPause"><i class="fa fa-pause"></i> 暂停</button>
+      <button type="button" class="btn btn-box-tool" onclick="$('#logPanel').hide()"><i class="fa fa-times"></i></button>
+    </div>
+  </div>
+  <div class="box-body">
+    <pre id="logContent" style="background:#1e1e1e; color:#d4d4d4; padding:16px; border-radius:6px; font-size:12px; line-height:1.5; max-height:500px; overflow-y:auto; white-space:pre-wrap; word-break:break-all;"></pre>
+  </div>
+</div>
+{% endif %}
 
 {% if task.is_finished == 1 %}
 
@@ -238,9 +263,67 @@ $(document).ready(function(){
   $("#tasks").find("ul").find("li#task_list").addClass("active");
   $("#tasks").find("ul").css("display","block");
 
+  // 查看完整日志
   $("button#result").click(function () {
       location.href = "{% url 'backend:tasklog' task.id %}?token={{ visit_token }}";
+  });
+
+  // 实时日志
+  var logPollTimer = null;
+  var logPaused = false;
+  var lastLogLen = 0;
+  $("button#btnLogLive").click(function(){
+    $("#logPanel").show();
+    lastLogLen = 0;
+    logPaused = false;
+    $("#btnLogPause").html('<i class="fa fa-pause"></i> 暂停');
+    pollLog();
+  });
+  $("#btnLogPause").click(function(){
+    logPaused = !logPaused;
+    $(this).html(logPaused ? '<i class="fa fa-play"></i> 继续' : '<i class="fa fa-pause"></i> 暂停');
+  });
+  function pollLog(){
+    if(logPaused) { logPollTimer = setTimeout(pollLog, 2000); return; }
+    $.getJSON("{% url 'api:tasklogtail' task.id %}?token={{ visit_token }}", function(data){
+      if(data.code==200){
+        var txt = (data.data || []).join("\n");
+        var $pre = $("#logContent");
+        if(txt.length > lastLogLen){
+          $pre.text(txt);
+          lastLogLen = txt.length;
+          $pre.scrollTop($pre[0].scrollHeight);
+        }
+        if(data.finished){
+          $pre.append("\n\n--- 任务已结束 ---");
+          return;
+        }
+      }
+      logPollTimer = setTimeout(pollLog, 2000);
+    }).fail(function(){ logPollTimer = setTimeout(pollLog, 5000); });
+  }
+
+  // 取消任务
+  $("button#btnCancel").click(function(){
+    if(!confirm("确定取消此任务？")) return;
+    $.post("{% url 'api:taskcancel' task.id %}?token={{ visit_token }}", {
+      csrfmiddlewaretoken: $("input[name='csrfmiddlewaretoken']").val()
+    }, function(data){
+      if(data.code==200){ alert("任务已取消"); location.reload(); }
+      else alert(data.message || "操作失败");
     });
+  });
+
+  // 重试任务
+  $("button#btnRetry").click(function(){
+    if(!confirm("确定重试此任务？")) return;
+    $.post("{% url 'api:taskretry' task.id %}?token={{ visit_token }}", {
+      csrfmiddlewaretoken: $("input[name='csrfmiddlewaretoken']").val()
+    }, function(data){
+      if(data.code==200){ alert("任务已重新提交"); location.reload(); }
+      else alert(data.message || "操作失败");
+    });
+  });
 
 });
 </script>

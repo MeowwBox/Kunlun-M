@@ -210,6 +210,7 @@ class ScanTask(models.Model):
     last_scan_time = models.DateTimeField(default=timezone.now)
     visit_token = models.CharField(max_length=64, default=uuid.uuid4)
     is_finished = models.IntegerField(default=3)
+    pid = models.IntegerField(null=True, default=None)
 
     def save(self, *args, **kwargs):
         # 检查project存不存在，如果不存在，那么新建一个

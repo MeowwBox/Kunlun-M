@@ -40,12 +40,13 @@ def try_dispatch():
 
         try:
             cmd = _build_scan_cmd(task)
-            subprocess.Popen(
+            proc = subprocess.Popen(
                 cmd,
                 cwd=getattr(settings, "PROJECT_DIRECTORY", None) or os.getcwd(),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
+            ScanTask.objects.filter(id=task.id).update(pid=proc.pid)
             started += 1
         except Exception as e:
             ScanTask.objects.filter(id=task.id).update(is_finished=0, finished_at=timezone.now(), exit_code=-1, error_message=str(e)[:2000])

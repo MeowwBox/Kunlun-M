@@ -49,4 +49,11 @@ urlpatterns = [
     # vendor statistics
     path("vendor/statistics", views.VendorStatisticsApiView.as_view(), name="vendor_statistics"),
 
+    # task log tail (realtime)
+    path("task/<int:task_id>/logtail", views.TaskLogTailApiView.as_view(), name="tasklogtail"),
+    # task cancel
+    path("task/<int:task_id>/cancel", views.TaskCancelApiView.as_view(), name="taskcancel"),
+    # task retry
+    path("task/<int:task_id>/retry", views.TaskRetryApiView.as_view(), name="taskretry"),
+
 ]
