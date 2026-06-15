@@ -266,9 +266,7 @@ def _function_returns_source_c(func_node, registry):
         return False
 
     def _walk_return(node):
-        if node is None:
-            return False
-        if not hasattr(node, 'type'):
+        if node is None or not hasattr(node, 'type'):
             return False
         if node.type == 'return_statement':
             for child in node.children:
@@ -284,7 +282,11 @@ def _function_returns_source_c(func_node, registry):
                 return True
         return False
 
-    return _walk_return(func_node)
+    # 从子节点开始遍历，避免 func_node 自身（function_definition）被跳过
+    for child in func_node.children:
+        if _walk_return(child):
+            return True
+    return False
 
 
 def _walk_for_functions(root_node, file_path, registry):

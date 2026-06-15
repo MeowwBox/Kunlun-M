@@ -302,7 +302,7 @@ def _node_contains_source(node, registry, _depth=0):
     return False
 
 
-def _function_returns_source(func_node, registry, _depth=0):
+def _function_returns_source(func_node, registry):
     """检查 Go 函数定义的 return 语句值是否包含已知 source
 
     只分析 return_statement 的表达式，不检查函数体内其他位置的 source。
@@ -312,18 +312,15 @@ def _function_returns_source(func_node, registry, _depth=0):
 
     def _walk_return(node):
         """在函数体内查找 return_statement 并检查其表达式"""
-        if node is None:
-            return False
-        if not hasattr(node, 'type'):
+        if node is None or not hasattr(node, 'type'):
             return False
         if node.type == 'return_statement':
-            # return 语句的表达式在 expression_list 子节点或子 children 中
             for child in node.children:
                 if hasattr(child, 'type') and child.type != 'return':
                     if _node_contains_source(child, registry):
                         return True
             return False
-        # 递归进入 block/function body，但不进入嵌套函数
+        # 不进入嵌套函数
         if node.type == 'function_declaration':
             return False
         for child in node.children:
@@ -331,7 +328,11 @@ def _function_returns_source(func_node, registry, _depth=0):
                 return True
         return False
 
-    return _walk_return(func_node)
+    # 从子节点开始遍历，避免 func_node 自身（function_declaration）被跳过
+    for child in func_node.children:
+        if _walk_return(child):
+            return True
+    return False
 
 
 def _walk_for_functions(root_node, file_path, registry):
