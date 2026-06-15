@@ -463,55 +463,102 @@ class TamperCheck:
         return True
 
     def load(self):
+        """
+        加载 tamper 文件到数据库。
+        支持新结构：rules/tamper/<language>/<framework>.py
+        同时向后兼容旧结构：rules/tamper/<framework>.py
+        """
+        # 扫描子目录结构 (新版本)
+        language_dirs = [d for d in os.listdir(self.tamper_base_path)
+                         if os.path.isdir(os.path.join(self.tamper_base_path, d))
+                         and not d.startswith('_') and d != '__pycache__']
 
-        self.tamper_list = list_parse(self.tamper_base_path, True)
+        # 扫描顶层 .py 文件 (旧版本兼容)
+        top_files = [f for f in os.listdir(self.tamper_base_path)
+                     if f.endswith('.py') and not f.startswith('_') and f not in ('test.py', 'demo.py', 'none.py')]
 
-        for tamper in self.tamper_list:
+        if language_dirs:
+            self._load_new_tampers(language_dirs)
+        if top_files:
+            self._load_old_tampers(top_files)
+
+        return True
+
+    def _load_new_tampers(self, language_dirs):
+        """加载新结构 tamper：rules/tamper/<language>/<framework>.py"""
+        for lang in sorted(language_dirs):
+            lang_dir = os.path.join(self.tamper_base_path, lang)
+            if not os.path.isdir(lang_dir):
+                continue
+
+            for fname in sorted(os.listdir(lang_dir)):
+                if not fname.endswith('.py') or fname.startswith('_'):
+                    continue
+
+                tamper_name = fname[:-3]  # 去掉 .py
+                module_path = "rules.tamper.{}.{}".format(lang, tamper_name)
+
+                try:
+                    tamper_obj = __import__(module_path, fromlist=[tamper_name])
+                except Exception as e:
+                    logger.warning("[INIT][Load Tamper] Failed to import {}: {}".format(module_path, e))
+                    continue
+
+                # 新接口：FILTER_FUNCTIONS (dict), CONTROLLED_SOURCES (list), EXTRA_SINKS (list of tuples)
+                filter_func = getattr(tamper_obj, 'FILTER_FUNCTIONS', None)
+                controlled_sources = getattr(tamper_obj, 'CONTROLLED_SOURCES', None)
+                extra_sinks = getattr(tamper_obj, 'EXTRA_SINKS', None)
+
+                # Filter-Function：{func_name: config_dict} → 存为 tam_type="Filter-Function"
+                if filter_func:
+                    for func_name, func_value in filter_func.items():
+                        self._upsert_tamper(tamper_name, "Filter-Function", func_name, func_value)
+
+                # Controlled-Sources：[source_string, ...] → 存为 tam_type="Controlled-Sources"
+                if controlled_sources:
+                    for source in controlled_sources:
+                        self._upsert_tamper(tamper_name, "Controlled-Sources", tamper_name, source)
+
+                # Extra-Sinks：[(sink_name, [svids]), ...] → 存为 tam_type="Extra-Sinks"
+                if extra_sinks:
+                    for sink_name, svids in extra_sinks:
+                        self._upsert_tamper(tamper_name, "Extra-Sinks", sink_name, svids)
+
+    def _load_old_tampers(self, top_files):
+        """加载旧结构 tamper：rules/tamper/<framework>.py（向后兼容）"""
+        for tamper in top_files:
             tamper_name = tamper.split('.')[0]
             tamper_file = "rules.tamper." + tamper_name
 
-            tamper_obj = __import__(tamper_file, fromlist=tamper_name)
+            try:
+                tamper_obj = __import__(tamper_file, fromlist=tamper_name)
+            except Exception as e:
+                logger.warning("[INIT][Load Tamper] Failed to import {}: {}".format(tamper_file, e))
+                continue
 
-            filter_func = getattr(tamper_obj, tamper_name)
-            input_control = getattr(tamper_obj, tamper_name + "_controlled")
+            filter_func = getattr(tamper_obj, tamper_name, None)
+            input_control = getattr(tamper_obj, tamper_name + "_controlled", None)
 
             if filter_func:
                 for function in filter_func:
-                    t = Tampers.objects.filter(tam_name=tamper_name, tam_type="Filter-Function",
-                                               tam_key=function).first()
-
-                    if not t:
-                        logger.info("[INIT][Load Tamper] New Tamper for {} function {}.".format(tamper_name, function))
-
-                        t1 = Tampers(tam_name=tamper_name, tam_type="Filter-Function",
-                                     tam_key=function, tam_value=filter_func[function])
-
-                        t1.save()
-
-                    else:
-                        logger.debug("[INIT][Load Tamper] Check Tamper for {} function {}.".format(tamper_name, function))
-
-                        self.check_and_update_tamper(t, filter_func[function])
+                    self._upsert_tamper(tamper_name, "Filter-Function", function, filter_func[function])
 
             if input_control:
-                for input in input_control:
-                    t = Tampers.objects.filter(tam_name=tamper_name, tam_type="Input-Control",
-                                               tam_key=tamper_name, tam_value=input).first()
+                for input_val in input_control:
+                    self._upsert_tamper(tamper_name, "Input-Control", tamper_name, input_val)
 
-                    if not t:
-                        logger.info("[INIT][Load Tamper] New Tamper for {} Input {}.".format(tamper_name, input))
+    def _upsert_tamper(self, tam_name, tam_type, tam_key, tam_value):
+        """通用 upsert：存在则检查更新，不存在则创建"""
+        t = Tampers.objects.filter(tam_name=tam_name, tam_type=tam_type, tam_key=tam_key).first()
 
-                        t1 = Tampers(tam_name=tamper_name, tam_type="Input-Control",
-                                     tam_key=tamper_name, tam_value=input)
-
-                        t1.save()
-
-                    else:
-                        logger.debug("[INIT][Load Tamper] Check Tamper for {} Input {}.".format(tamper_name, input))
-
-                        self.check_and_update_tamper(t, input)
-
-        return True
+        if not t:
+            logger.info("[INIT][Load Tamper] New Tamper {} {} key={}".format(tam_name, tam_type, tam_key))
+            Tampers(tam_name=tam_name, tam_type=tam_type, tam_key=tam_key, tam_value=str(tam_value)).save()
+        else:
+            if str(t.tam_value) != str(tam_value):
+                logger.debug("[INIT][Load Tamper] Update {} {} key={}".format(tam_name, tam_type, tam_key))
+                t.tam_value = str(tam_value)
+                t.save()
 
     def recover(self):
 
