@@ -211,7 +211,6 @@ def scan(target_directory, a_sid=None, s_sid=None, special_rules=None, language=
     def store(result):
         if result is not None and isinstance(result, list) is True:
             for res in result:
-                res.file_path = res.file_path
                 find_vulnerabilities.append(res)
         else:
             logger.debug('[SCAN] [STORE] Not found vulnerabilities on this rule!')
