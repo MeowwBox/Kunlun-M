@@ -28,6 +28,13 @@ EXTRA_SINKS = [
     ("c.FileAttachment(", [8006]),
     ("c.Redirect(", [8013]),
     ("c.JSONP(", [8008]),
+    ("c.String(", [8003, 8008]),
+    ("c.JSON(", [8003, 8008]),
+    ("c.XML(", [8003, 8008]),
+    ("c.YAML(", [8003, 8008]),
+    ("c.Data(", [8003, 8008]),
+    ("c.Writer.Write(", [8003, 8008]),
+    ("c.SaveUploadedFile(", [8004, 8006]),
 ]
 
 CONTROLLED_SOURCES = [
@@ -42,4 +49,10 @@ CONTROLLED_SOURCES = [
     'ctx.Param',
     'ctx.PostForm',
     'ctx.GetHeader',
+    'c.DefaultQuery',
+    'c.DefaultPostForm',
+    'c.ShouldBindQuery',
+    'c.ShouldBindXML',
+    'c.ShouldBindYAML',
+    'c.ClientIP',
 ]

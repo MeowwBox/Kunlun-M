@@ -12,10 +12,18 @@ def detect(project_dir, language='php'):
 
 FILTER_FUNCTIONS = {
     'rcube_utils::rep_specialchars_output': {'safe_for': [1000, 10001, 10002]},
+    'rcube_html::clean': {'safe_for': [1000, 1010]},
 }
 
 CONTROLLED_SOURCES = [
     'rcube_utils::get_input_value',
     'rcube_utils::get_request_header',
     'rcube_utils::get_request_param',
+    'rcube_session::get',
+    '$OUTPUT->get_env',
+]
+
+EXTRA_SINKS = [
+    ("$DB->query(", [1004]),
+    ("rcube_utils::http_get(", [1005]),
 ]

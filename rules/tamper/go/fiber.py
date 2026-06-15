@@ -7,6 +7,15 @@ DEPENDENCIES = {'gomod': ['github.com/gofiber/fiber']}
 
 def detect(project_dir, language='go'):
     """检测是否为 Fiber 项目"""
+    go_mod = os.path.join(project_dir, 'go.mod')
+    if os.path.isfile(go_mod):
+        try:
+            with open(go_mod, 'r', encoding='utf-8') as f:
+                content = f.read()
+                if 'fiber' in content and 'gofiber' in content:
+                    return True
+        except IOError:
+            pass
     return False
 
 
@@ -18,10 +27,22 @@ CONTROLLED_SOURCES = [
     'c.FormValue',
     'c.Body',
     'c.Get',
+    'c.Cookies',
+    'c.Path',
+    'c.IP',
+    'c.IPs',
+    'c.Hostname',
+    'c.Protocol',
 ]
 
 EXTRA_SINKS = [
     ("c.HTML(", [8008]),
     ("c.SendFile(", [8006]),
     ("c.Redirect(", [8013]),
+    ("c.JSON(", [8003, 8008]),
+    ("c.SendString(", [8003, 8008]),
+    ("c.SendStatus(", [8003, 8008]),
+    ("c.XML(", [8003, 8008]),
+    ("c.Download(", [8004, 8006]),
+    ("c.Stream(", [8004]),
 ]

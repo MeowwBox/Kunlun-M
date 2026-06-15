@@ -80,7 +80,6 @@ IS_REPAIR = {
     "ESAPI.encoder().encodeForHTML": [6002, 6022],
 
     # ---- 命令注入防御 ----
-    "ProcessBuilder": [6003, 6023, 6032, 6038],
     "escapeShellArg": [6003, 6023, 6032, 6038],
 
     # ---- 路径穿越防御 ----
