@@ -1,4 +1,15 @@
 ## 更新日志
+- 2026-06-15
+  - KunLun-M 2.14.1
+  - **全项目架构复盘修复**
+    - 删除 `scanner.py` 中无意义的 `res.file_path` 自赋值
+    - 合并 Go matcher 中两个重复的 `function-param-regex` 分支，删除 37 行死代码
+    - 修复 6 语言函数摘要查询不匹配：`lookup_summary` 改为先精确匹配全限定名再 fallback 短名（PHP/JS/Python/Go/C/Java）
+    - 修复 Java parser `global_methods` 迭代错误（元组解包不匹配 + 列表用 `.get()` 访问）
+    - VirtualRule 未继承原始规则的 `level` 属性，导致 EXTRA_SINKS 虚拟规则全部 level=0
+    - Python `function_back` 只收集首个 return 分支结果，导致 L2 安全函数继承被误判
+    - Source Discovery 过度标记 bug：5 语言（PHP/JS/Python/Go/C）从检查函数体内容改为只检查 return 语句值
+    - Go/C `_function_returns_source` 从根节点开始遍历导致立即返回 False，改为从 body 子节点开始
 - 2026-06-12
   - KunLun-M 2.14.0
   - **tamper 框架化改造（Phase 1/2/3）**
