@@ -176,5 +176,95 @@
             <!-- /.box-footer -->
           </div>
 
+<!-- 统计图表 -->
+<div class="row" style="margin-top:16px;">
+  <div class="col-md-4">
+    <div class="box box-info">
+      <div class="box-header with-border">
+        <h3 class="box-title"><i class="fa fa-pie-chart"></i> 漏洞语言分布</h3>
+      </div>
+      <div class="box-body" style="height:280px;">
+        <canvas id="chartLang"></canvas>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="box box-warning">
+      <div class="box-header with-border">
+        <h3 class="box-title"><i class="fa fa-bar-chart"></i> 漏洞等级分布</h3>
+      </div>
+      <div class="box-body" style="height:280px;">
+        <canvas id="chartLevel"></canvas>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="box box-success">
+      <div class="box-header with-border">
+        <h3 class="box-title"><i class="fa fa-line-chart"></i> 最近 7 天扫描量</h3>
+      </div>
+      <div class="box-body" style="height:280px;">
+        <canvas id="chartDaily"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script>
+$(function(){
+  $.getJSON("{% url 'api:stats_dashboard' %}", function(data){
+    if(data.code !== 200) return;
+
+    var colors = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6','#1abc9c','#e67e22','#34495e'];
+
+    // 语言分布饼图
+    var langLabels = data.lang_dist.map(function(d){ return d.language; });
+    var langData = data.lang_dist.map(function(d){ return d.count; });
+    new Chart(document.getElementById('chartLang'), {
+      type: 'doughnut',
+      data: {
+        labels: langLabels,
+        datasets: [{ data: langData, backgroundColor: colors.slice(0, langLabels.length) }]
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+    });
+
+    // 等级分布柱状图
+    var ld = data.level_dist;
+    new Chart(document.getElementById('chartLevel'), {
+      type: 'bar',
+      data: {
+        labels: Object.keys(ld),
+        datasets: [{
+          label: '漏洞数',
+          data: Object.values(ld),
+          backgroundColor: ['#e74c3c','#f39c12','#3498db','#95a5a6']
+        }]
+      },
+      options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }, plugins: { legend: { display: false } } }
+    });
+
+    // 最近 7 天折线图
+    var dailyLabels = data.daily_tasks.map(function(d){ return d.date.slice(5); });
+    var dailyData = data.daily_tasks.map(function(d){ return d.count; });
+    new Chart(document.getElementById('chartDaily'), {
+      type: 'line',
+      data: {
+        labels: dailyLabels,
+        datasets: [{
+          label: '扫描任务数',
+          data: dailyData,
+          borderColor: '#2ecc71',
+          backgroundColor: 'rgba(46,204,113,0.1)',
+          fill: true,
+          tension: 0.3
+        }]
+      },
+      options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }, plugins: { legend: { display: false } } }
+    });
+  });
+});
+</script>
 
 {% endblock %}

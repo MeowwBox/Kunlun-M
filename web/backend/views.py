@@ -220,6 +220,54 @@ def exportresult(req, task_id):
             w.writerow(r)
         return resp
 
+    if fmt == "html":
+        html_parts = [
+            "<!DOCTYPE html><html><head><meta charset='utf-8'>",
+            "<title>ScanTask {} Report</title>".format(task_id),
+            "<style>body{font-family:sans-serif;margin:20px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:8px;text-align:left}th{background:#f5f5f5}tr:nth-child(even){background:#fafafa}.meta{margin-bottom:20px;color:#666}</style>",
+            "</head><body>",
+            "<div class='meta'><h2>ScanTask #{} Report</h2>".format(task_id),
+            "<p>Task: {} | Target: {} | Total: {}</p>".format(
+                getattr(task, 'task_name', task_id), getattr(task, 'target_path', ''), len(rows)),
+            "</div>",
+            "<table><thead><tr>",
+        ]
+        if rows:
+            for k in rows[0].keys():
+                html_parts.append("<th>{}</th>".format(k))
+        html_parts.append("</tr></thead><tbody>")
+        for r in rows:
+            html_parts.append("<tr>")
+            for v in r.values():
+                html_parts.append("<td>{}</td>".format(str(v) if v is not None else ''))
+            html_parts.append("</tr>")
+        html_parts.append("</tbody></table></body></html>")
+
+        resp = HttpResponse('\n'.join(html_parts), content_type="text/html; charset=utf-8")
+        resp["Content-Disposition"] = "attachment; filename=ScanTask_{}_result.html".format(task_id)
+        return resp
+
+    if fmt == "md":
+        md_parts = [
+            "# ScanTask #{} Report".format(task_id),
+            "",
+            "- **Task**: {}".format(getattr(task, 'task_name', task_id)),
+            "- **Target**: {}".format(getattr(task, 'target_path', '')),
+            "- **Total**: {}".format(len(rows)),
+            "",
+        ]
+        if rows:
+            headers = list(rows[0].keys())
+            md_parts.append("| " + " | ".join(headers) + " |")
+            md_parts.append("| " + " | ".join(["---"] * len(headers)) + " |")
+            for r in rows:
+                md_parts.append("| " + " | ".join(str(v) if v is not None else '' for v in r.values()) + " |")
+        md_parts.append("")
+
+        resp = HttpResponse('\n'.join(md_parts), content_type="text/markdown; charset=utf-8")
+        resp["Content-Disposition"] = "attachment; filename=ScanTask_{}_result.md".format(task_id)
+        return resp
+
     resp = JsonResponse({"code": 200, "status": True, "message": rows})
     resp["Content-Disposition"] = "attachment; filename=ScanTask_{}_result.json".format(task_id)
     return resp

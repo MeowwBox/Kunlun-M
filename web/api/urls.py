@@ -56,4 +56,7 @@ urlpatterns = [
     # task retry
     path("task/<int:task_id>/retry", views.TaskRetryApiView.as_view(), name="taskretry"),
 
+    # stats
+    path("stats/dashboard", views.StatsApiView.as_view(), name="stats_dashboard"),
+
 ]

@@ -97,6 +97,8 @@
     <button id="result" type="button" class="btn btn-primary"><i class="fa fa-file-text-o"></i> 查看完整日志</button>
     <a class="btn btn-default" href="{% url 'backend:exportresult' task.id %}?format=csv"><i class="fa fa-download"></i> CSV</a>
     <a class="btn btn-default" href="{% url 'backend:exportresult' task.id %}?format=json"><i class="fa fa-download"></i> JSON</a>
+    <a class="btn btn-default" href="{% url 'backend:exportresult' task.id %}?format=html"><i class="fa fa-file-code-o"></i> HTML</a>
+    <a class="btn btn-default" href="{% url 'backend:exportresult' task.id %}?format=md"><i class="fa fa-file-text-o"></i> Markdown</a>
     {% if task.is_finished == 0 %}
     <button id="btnRetry" type="button" class="btn btn-warning"><i class="fa fa-redo"></i> 重试</button>
     {% endif %}
