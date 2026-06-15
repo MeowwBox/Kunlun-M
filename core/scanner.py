@@ -182,14 +182,16 @@ def scan(target_directory, a_sid=None, s_sid=None, special_rules=None, language=
                         if extra:
                             for pattern, svids in extra.items():
                                 for svid in svids:
-                                    # 从已有规则获取漏洞描述
+                                    # 从已有规则获取漏洞描述和等级
                                     vuln_desc = ""
+                                    vuln_level = 0
                                     for rule_key in rules:
                                         try:
                                             r = getattr(rules[rule_key], rule_key)
                                             rc = r()
                                             if rc.svid == svid:
                                                 vuln_desc = rc.vulnerability
+                                                vuln_level = rc.level
                                                 break
                                         except:
                                             pass
@@ -197,7 +199,7 @@ def scan(target_directory, a_sid=None, s_sid=None, special_rules=None, language=
                                     # 生成虚拟规则类（包装为假模块以兼容 getattr 结构）
                                     vw_name = "VW_{}_{}".format(svid, virtual_rule_count)
                                     vw_class = type(vw_name, (VirtualRule,), {
-                                        '__init__': lambda self, _p=pattern, _s=svid, _l=lang_lower, _d=vuln_desc: VirtualRule.__init__(self, _p, _s, _l, _d)
+                                        '__init__': lambda self, _p=pattern, _s=svid, _l=lang_lower, _d=vuln_desc, _vl=vuln_level: VirtualRule.__init__(self, _p, _s, _l, _d, level=_vl)
                                     })
                                     vw_module = _types.ModuleType(vw_name)
                                     setattr(vw_module, vw_name, vw_class)

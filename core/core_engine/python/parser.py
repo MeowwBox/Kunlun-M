@@ -1448,70 +1448,118 @@ def _trace_function_return(func_def, call_node, lineno, file_path,
                             controllable_local.add(tname)
 
     # 在函数体中查找 return 语句
+    # 先收集所有 return 语句，避免在第一个 return 就退出而漏掉后续分支
+    return_nodes = [node for node in ast.walk(func_def) if isinstance(node, ast.Return) and node.value]
+
     # Source Discovery: 如果函数本身是 source producer，返回值直接可控
     if _is_source_producer:
-        for node in ast.walk(func_def):
-            if isinstance(node, ast.Return) and node.value:
-                return_str = _expr_to_str(node.value)
-                logger.debug("[AST][Python] Source producer {} returns: {}".format(func_name, return_str))
-                return 1, return_str, lineno
+        for node in return_nodes:
+            return_str = _expr_to_str(node.value)
+            logger.debug("[AST][Python] Source producer {} returns: {}".format(func_name, return_str))
+            # Source producer: any return means controllable
+            return 1, return_str, lineno
         # 无 return 语句但仍是 source producer → 仍然视为可控
         return 1, func_name, lineno
 
-    for node in ast.walk(func_def):
-        if isinstance(node, ast.Return) and node.value:
-            # 先检查返回值外层是否是 safe 函数（如 html.escape, str, int 等）
-            # safe 函数处理后数据不再被视为可控攻击向量
-            if isinstance(node.value, ast.Call):
-                return_call_name = _get_call_name(node.value)
-                if return_call_name:
-                    return_builtin = lookup_builtin(return_call_name)
-                    if return_builtin and return_builtin.get("safe"):
-                        # L2 注册：当前函数 return 了 safe 函数，继承 safe_for
-                        _register_l2_inherit("python", func_name, return_call_name)
-                        logger.debug("[AST][Python] Function {} returns safe function call: {}".format(
-                            func_name, return_call_name))
-                        return -1, None, lineno
+    # 评估所有 return 分支，而不是遇到第一个就退出
+    has_safe_return = False          # 至少有一个分支返回 safe 函数
+    has_controllable_return = False  # 至少有一个分支返回可控数据
+    all_deps = set()                 # 所有依赖的调用者变量名并集
+    all_safe_funcs = []              # 返回值中出现的 safe 函数
 
-            # 先检查返回值表达式本身是否是可控源
+    for node in return_nodes:
+        # 先检查返回值外层是否是 safe 函数（如 html.escape, str, int 等）
+        # safe 函数处理后数据不再被视为可控攻击向量
+        if isinstance(node.value, ast.Call):
+            return_call_name = _get_call_name(node.value)
+            if return_call_name:
+                return_builtin = lookup_builtin(return_call_name)
+                if return_builtin and return_builtin.get("safe"):
+                    has_safe_return = True
+                    all_safe_funcs.append(return_call_name)
+                    logger.debug("[AST][Python] Function {} returns safe function call: {}".format(
+                        func_name, return_call_name))
+                    continue  # 检查下一个 return 分支
+
+        # 先检查返回值表达式本身是否是可控源
+        return_str = _expr_to_str(node.value)
+        if is_controllable(return_str, controlled_params):
+            has_controllable_return = True
+            logger.debug("[AST][Python] Function {} returns controllable source directly: {}".format(
+                func_name, return_str))
+            break
+
+        # 检查返回值中引用的变量是否在可控局部变量集合中
+        return_names = _collect_names(node.value)
+
+        # 检查返回值是否包含可控局部变量（赋值链传播结果）
+        matched = return_names & controllable_local
+        if matched:
+            # 可控局部变量最终来自形参 → 形参来自调用处的实参
+            # 收集这些实参中的变量名，返回给上层继续追踪
+            deps = set()
+            for var_name in matched:
+                if var_name in arg_map:
+                    # 形参直接出现在返回值中 → 取对应实参的变量名
+                    arg_str = arg_map[var_name]
+                    if is_controllable(arg_str, controlled_params):
+                        has_controllable_return = True
+                        break
+                    deps.update(_collect_names_from_str(arg_str))
+                else:
+                    # 局部变量间接传播 → 其来源仍可追溯到形参
+                    deps.update(_collect_names(node.value))
+            if has_controllable_return:
+                break
+            if deps:
+                logger.debug("[AST][Python] Function {} return depends on caller vars: {}".format(
+                    func_name, deps))
+                all_deps.update(deps)
+                continue  # 检查下一个 return 分支
+
+        # fallback: 文本匹配形参名出现在返回值中
+        return_str = _expr_to_str(node.value)
+        for param_name, arg_str in arg_map.items():
+            if is_controllable(arg_str, controlled_params):
+                if param_name in return_str or _contains_name(node.value, param_name):
+                    logger.debug("[AST][Python] Function {} returns controllable param {} (text match)".format(
+                        func_name, param_name))
+                    has_controllable_return = True
+                    break
+        if has_controllable_return:
+            break
+
+    # 根据所有分支的结果做最终判定
+    if has_controllable_return:
+        # 找到具体可控的 return 用于上报
+        for node in return_nodes:
             return_str = _expr_to_str(node.value)
             if is_controllable(return_str, controlled_params):
-                logger.debug("[AST][Python] Function {} returns controllable source directly: {}".format(
-                    func_name, return_str))
                 return 1, return_str, lineno
-
-            # 检查返回值中引用的变量是否在可控局部变量集合中
             return_names = _collect_names(node.value)
-
-            # 检查返回值是否包含可控局部变量（赋值链传播结果）
             matched = return_names & controllable_local
             if matched:
-                # 可控局部变量最终来自形参 → 形参来自调用处的实参
-                # 收集这些实参中的变量名，返回给上层继续追踪
-                deps = set()
                 for var_name in matched:
                     if var_name in arg_map:
-                        # 形参直接出现在返回值中 → 取对应实参的变量名
                         arg_str = arg_map[var_name]
                         if is_controllable(arg_str, controlled_params):
                             return 1, arg_str, lineno
-                        deps.update(_collect_names_from_str(arg_str))
-                    else:
-                        # 局部变量间接传播 → 其来源仍可追溯到形参
-                        deps.update(_collect_names(node.value))
-                if deps:
-                    logger.debug("[AST][Python] Function {} return depends on caller vars: {}".format(
-                        func_name, deps))
-                    return 'deps', list(deps), lineno
-
-            # fallback: 文本匹配形参名出现在返回值中
+        # fallback 文本匹配命中
+        for node in return_nodes:
             return_str = _expr_to_str(node.value)
             for param_name, arg_str in arg_map.items():
                 if is_controllable(arg_str, controlled_params):
                     if param_name in return_str or _contains_name(node.value, param_name):
-                        logger.debug("[AST][Python] Function {} returns controllable param {} (text match)".format(
-                            func_name, param_name))
                         return 1, arg_str, lineno
+
+    if all_deps and not has_controllable_return:
+        return 'deps', list(all_deps), lineno
+
+    # 只有当没有可控返回且没有 deps 时才注册 L2
+    # （避免混合 safe/unsafe 返回时误把函数标记为 safe）
+    if has_safe_return and not has_controllable_return and not all_deps:
+        for safe_func in all_safe_funcs:
+            _register_l2_inherit("python", func_name, safe_func)
 
     # 返回值没有明确的可控来源，但有未确认的调用者变量
     # 把 caller_var_names 交给上层继续追踪
