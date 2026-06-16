@@ -39,7 +39,7 @@
       </div>
       <div class="box-body" style="padding:0; max-height:calc(100vh - 120px); overflow:auto; background:#eaedf1 !important;">
         <div id="codePanel" class="km-code-panel" style="display:none;">
-          <table class="km-code-table" style="width:100%; border-collapse:collapse; font-family:'Fira Code',Consolas,monospace; font-size:13px; line-height:1.15;">
+          <table class="km-code-table" style="width:100%; border-collapse:collapse; font-family:'Fira Code',Consolas,monospace; font-size:13px; line-height:1.0;">
             <tbody id="codeBody"></tbody>
           </table>
         </div>
@@ -71,11 +71,11 @@
 .km-tree-hidden { display:none !important; }
 
 /* ── 代码面板（浅灰） ── */
-.km-code-panel { font-family:'Fira Code',Consolas,'Courier New',monospace; font-size:13px; line-height:1.15; }
+.km-code-panel { font-family:'Fira Code',Consolas,'Courier New',monospace; font-size:13px; line-height:1.0; }
 .km-code-table { width:100%; border-collapse:collapse; background:#eaedf1; color:#24292e; table-layout:fixed; }
-.km-code-table tr { border:none !important; }
-.km-code-table td { padding:0 12px; vertical-align:top; border:none !important; line-height:1.15; }
-.km-code-line-num { width:50px; min-width:50px; text-align:right; color:#6a737d; user-select:none; cursor:pointer; padding-right:10px !important; font-size:12px; font-family:Consolas,monospace; }
+.km-code-table tr { border:none !important; height:auto !important; }
+.km-code-table td { padding:0 12px !important; vertical-align:top; border:none !important; line-height:1.0; }
+.km-code-line-num { width:50px; min-width:50px; text-align:right; color:#6a737d; user-select:none; cursor:pointer; font-size:13px; font-family:Consolas,monospace; }
 .km-code-line-num:hover { background:rgba(0,0,0,0.06); }
 .km-code-line { white-space:pre; tab-size:4; }
 .km-line-highlight { background:#fffbe6 !important; }
