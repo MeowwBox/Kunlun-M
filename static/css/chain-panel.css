@@ -1,168 +1,183 @@
-/* 漏洞链面板 */
+/* ── 漏洞链面板（inline row 版本） ── */
+
+/* 面板容器（在 <td> 内的 flex 布局） */
 .km-chain-panel {
     display: flex;
-    border: 1px solid #ddd;
+    border: 1px solid #d8dce0;
     border-top: 2px solid #3c8dbc;
-    background: #f9f9f9;
-    margin: 10px 0;
     min-height: 300px;
     max-height: 500px;
     overflow: hidden;
-    border-radius: 4px;
+    background: #eaedf1;
 }
-.km-chain-row-active {
-    background-color: #fffde7 !important;
-}
+
+/* ── 左侧节点链 ── */
 .km-chain-sidebar {
     width: 280px;
     min-width: 280px;
     background: #fff;
-    border-right: 1px solid #ddd;
+    border-right: 1px solid #d8dce0;
     overflow-y: auto;
-    padding: 0;
+    padding: 12px 8px;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
 }
+.km-chain-sidebar::-webkit-scrollbar { display: none; }
+
 .km-chain-title {
-    padding: 10px 15px;
-    font-weight: 600;
-    font-size: 13px;
-    color: #555;
+    font-size: 14px;
+    font-weight: bold;
+    color: #333;
+    padding: 4px 12px 12px;
     border-bottom: 1px solid #eee;
-    background: #fafafa;
+    margin-bottom: 8px;
 }
-.km-chain-nodes {
-    padding: 10px 0;
-}
+
+.km-chain-nodes { }
+
 .km-chain-node {
     display: flex;
     align-items: flex-start;
-    padding: 10px 15px;
+    padding: 8px 12px;
+    border-radius: 6px;
     cursor: pointer;
     transition: background 0.15s;
-    border-left: 3px solid transparent;
 }
-.km-chain-node:hover {
-    background: #f5f5f5;
-}
-.km-chain-node.km-chain-node-active {
-    background: #e8f4fd;
-    border-left-color: #3c8dbc;
-}
+.km-chain-node:hover { background: #f0f7ff; }
+.km-chain-node-active { background: #e1effc !important; }
+
 .km-chain-node-icon {
     width: 28px;
     min-width: 28px;
     text-align: center;
-    padding-top: 2px;
     font-size: 14px;
+    padding-top: 2px;
 }
-.km-chain-node-info {
-    flex: 1;
-    min-width: 0;
-}
+
+.km-chain-node-info { flex: 1; min-width: 0; }
+
 .km-chain-node-type {
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    font-size: 12px;
+    font-weight: bold;
 }
+
 .km-chain-node-content {
-    font-size: 13px;
-    color: #333;
+    font-size: 12px;
+    color: #555;
     margin-top: 2px;
-    word-break: break-all;
-    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
 }
+
 .km-chain-node-loc {
     font-size: 11px;
     color: #999;
     margin-top: 2px;
-    font-family: monospace;
 }
-/* 连线 */
+
 .km-chain-connector {
-    padding: 0 0 0 27px;
-    height: 12px;
-    position: relative;
+    display: flex;
+    justify-content: center;
+    padding: 2px 0;
 }
 .km-chain-connector-line {
     width: 2px;
-    height: 100%;
+    height: 16px;
     background: #ccc;
-    margin-left: 1px;
     border-radius: 1px;
 }
-/* 右侧代码区 */
+
+.km-chain-empty {
+    padding: 20px;
+    text-align: center;
+    color: #999;
+    font-size: 13px;
+}
+
+/* ── 右侧代码区 ── */
 .km-chain-code {
     flex: 1;
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    background: #fff;
+    background: #eaedf1;
 }
+
 .km-chain-code-header {
-    padding: 10px 15px;
-    font-weight: 600;
+    padding: 8px 16px;
     font-size: 13px;
-    color: #333;
-    border-bottom: 1px solid #eee;
-    background: #fafafa;
+    font-weight: bold;
+    background: #e2e6ea;
+    border-bottom: 1px solid #d8dce0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
+
 .km-chain-code-path {
-    color: #999;
-    font-weight: 400;
-    font-family: monospace;
-    margin-left: 10px;
+    font-size: 12px;
+    color: #666;
+    font-weight: normal;
 }
+
 .km-chain-code-body {
     flex: 1;
     overflow: auto;
     padding: 0;
+    background: #eaedf1;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
 }
+.km-chain-code-body::-webkit-scrollbar { display: none; }
+
+/* 代码表格 */
 .km-chain-code-table {
     width: 100%;
     border-collapse: collapse;
-    font-family: 'Source Code Pro', 'Consolas', 'Monaco', monospace;
-    font-size: 12px;
+    font-family: 'Fira Code', Consolas, 'Courier New', monospace;
+    font-size: 14px;
+    line-height: 1.15;
+    background: #eaedf1;
+    table-layout: fixed;
 }
+
+/* 行号 */
 .km-chain-lineno {
     width: 50px;
     min-width: 50px;
     text-align: right;
-    padding: 1px 8px 1px 12px;
-    color: #999;
-    background: #fafafa;
-    border-right: 1px solid #eee;
+    padding: 0 12px 0 0 !important;
+    color: #6a737d;
+    background: #eaedf1;
     user-select: none;
-    font-size: 11px;
-}
-.km-chain-code-line {
-    padding: 1px 12px;
-    color: #333;
-    white-space: pre;
-}
-.km-chain-line-highlight {
-    background: #fff3cd !important;
-}
-.km-chain-line-highlight .km-chain-lineno {
-    background: #ffeeba;
-    color: #856404;
-    font-weight: 600;
-}
-.km-chain-empty {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    color: #999;
+    cursor: pointer;
     font-size: 14px;
+    font-family: Consolas, monospace;
+    border-right: 1px solid #d8dce0;
+    line-height: 1.15;
+    vertical-align: top;
 }
-/* 链按钮 */
-.btn-chain {
-    color: #3c8dbc;
-    opacity: 0.6;
-    transition: opacity 0.15s;
+
+/* 代码行 */
+.km-chain-code-line {
+    padding: 0 12px !important;
+    color: #24292e;
+    white-space: pre;
+    line-height: 1.15;
+    border: none !important;
+    vertical-align: top;
 }
-.btn-chain:hover {
-    opacity: 1;
+
+/* 目标行高亮 */
+.km-chain-line-highlight {
+    background: rgba(255, 235, 59, 0.18) !important;
+}
+
+/* 行 hover */
+.km-chain-code-table tr:hover td {
+    background: rgba(0, 0, 0, 0.02);
+}
+.km-chain-line-highlight:hover td {
+    background: rgba(255, 235, 59, 0.25) !important;
 }

@@ -266,11 +266,15 @@
               </table>
     </div>
 
-    <!-- 漏洞链面板 -->
-    <div id="chainPanel" class="km-chain-panel" style="display:none">
-      <div class="km-chain-sidebar" id="chainSidebar"></div>
-      <div class="km-chain-code" id="chainCode"></div>
-    </div>
+    <!-- 传播链面板（inline，JS 移动到对应行位置） -->
+    <tr id="chainPanel" class="km-chain-row" style="display:none;">
+      <td colspan="9" style="padding:0 !important; border:none !important;">
+        <div class="km-chain-panel">
+          <div class="km-chain-sidebar" id="chainSidebar"></div>
+          <div class="km-chain-code" id="chainCode"></div>
+        </div>
+      </td>
+    </tr>
 
     {% csrf_token %}
 
@@ -327,14 +331,54 @@
 {% block script %}
 
 <link rel="stylesheet" href="{% static 'css/chain-panel.css' %}">
+<link rel="stylesheet" href="{% static 'css/prism.css' %}">
 <style>
 .km-vul-row-active { background-color: #e8f4fd !important; }
 .km-vul-row:hover { background-color: #f5f5f5 !important; }
+.km-chain-row-active { background-color: #e8f4fd !important; }
+
+/* Chain code area - Prism 浅色主题覆盖 */
+.km-chain-code-body .token.comment,
+.km-chain-code-body .token.prolog,
+.km-chain-code-body .token.doctype,
+.km-chain-code-body .token.cdata { color:slategray; font-style:italic; }
+.km-chain-code-body .token.punctuation { color:#999; }
+.km-chain-code-body .token.property,
+.km-chain-code-body .token.tag,
+.km-chain-code-body .token.boolean,
+.km-chain-code-body .token.constant,
+.km-chain-code-body .token.symbol,
+.km-chain-code-body .token.deleted { color:#905; }
+.km-chain-code-body .token.selector,
+.km-chain-code-body .token.attr-name,
+.km-chain-code-body .token.string,
+.km-chain-code-body .token.char,
+.km-chain-code-body .token.builtin,
+.km-chain-code-body .token.inserted { color:#690; }
+.km-chain-code-body .token.operator,
+.km-chain-code-body .token.entity,
+.km-chain-code-body .token.url { color:#9a6e3a; }
+.km-chain-code-body .token.atrule,
+.km-chain-code-body .token.attr-value,
+.km-chain-code-body .token.keyword { color:#07a; }
+.km-chain-code-body .token.function,
+.km-chain-code-body .token.class-name { color:#DD4A68; }
+.km-chain-code-body .token.regex,
+.km-chain-code-body .token.important,
+.km-chain-code-body .token.variable { color:#e90; }
+/* 修复 Bulma .number 泄漏 */
+.km-chain-code-body .token.number {
+  display:inline !important; font-size:inherit !important; line-height:inherit !important;
+  color:#905 !important; height:auto !important; vertical-align:baseline !important;
+  background:transparent !important; border-radius:0 !important; margin:0 !important;
+  padding:0 !important; min-width:0 !important;
+}
 </style>
 <script>
 // 注入漏洞链数据（Django 后端渲染）—— 必须在 chain-panel.js 之前
 var chainDataMap = {{ chain_json|safe }};
 </script>
+<script src="{% static 'js/prism.js' %}"></script>
 <script src="{% static 'js/chain-panel.js' %}"></script>
 
 <script>
@@ -450,6 +494,7 @@ $(document).ready(function(){
   function applyFilters(){
     var $rows = $("#resultTable tbody tr.km-vul-row");
     var visible = 0;
+    var $chainPanel = $('#chainPanel');
     $rows.each(function(){
       var $r = $(this);
       var $detail = $r.next('.km-vul-detail-row');
@@ -462,6 +507,12 @@ $(document).ready(function(){
       var show = matchSearch && matchLevel;
       $r.toggle(show);
       $detail.toggle(show);
+      // 如果传播链面板紧跟在当前行后面且行被隐藏，也隐藏传播链
+      if (!show && $chainPanel && $chainPanel.prev('.km-vul-row')[0] === $r[0]) {
+        $chainPanel.hide();
+        chainPanelVisible = false;
+        chainPanelVulId = null;
+      }
       if(show) visible++;
     });
   }
