@@ -858,6 +858,75 @@ a.btn {
     color: #1f2a39;
 }
 
+/* 语言分组 */
+.km-tamper-group {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.km-tamper-lang {
+    width: 100%;
+    border: none;
+    border-radius: 8px;
+    background: #f0f3f8;
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    text-align: left;
+}
+
+.km-tamper-lang:hover {
+    background: #e4e9f2;
+}
+
+.km-tamper-lang-arrow {
+    font-size: 10px;
+    color: #6b7a8d;
+    width: 14px;
+    text-align: center;
+}
+
+.km-tamper-lang-name {
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    color: #475569;
+}
+
+.km-tamper-lang-count {
+    font-size: 10px;
+    background: #cbd5e1;
+    color: #334155;
+    border-radius: 10px;
+    padding: 1px 7px;
+    font-weight: 600;
+}
+
+.km-tamper-children {
+    padding-left: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.km-tamper-group.is-collapsed .km-tamper-children {
+    display: none;
+}
+
+.km-tamper-children .km-tamper-item {
+    border-radius: 8px;
+    padding: 7px 10px;
+}
+
+.km-tamper-children .km-tamper-item-name {
+    font-weight: 600;
+    font-size: 13px;
+}
+
 .km-tamper-source {
     display: none;
 }
@@ -1165,6 +1234,27 @@ body.dark-mode .km-tamper-item.is-active {
 body.dark-mode .km-tamper-item-name,
 body.dark-mode .km-tamper-detail-title {
     color: #d8dce4;
+}
+
+body.dark-mode .km-tamper-lang {
+    background: #1b2330;
+}
+
+body.dark-mode .km-tamper-lang:hover {
+    background: #222d3d;
+}
+
+body.dark-mode .km-tamper-lang-name {
+    color: #94a3b8;
+}
+
+body.dark-mode .km-tamper-lang-arrow {
+    color: #64748b;
+}
+
+body.dark-mode .km-tamper-lang-count {
+    background: #334155;
+    color: #94a3b8;
 }
 
 body.dark-mode .km-user-menu {

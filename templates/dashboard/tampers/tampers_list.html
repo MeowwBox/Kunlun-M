@@ -17,14 +17,21 @@
                 <input id="tamperFilterInput" class="form-control input-sm km-tamper-filter" placeholder="搜索拓展插件...">
               </div>
               <div id="tamperList" class="km-tamper-items">
-                {% for name, detail in tampers.items %}
-                  <button type="button" class="km-tamper-item" data-name="{{ name|lower }}" data-lang="{{ detail.language }}">
-                    <span class="km-tamper-item-name">{{ name }}</span>
-                    {% if detail.language %}
-                    <span class="label label-default">{{ detail.language }}</span>
-                    {% endif %}
+                {% for lang, tamper_list in lang_groups %}
+                <div class="km-tamper-group" data-lang="{{ lang }}">
+                  <button type="button" class="km-tamper-lang">
+                    <span class="km-tamper-lang-arrow">▼</span>
+                    <span class="km-tamper-lang-name">{{ lang }}</span>
+                    <span class="km-tamper-lang-count">{{ tamper_list|length }}</span>
                   </button>
-                  <textarea id="tamperSource{{ forloop.counter0 }}" class="km-tamper-source">{{ detail.source_code }}</textarea>
+                  <div class="km-tamper-children">
+                    {% for name, filepath in tamper_list %}
+                    <button type="button" class="km-tamper-item" data-name="{{ name|lower }}" data-lang="{{ lang }}">
+                      <span class="km-tamper-item-name">{{ name }}</span>
+                    </button>
+                    {% endfor %}
+                  </div>
+                </div>
                 {% endfor %}
               </div>
             </div>
@@ -59,6 +66,19 @@
           var $list = $("#tamperList");
           var $detailTitle = $("#tamperDetailTitle");
           var detailCodeEl = document.getElementById("tamperDetailCode");
+          var sourceCache = {};
+          var sourceLoaded = false;
+
+          function loadAllSources(callback) {
+              if (sourceLoaded) { callback(); return; }
+              $.get("{% url 'dashboard:tamper_sources' %}", function (data) {
+                  sourceCache = data;
+                  sourceLoaded = true;
+                  callback();
+              }).fail(function () {
+                  callback();
+              });
+          }
 
           function setActive($btn) {
               $list.find(".km-tamper-item").removeClass("is-active");
@@ -66,13 +86,11 @@
           }
 
           function showDetail($btn) {
-              var idx = $list.find(".km-tamper-item").index($btn);
-              if (idx < 0) idx = $btn.closest(".km-tamper-item").index();
-              var source = $("#tamperSource" + idx).val() || "";
-              var name = $btn.find(".km-tamper-item-name").text() || "";
+              var name = $btn.attr("data-name");
               var lang = $btn.attr("data-lang") || "";
-              $detailTitle.text(name + (lang ? "  [" + lang + "]" : ""));
-              detailCodeEl.textContent = source;
+              var title = $btn.find(".km-tamper-item-name").text() || name;
+              $detailTitle.text(title + (lang ? "  [" + lang + "]" : ""));
+              detailCodeEl.textContent = sourceCache[name] || "";
               if (window.Prism) {
                   Prism.highlightElement(detailCodeEl);
               }
@@ -90,24 +108,48 @@
               }
           }
 
-          $list.on("click", ".km-tamper-item", function () {
-              var $btn = $(this);
-              setActive($btn);
-              showDetail($btn);
+          // 语言分组折叠
+          $list.on("click", ".km-tamper-lang", function (e) {
+              e.stopPropagation();
+              var $group = $(this).closest(".km-tamper-group");
+              var $children = $group.find(".km-tamper-children");
+              var $arrow = $(this).find(".km-tamper-lang-arrow");
+              $children.slideToggle(150);
+              $group.toggleClass("is-collapsed");
+              $arrow.text($group.hasClass("is-collapsed") ? "▶" : "▼");
           });
 
+          // 点击 tamper 子项
+          $list.on("click", ".km-tamper-item", function (e) {
+              e.stopPropagation();
+              setActive($(this));
+              showDetail($(this));
+          });
+
+          // 搜索过滤
           $("#tamperFilterInput").on("input", function () {
               var q = ($(this).val() || "").toLowerCase().trim();
-              $list.find(".km-tamper-item").each(function () {
-                  var $btn = $(this);
-                  var name = ($btn.attr("data-name") || "");
-                  var lang = ($btn.attr("data-lang") || "");
-                  var ok = !q || name.indexOf(q) > -1 || lang.indexOf(q) > -1;
-                  $btn.toggle(ok);
+              $list.find(".km-tamper-group").each(function () {
+                  var $group = $(this);
+                  var lang = ($group.attr("data-lang") || "").toLowerCase();
+                  var hasMatch = !q;
+                  $group.find(".km-tamper-item").each(function () {
+                      var name = ($(this).attr("data-name") || "");
+                      var ok = !q || name.indexOf(q) > -1 || lang.indexOf(q) > -1;
+                      $(this).toggle(ok);
+                      if (ok) hasMatch = true;
+                  });
+                  $group.toggle(hasMatch);
+                  if (q && hasMatch) {
+                      $group.removeClass("is-collapsed");
+                      $group.find(".km-tamper-children").show();
+                      $group.find(".km-tamper-lang-arrow").text("▼");
+                  }
               });
               pickFirstVisible();
           });
 
+          // 复制
           $("#tamperCopyBtn").on("click", function () {
               var text = detailCodeEl.textContent || "";
               if (!text) return;
@@ -122,7 +164,10 @@
               }
           });
 
-          pickFirstVisible();
+          // 初始：加载源码后选中第一个
+          loadAllSources(function () {
+              pickFirstVisible();
+          });
       });
 </script>
 
