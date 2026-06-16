@@ -17,19 +17,19 @@
                 <input id="tamperFilterInput" class="form-control input-sm km-tamper-filter" placeholder="搜索拓展插件...">
               </div>
               <div id="tamperList" class="km-tamper-items">
-                {% for tamper in tampers.items %}
-                  <button type="button" class="km-tamper-item" data-name="{{ tamper.0|lower }}" data-lang="{{ tamper.1.language }}" data-id="{{ tamper.1.id }}">
-                    <span class="km-tamper-item-name">{{ tamper.0 }}</span>
-                    {% if tamper.1.language %}
-                    <span class="label label-default">{{ tamper.1.language }}</span>
+                {% for name, detail in tampers.items %}
+                  <button type="button" class="km-tamper-item" data-name="{{ name|lower }}" data-lang="{{ detail.language }}">
+                    <span class="km-tamper-item-name">{{ name }}</span>
+                    {% if detail.language %}
+                    <span class="label label-default">{{ detail.language }}</span>
                     {% endif %}
-                    <span class="km-muted">#{{ tamper.1.id }}</span>
                   </button>
-                  <textarea id="tamperName{{ tamper.1.id }}" class="km-tamper-source">{{ tamper.0 }}</textarea>
-                  <textarea id="tamperLang{{ tamper.1.id }}" class="km-tamper-source">{{ tamper.1.language }}</textarea>
-                  <textarea id="tamperFilter{{ tamper.1.id }}" class="km-tamper-source">{{ tamper.1.FilterFunction }}</textarea>
-                  <textarea id="tamperCS{{ tamper.1.id }}" class="km-tamper-source">{{ tamper.1.ControlledSources }}</textarea>
-                  <textarea id="tamperES{{ tamper.1.id }}" class="km-tamper-source">{{ tamper.1.ExtraSinks }}</textarea>
+                  <textarea id="tamperName{{ forloop.counter0 }}" class="km-tamper-source">{{ name }}</textarea>
+                  <textarea id="tamperLang{{ forloop.counter0 }}" class="km-tamper-source">{{ detail.language }}</textarea>
+                  <textarea id="tamperFilter{{ forloop.counter0 }}" class="km-tamper-source">{{ detail.FilterFunction }}</textarea>
+                  <textarea id="tamperCS{{ forloop.counter0 }}" class="km-tamper-source">{{ detail.ControlledSources }}</textarea>
+                  <textarea id="tamperES{{ forloop.counter0 }}" class="km-tamper-source">{{ detail.ExtraSinks }}</textarea>
+                  <input type="hidden" class="km-tamper-real-id" data-index="{{ forloop.counter0 }}" value="">
                 {% endfor %}
               </div>
             </div>
@@ -72,13 +72,14 @@
           }
 
           function showDetail($btn) {
-              var id = String($btn.attr("data-id") || "").trim();
-              var name = $("#tamperName" + id).val() || "";
-              var lang = $("#tamperLang" + id).val() || "";
-              var filterText = $("#tamperFilter" + id).val() || "";
-              var csText = $("#tamperCS" + id).val() || "";
-              var esText = $("#tamperES" + id).val() || "";
-              $detailTitle.text(name + (id ? ("  #" + id) : ""));
+              var idx = $list.find(".km-tamper-item").index($btn);
+              if (idx < 0) idx = $btn.closest(".km-tamper-item").index();
+              var name = $("#tamperName" + idx).val() || "";
+              var lang = $("#tamperLang" + idx).val() || "";
+              var filterText = $("#tamperFilter" + idx).val() || "";
+              var csText = $("#tamperCS" + idx).val() || "";
+              var esText = $("#tamperES" + idx).val() || "";
+              $detailTitle.text(name);
               var code = 'FRAMEWORK_NAME = "' + name + '"\n'
                   + 'LANGUAGE = "' + lang + '"\n\n'
                   + 'FILTER_FUNCTIONS = ' + filterText + '\n\n'
@@ -88,9 +89,9 @@
               if (window.Prism) {
                   Prism.highlightElement(detailCodeEl);
               }
-              // 更新源码链接
-              if (id) {
-                  $("#tamperSourceLink").attr("href", "{% url 'dashboard:tamper_detail' 0 %}".replace("/0/", "/" + id + "/")).show();
+              // 更新源码链接（用 tamper 名称作为 id 查询）
+              if (name) {
+                  $("#tamperSourceLink").attr("href", "{% url 'dashboard:tamper_detail' 0 %}".replace("/0/", "/" + encodeURIComponent(name) + "/")).show();
               } else {
                   $("#tamperSourceLink").hide();
               }
@@ -119,9 +120,8 @@
               $list.find(".km-tamper-item").each(function () {
                   var $btn = $(this);
                   var name = ($btn.attr("data-name") || "");
-                  var id = String($btn.attr("data-id") || "");
                   var lang = ($btn.attr("data-lang") || "");
-                  var ok = !q || name.indexOf(q) > -1 || id.indexOf(q) > -1 || lang.indexOf(q) > -1;
+                  var ok = !q || name.indexOf(q) > -1 || lang.indexOf(q) > -1;
                   $btn.toggle(ok);
               });
               pickFirstVisible();

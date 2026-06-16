@@ -36,7 +36,7 @@ urlpatterns = [
 
     # tamper
     path('tampers/list', login_required(tampers.TamperListView.as_view()), name='tampers_list'),
-    path('tampers/detail/<int:tamper_id>', tampers.TamperDetailView.as_view(), name="tamper_detail"),
+    path('tampers/detail/<tamper_id>', tampers.TamperDetailView.as_view(), name="tamper_detail"),
 
     # vendor
     path('vendors/search', login_required(vendor.VendorDetailView.as_view()), name='vendor_details'),

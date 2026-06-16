@@ -529,6 +529,30 @@ class TamperCheck:
         except Exception as e:
             logger.warning("[INIT][Load Tamper] Legacy tamper scan error: {}".format(e))
 
+        # 清理：删除文件系统中已不存在的 tamper 旧记录
+        try:
+            from rules.tamper._compat import scan_legacy_tampers as _scan_legacy
+            active_names = set()
+            # 收集新版 tamper 名称
+            for lang in language_dirs:
+                lang_dir = os.path.join(self.tamper_base_path, lang)
+                if not os.path.isdir(lang_dir):
+                    continue
+                for fname in os.listdir(lang_dir):
+                    if fname.endswith('.py') and not fname.startswith('_'):
+                        active_names.add(fname[:-3])
+            # 收集旧版 tamper 名称
+            for _, name, _, _ in _scan_legacy(self.tamper_base_path):
+                active_names.add(name)
+            # 删除不活跃的 tamper 记录
+            stale = Tampers.objects.exclude(tam_name__in=active_names)
+            stale_count = stale.count()
+            if stale_count > 0:
+                logger.info("[INIT][Load Tamper] Cleaning {} stale records for removed tampers".format(stale_count))
+                stale.delete()
+        except Exception as e:
+            logger.warning("[INIT][Load Tamper] Stale record cleanup error: {}".format(e))
+
         return True
 
     def _upsert_tamper(self, tam_name, tam_type, tam_key, tam_value):
