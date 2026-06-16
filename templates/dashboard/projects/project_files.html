@@ -392,8 +392,19 @@ $(document).ready(function() {
 
   // URL 参数：自动打开文件+高亮
   var params = new URLSearchParams(window.location.search);
-  var initFile = params.get('file');
-  var initLine = params.get('lineno');
+  var initFile = params.get('file') || '';
+  var initLine = params.get('lineno') || '';
+  // 支持 vulfile_path 格式: "v.php:58" → file=v.php, lineno=58
+  if (initFile && !initLine) {
+    var colonIdx = initFile.lastIndexOf(':');
+    if (colonIdx > 0) {
+      var possibleLine = initFile.substring(colonIdx + 1);
+      if (/^\d+$/.test(possibleLine)) {
+        initLine = possibleLine;
+        initFile = initFile.substring(0, colonIdx);
+      }
+    }
+  }
   if (initFile) {
     // 先展开到文件所在目录
     var lastSlash = initFile.lastIndexOf('/');
@@ -401,7 +412,16 @@ $(document).ready(function() {
       expandTo(initFile.substring(0, lastSlash + 1));
     }
     // 延迟打开文件（等 tree 加载完）
-    setTimeout(function() { openFile(initFile); }, 500);
+    setTimeout(function() {
+      // 先更新 URL（去掉冒号行号格式）
+      if (initLine) {
+        var newUrl = new URL(window.location);
+        newUrl.searchParams.set('lineno', initLine);
+        newUrl.searchParams.set('file', initFile);
+        window.history.replaceState(null, '', newUrl);
+      }
+      openFile(initFile);
+    }, 500);
   }
 });
 </script>
