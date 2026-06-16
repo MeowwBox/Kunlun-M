@@ -15,6 +15,7 @@ from django.views import View
 from django.views.generic import TemplateView
 
 from web.index.models import Rules
+from Kunlun_M.settings import RULES_PATH
 
 
 class RuleListView(TemplateView):
@@ -44,7 +45,7 @@ class RuleDetailView(View):
         source_code = None
         # 优先从源文件读取真实代码
         if row.language and row.svid:
-            rule_file = os.path.join(settings.RULES_PATH, row.language, 'CVI_{}.py'.format(row.svid))
+            rule_file = os.path.join(RULES_PATH, row.language, 'CVI_{}.py'.format(row.svid))
             if os.path.isfile(rule_file):
                 try:
                     with open(rule_file, 'r', encoding='utf-8', errors='replace') as f:
