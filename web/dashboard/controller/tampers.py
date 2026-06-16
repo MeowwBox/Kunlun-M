@@ -84,7 +84,7 @@ class TamperDetailView(View):
         source_code = None
         source_path = None
 
-        # 从文件系统搜索真实源文件
+        # 从文件系统搜索真实源文件（先搜语言子目录，再搜根目录兼容旧版）
         tamper_base = os.path.join(RULES_PATH, 'tamper')
         if os.path.isdir(tamper_base):
             for lang_dir in os.listdir(tamper_base):
@@ -99,6 +99,16 @@ class TamperDetailView(View):
                         except Exception:
                             pass
                         break
+            # 兼容：根目录旧版 tamper
+            if not source_code:
+                candidate = os.path.join(tamper_base, tamper_name + '.py')
+                if os.path.isfile(candidate):
+                    try:
+                        with open(candidate, 'r', encoding='utf-8', errors='replace') as f:
+                            source_code = f.read()
+                        source_path = os.path.relpath(candidate, RULES_PATH)
+                    except Exception:
+                        pass
 
         data = {
             'tamper_name': tamper_name,

@@ -258,6 +258,24 @@ def detect_frameworks(language, project_dir):
                 getattr(mod, 'FRAMEWORK_NAME', mod_name), language))
             matched.append(mod)
 
+    # 兼容：扫描根目录旧版 tamper 文件（无 DEPENDENCIES/detect，只通过 -tp 手动指定）
+    from rules.tamper._compat import scan_legacy_tampers, wrap_legacy_module
+    try:
+        tamper_root = os.path.dirname(__file__)
+        legacy_list = scan_legacy_tampers(tamper_root)
+        for mod, ltc_name, ltc_lang, ltc_path in legacy_list:
+            if ltc_lang != language:
+                continue
+            wrapped = wrap_legacy_module(mod, ltc_name, ltc_lang, ltc_path)
+            # 旧版没有自动检测，但如果有同名语言目录下不存在同名模块，
+            # 将 wrapped 加入 matched 以便 -tp 参数能正确找到
+            # （detect_frameworks 的结果也用于缓存，这里注册确保可用）
+            logger.info("[TAMPER-COMPAT] Legacy framework registered: {} (language: {})".format(
+                ltc_name, language))
+            matched.append(wrapped)
+    except Exception as e:
+        logger.debug("[TAMPER-COMPAT] Legacy scan error: {}".format(e))
+
     return matched
 
 

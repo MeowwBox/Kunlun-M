@@ -505,6 +505,30 @@ class TamperCheck:
                     for sink_name, svids in extra_sinks:
                         self._upsert_tamper(tamper_name, "Extra-Sinks", sink_name, svids)
 
+        # 兼容：扫描根目录旧版 tamper 文件（扁平目录结构）
+        try:
+            from rules.tamper._compat import scan_legacy_tampers, wrap_legacy_module
+            legacy_list = scan_legacy_tampers(self.tamper_base_path)
+            for mod, tamper_name, lang, filepath in legacy_list:
+                wrapped = wrap_legacy_module(mod, tamper_name, lang, filepath)
+                filter_func = getattr(wrapped, 'FILTER_FUNCTIONS', None)
+                controlled_sources = getattr(wrapped, 'CONTROLLED_SOURCES', None)
+                extra_sinks = getattr(wrapped, 'EXTRA_SINKS', None)
+
+                if filter_func:
+                    for func_name, func_value in filter_func.items():
+                        self._upsert_tamper(tamper_name, "Filter-Function", func_name, func_value)
+
+                if controlled_sources:
+                    for source in controlled_sources:
+                        self._upsert_tamper(tamper_name, "Controlled-Sources", tamper_name, source)
+
+                if extra_sinks:
+                    for sink_name, svids in extra_sinks:
+                        self._upsert_tamper(tamper_name, "Extra-Sinks", sink_name, svids)
+        except Exception as e:
+            logger.warning("[INIT][Load Tamper] Legacy tamper scan error: {}".format(e))
+
         return True
 
     def _upsert_tamper(self, tam_name, tam_type, tam_key, tam_value):
