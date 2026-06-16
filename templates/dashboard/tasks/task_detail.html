@@ -170,17 +170,17 @@
                 </thead>
                 <tbody>
                   {% for taskresult in taskresults %}
-                  <tr data-level="{{ taskresult.level|lower }}" data-confirm="{% if taskresult.is_unconfirm == 0 %}confirmed{% else %}unconfirmed{% endif %}">
+                  <tr data-level="{{ taskresult.level|lower }}" data-confirm="{% if taskresult.is_unconfirm == 0 %}confirmed{% else %}unconfirmed{% endif %}" data-vul-id="{{ taskresult.id }}" class="km-vul-row" style="cursor:pointer;" onclick="toggleVulDetail(this)">
                     <td class="km-td-nowrap">{{ taskresult.id }}</td>
                     <td class="km-td-nowrap">{{ taskresult.cvi_id }}</td>
                     <td class="km-td-nowrap">{{ taskresult.language }}</td>
 
                     {% if taskresult.cvi_id == '9999' %}
-                      <td><div class="km-cell-title"><a class="km-link-strong" href="{% url 'dashboard:vendor_vulns_details' taskresult.vid %}" title="{{ taskresult.vulfile_path|escape }}">{{ taskresult.vulfile_path }}</a></div></td>
+                      <td><div class="km-cell-title"><a class="km-link-strong" href="{% url 'dashboard:vendor_vulns_details' taskresult.vid %}" title="{{ taskresult.vulfile_path|escape }}" onclick="event.stopPropagation()">{{ taskresult.vulfile_path }}</a></div></td>
                     {% else %}
                       <td>
                         <div class="km-cell-config" title="{{ taskresult.vulfile_path|escape }}">
-                          <a class="km-link-strong" href="{% url 'dashboard:project_files' project.id %}?file={{ taskresult.vulfile_path|urlencode }}" title="在源码中查看">{{ taskresult.vulfile_path }}</a>
+                          <a class="km-link-strong" href="{% url 'dashboard:project_files' project.id %}?file={{ taskresult.vulfile_path|urlencode }}" title="在源码中查看" onclick="event.stopPropagation()">{{ taskresult.vulfile_path }}</a>
                         </div>
                       </td>
                     {% endif %}
@@ -188,7 +188,7 @@
                     {% if taskresult.result_type == 'vendor_source_match' %}
                       <td class="km-cell-wrap">
                         {% for rs in taskresult.source_code %}
-                        <a href="{{ rs }}">{{ rs }}</a><br>
+                        <a href="{{ rs }}" onclick="event.stopPropagation()">{{ rs }}</a><br>
                         {% endfor %}
                       </td>
                     {% else %}
@@ -222,9 +222,42 @@
                     <td class="km-col-actions">
                       <div class="km-actions">
                         {% if taskresult.has_chain %}
-                        <button type="button" class="btn btn-xs btn-chain" data-vul-id="{{ taskresult.id }}" onclick="toggleChainPanel(this)" title="查看传播链"><i class="fa fa-sitemap"></i></button>
+                        <button type="button" class="btn btn-xs btn-chain" data-vul-id="{{ taskresult.id }}" onclick="event.stopPropagation(); toggleChainPanel(this)" title="查看传播链"><i class="fa fa-sitemap"></i></button>
                         {% endif %}
-                        <button type="button" class="btn btn-danger btn-xs" onclick="delVul('{{ taskresult.id }}')">删除</button>
+                        <button type="button" class="btn btn-danger btn-xs" onclick="event.stopPropagation(); delVul('{{ taskresult.id }}')">删除</button>
+                      </div>
+                    </td>
+                  </tr>
+                  <!-- 漏洞详情面板（点击展开） -->
+                  <tr class="km-vul-detail-row" style="display:none;">
+                    <td colspan="9" style="padding:0 !important; border:none !important;">
+                      <div class="km-vul-detail" style="padding:12px 16px; background:#f8f9fa; border-top:1px solid #e1e4e8; font-size:13px;">
+                        <table style="width:100%; border-collapse:collapse;">
+                          <tr><td style="width:60px; color:#6a737d; padding:4px 0; vertical-align:top;">CVI</td><td style="padding:4px 0;">{{ taskresult.cvi_id }}</td></tr>
+                          <tr><td style="color:#6a737d; padding:4px 0; vertical-align:top;">文件</td><td style="padding:4px 0;">
+                            {% if taskresult.cvi_id == '9999' %}
+                              <a href="{% url 'dashboard:vendor_vulns_details' taskresult.vid %}">{{ taskresult.vulfile_path }}</a>
+                            {% else %}
+                              <a href="{% url 'dashboard:project_files' project.id %}?file={{ taskresult.vulfile_path|urlencode }}">{{ taskresult.vulfile_path }}</a>
+                            {% endif %}
+                          </td></tr>
+                          <tr><td style="color:#6a737d; padding:4px 0; vertical-align:top;">语言</td><td style="padding:4px 0;">{{ taskresult.language }}</td></tr>
+                          <tr><td style="color:#6a737d; padding:4px 0; vertical-align:top;">来源</td><td style="padding:4px 0;">
+                            {% if taskresult.result_type == 'vendor_source_match' %}
+                              {% for rs in taskresult.source_code %}<a href="{{ rs }}" style="margin-right:8px;">{{ rs }}</a>{% endfor %}
+                            {% else %}
+                              <code style="background:#e8e8e8; padding:2px 6px; border-radius:3px; font-size:12px;">{{ taskresult.source_code|escape }}</code>
+                            {% endif %}
+                          </td></tr>
+                          <tr><td style="color:#6a737d; padding:4px 0; vertical-align:top;">类型</td><td style="padding:4px 0;">{{ taskresult.result_type }}</td></tr>
+                          <tr><td style="color:#6a737d; padding:4px 0; vertical-align:top;">等级</td><td style="padding:4px 0;">
+                            {% if taskresult.level|lower == 'critical' %}<span class="label label-danger" style="background:#a00 !important;">严重</span>
+                            {% elif taskresult.level|lower == 'high' %}<span class="label label-danger">高危</span>
+                            {% elif taskresult.level|lower == 'medium' %}<span class="label label-warning">中危</span>
+                            {% elif taskresult.level|lower == 'low' %}<span class="label label-info">低危</span>
+                            {% else %}{{ taskresult.level }}{% endif %}
+                          </td></tr>
+                        </table>
                       </div>
                     </td>
                   </tr>
@@ -294,13 +327,44 @@
 {% block script %}
 
 <link rel="stylesheet" href="{% static 'css/chain-panel.css' %}">
-<script src="{% static 'js/chain-panel.js' %}"></script>
+<style>
+.km-vul-row-active { background-color: #e8f4fd !important; }
+.km-vul-row:hover { background-color: #f5f5f5 !important; }
+</style>
 <script>
-// 注入漏洞链数据（Django 后端渲染）
+// 注入漏洞链数据（Django 后端渲染）—— 必须在 chain-panel.js 之前
 var chainDataMap = {{ chain_json|safe }};
 </script>
+<script src="{% static 'js/chain-panel.js' %}"></script>
 
 <script>
+var activeVulRow = null;
+function toggleVulDetail(row) {
+  // 找到紧挨着的详情行
+  var detailRow = row.nextElementSibling;
+  if (!detailRow || !detailRow.classList.contains('km-vul-detail-row')) return;
+
+  // 关闭之前打开的
+  if (activeVulRow && activeVulRow !== row) {
+    var prevDetail = activeVulRow.nextElementSibling;
+    if (prevDetail && prevDetail.classList.contains('km-vul-detail-row')) {
+      prevDetail.style.display = 'none';
+      activeVulRow.classList.remove('km-vul-row-active');
+    }
+  }
+
+  // 切换当前行
+  if (detailRow.style.display === 'none') {
+    detailRow.style.display = 'table-row';
+    row.classList.add('km-vul-row-active');
+    activeVulRow = row;
+  } else {
+    detailRow.style.display = 'none';
+    row.classList.remove('km-vul-row-active');
+    activeVulRow = null;
+  }
+}
+
 function delVul(vulid){
   $.get("{% url 'dashboard:vul_del' 654321 %}".replace('654321', vulid), function(data){
       if(data.code == 200){
@@ -384,18 +448,21 @@ $(document).ready(function(){
   var currentFilter = 'all';
   var currentSearch = '';
   function applyFilters(){
-    var $rows = $("#resultTable tbody tr");
+    var $rows = $("#resultTable tbody tr.km-vul-row");
     var visible = 0;
     $rows.each(function(){
       var $r = $(this);
+      var $detail = $r.next('.km-vul-detail-row');
       var text = $r.text().toLowerCase();
       var matchSearch = !currentSearch || text.indexOf(currentSearch) >= 0;
       var matchLevel = currentFilter === 'all' ||
         (currentFilter === 'confirmed' && $r.data('confirm') === 'confirmed') ||
         (currentFilter === 'unconfirmed' && $r.data('confirm') === 'unconfirmed') ||
         $r.data('level') === currentFilter;
-      $r.toggle(matchSearch && matchLevel);
-      if(matchSearch && matchLevel) visible++;
+      var show = matchSearch && matchLevel;
+      $r.toggle(show);
+      $detail.toggle(show);
+      if(show) visible++;
     });
   }
   $("#filterBar").on("click", ".filter-btn", function(){

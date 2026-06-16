@@ -300,8 +300,9 @@ class TaskDetailView(View):
                         'lineno': str(rf.node_lineno or ''),
                         'source': rf.node_source or '',
                     })
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger('django').warning('[chain] load chain data failed: %s', e)
 
         task.is_finished = int(task.is_finished)
         task.parameter_config = del_sensitive_for_config(task.parameter_config)
