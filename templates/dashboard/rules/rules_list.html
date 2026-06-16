@@ -75,7 +75,7 @@
 
           function loadSource(id, callback) {
               if (cache[id]) { callback(cache[id]); return; }
-              $.get("/dashboard/rules/source/" + id + "/", function (data) {
+              $.get("{% url 'dashboard:rule_source' 0 %}".replace(/\/0$/, "/" + id), function (data) {
                   cache[id] = data;
                   callback(data);
               }).fail(function () {
