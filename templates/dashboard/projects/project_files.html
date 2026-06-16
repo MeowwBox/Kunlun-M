@@ -97,6 +97,14 @@
 .km-code-panel .token.constant,
 .km-code-panel .token.symbol,
 .km-code-panel .token.deleted { color:#905; }
+/* 修复 Bulma .number 样式泄漏到 .token.number */
+.km-code-panel .token.number {
+  display:inline !important; font-size:inherit !important; line-height:inherit !important;
+  height:auto !important; vertical-align:baseline !important; background:transparent !important;
+  background-color:transparent !important; border-radius:0 !important; margin:0 !important;
+  padding:0 !important; min-width:0 !important; align-items:baseline !important;
+  justify-content:flex-start !important;
+}
 .km-code-panel .token.selector,
 .km-code-panel .token.attr-name,
 .km-code-panel .token.string,
