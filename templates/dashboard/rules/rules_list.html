@@ -105,6 +105,10 @@
           function pickFirstVisible() {
               var $first = $list.find(".km-tamper-item:visible").first();
               if ($first.length) {
+                  var $group = $first.closest(".km-tamper-group");
+                  $group.removeClass("is-collapsed");
+                  $group.find(".km-tamper-children").show();
+                  $group.find(".km-tamper-lang-arrow").text("▼");
                   setActive($first);
                   showDetail($first);
               } else {
@@ -171,6 +175,12 @@
               }
           });
 
+          // 初始化：默认折叠所有语言分组
+          $list.find(".km-tamper-children").hide();
+          $list.find(".km-tamper-group").addClass("is-collapsed");
+          $list.find(".km-tamper-lang-arrow").text("▶");
+
+          // 展开第一个分组并选中第一条规则
           pickFirstVisible();
       });
 </script>

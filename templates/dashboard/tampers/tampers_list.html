@@ -99,6 +99,10 @@
           function pickFirstVisible() {
               var $first = $list.find(".km-tamper-item:visible").first();
               if ($first.length) {
+                  var $group = $first.closest(".km-tamper-group");
+                  $group.removeClass("is-collapsed");
+                  $group.find(".km-tamper-children").show();
+                  $group.find(".km-tamper-lang-arrow").text("▼");
                   setActive($first);
                   showDetail($first);
               } else {
@@ -164,7 +168,10 @@
               }
           });
 
-          // 初始：加载源码后选中第一个
+          // 初始：折叠所有分组，加载源码后展开第一个
+          $list.find(".km-tamper-children").hide();
+          $list.find(".km-tamper-group").addClass("is-collapsed");
+          $list.find(".km-tamper-lang-arrow").text("▶");
           loadAllSources(function () {
               pickFirstVisible();
           });
