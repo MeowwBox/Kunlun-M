@@ -197,7 +197,7 @@
 
                     <td class="km-td-nowrap">
                       {% if taskresult.level|lower == 'critical' %}
-                      <span class="label label-danger" style="background:#a00 !important;">严重</span>
+                      <span class="label label-danger" style="background:#a00 !important; color:#fff !important;">严重</span>
                       {% elif taskresult.level|lower == 'high' %}
                       <span class="label label-danger">高危</span>
                       {% elif taskresult.level|lower == 'medium' %}
@@ -251,7 +251,7 @@
                           </td></tr>
                           <tr><td style="color:#6a737d; padding:4px 0; vertical-align:top;">类型</td><td style="padding:4px 0;">{{ taskresult.result_type }}</td></tr>
                           <tr><td style="color:#6a737d; padding:4px 0; vertical-align:top;">等级</td><td style="padding:4px 0;">
-                            {% if taskresult.level|lower == 'critical' %}<span class="label label-danger" style="background:#a00 !important;">严重</span>
+                            {% if taskresult.level|lower == 'critical' %}<span class="label label-danger" style="background:#a00 !important; color:#fff !important;">严重</span>
                             {% elif taskresult.level|lower == 'high' %}<span class="label label-danger">高危</span>
                             {% elif taskresult.level|lower == 'medium' %}<span class="label label-warning">中危</span>
                             {% elif taskresult.level|lower == 'low' %}<span class="label label-info">低危</span>
