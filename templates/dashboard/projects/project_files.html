@@ -11,13 +11,13 @@
   <!-- 左侧文件树 -->
   <div class="col-md-3" style="padding-right:0;">
     <div class="box box-solid">
-      <div class="box-header with-border" style="padding:8px 12px;">
-        <h3 class="box-title" style="font-size:14px;"><i class="fa fa-sitemap"></i> 文件树</h3>
-        <div class="box-tools pull-right">
-          <input type="text" id="treeFilter" class="form-control input-sm" placeholder="过滤..." style="width:120px;height:26px;font-size:12px;">
-        </div>
+      <div class="box-header" style="padding:6px 12px;">
+        <h3 class="box-title" style="font-size:14px;margin:0;"><i class="fa fa-sitemap"></i> 文件树</h3>
       </div>
-      <div class="box-body" style="padding:6px 0; max-height:calc(100vh - 120px); overflow-y:auto; background:#eaedf1 !important;">
+      <div style="padding:4px 8px; border-bottom:1px solid #ddd; background:#eaedf1;">
+        <input type="text" id="treeFilter" class="form-control input-sm" placeholder="过滤文件..." style="font-size:12px;">
+      </div>
+      <div class="box-body" style="padding:4px 0; max-height:calc(100vh - 160px); overflow-y:auto; background:#eaedf1 !important;">
         <ul id="fileTree" class="km-file-tree" style="list-style:none; padding-left:8px; margin:0; font-size:13px;">
           <li class="km-tree-loading"><i class="fa fa-spinner fa-spin"></i> 加载中...</li>
         </ul>
