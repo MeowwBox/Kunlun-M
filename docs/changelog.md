@@ -1,4 +1,36 @@
 ## 更新日志
+- 2026-06-16
+  - KunLun-M 2.15.0
+  - **安全防护：统一路径安全校验**
+    - 新增 `utils/path_safety.py` 公共模块，提供 `safe_join`/`is_path_under` 函数
+    - 使用 `os.path.realpath` 解析 symlink，防止符号链接绕过目录限制
+    - 修复 `files.py`、`views.py`（code_view）、`docs` 接口、`backend/views.py` 日志接口的路径校验
+    - 修复 Windows 上 `os.sep`（`\`）与前端 `/` 不匹配导致子目录请求 403
+  - **扫描结果页增强**
+    - 漏洞结果列表添加 critical（严重）级别翻译和筛选按钮
+    - 点击漏洞行展开详情面板：左侧基本信息（CVI/文件/语言/来源/类型/等级），右侧传播链节点+代码高亮
+    - 传播链面板改为 inline 行模式，插入对应漏洞行下方，支持 Prism 语法高亮
+    - critical 标签强制白字 `color:#fff`，避免与深红底色混淆
+  - **项目文件管理器**
+    - 项目级文件浏览器，支持目录树导航和文件内容查看
+    - 漏洞结果文件链接跳转时自动解析 `file:lineno` 格式
+    - 代码区 Prism 整段高亮+按行拆分，浅色主题（`#eaedf1` 底色）
+    - 修复 AdminLTE 全局 `table td padding` 覆盖代码区样式（`!important`）
+    - 修复 Bulma `.number` 样式泄漏到 Prism `.token.number`
+    - 文件树和代码区隐藏滚动条，flexbox 左右布局
+    - `{% load static %}` 缺失修复（project_detail.html、task_detail.html）
+  - **tamper/rule 管理页**
+    - tamper 列表按语言分组展示，默认折叠，支持展开/搜索
+    - rule 列表改为左右分栏布局（左侧规则列表，右侧 Prism 高亮源码）
+    - tamper 列表直接展示源码，去掉查看源码跳转
+    - tamper 列表和详情页适配新目录结构
+    - 新增 legacy tamper 兼容模块 `_compat.py`，支持旧格式 tamper 文件
+  - **Bug 修复**
+    - `load_rules()` match 字段 NOT NULL 约束失败
+    - 批量修复 controller 缺失 import（os/json/reverse/settings/RULES_PATH）
+    - 规则列表 AJAX 源码 URL 改用 `{% url %}` 避免硬编码路径导致 301
+    - 传播链数据注入顺序修复（移到 chain-panel.js 加载之前）
+    - 后端 chain 异常改为 warning 日志，不再静默吞掉
 - 2026-06-15
   - KunLun-M 2.14.1
   - **全项目架构复盘修复**
