@@ -7,9 +7,9 @@
 <input type="hidden" id="projectId" value="{{ project.id }}">
 <input type="hidden" id="sourceRoot" value="{{ source_root }}">
 
-<div class="row">
+<div style="display:flex; gap:8px; height:calc(100vh - 100px);">
   <!-- 左侧文件树 -->
-  <div class="col-md-3" style="padding-right:0;">
+  <div style="width:280px; min-width:280px; flex-shrink:0;">
     <div class="box box-solid">
       <div class="box-header" style="padding:6px 12px;">
         <h3 class="box-title" style="font-size:14px;margin:0;"><i class="fa fa-sitemap"></i> 文件树</h3>
@@ -26,8 +26,8 @@
   </div>
 
   <!-- 右侧代码查看器 -->
-  <div class="col-md-9" style="padding-left:8px;">
-    <div class="box box-solid" style="border:1px solid #e1e4e8; background:#eaedf1;">
+  <div style="flex:1; min-width:0;">
+    <div class="box box-solid" style="border:1px solid #e1e4e8; background:#eaedf1; height:100%;">
       <div class="box-header with-border" style="padding:8px 12px; background:#eaedf1 !important; border-bottom:1px solid #e1e4e8;">
         <div id="breadcrumb" style="font-size:13px; margin:0; line-height:28px;">
           <i class="fa fa-code"></i> 选择文件查看源码
@@ -36,7 +36,7 @@
       </div>
       <div id="codeBodyWrapper" class="box-body" style="padding:0; max-height:calc(100vh - 120px); overflow:auto; background:#eaedf1 !important; scrollbar-width:none; -ms-overflow-style:none;">
         <div id="codePanel" class="km-code-panel" style="display:none;">
-          <table class="km-code-table" style="width:100%; border-collapse:collapse; font-family:'Fira Code',Consolas,monospace; font-size:13px; line-height:1.0;">
+          <table class="km-code-table" style="width:100%; border-collapse:collapse; font-family:'Fira Code',Consolas,monospace; font-size:14px; line-height:1.15;">
             <tbody id="codeBody"></tbody>
           </table>
         </div>
@@ -74,11 +74,11 @@
 #treeWrapper::-webkit-scrollbar { display:none; }
 
 /* ── 代码面板（浅灰） ── */
-.km-code-panel { font-family:'Fira Code',Consolas,'Courier New',monospace; font-size:13px; line-height:1.0; }
+.km-code-panel { font-family:'Fira Code',Consolas,'Courier New',monospace; font-size:14px; line-height:1.15; }
 .km-code-table { width:100%; border-collapse:collapse; background:#eaedf1; color:#24292e; table-layout:fixed; }
 .km-code-table tr { border:none !important; height:auto !important; }
-.km-code-table td { padding:0 12px !important; vertical-align:top; border:none !important; line-height:1.0; }
-.km-code-line-num { width:50px; min-width:50px; text-align:right; color:#6a737d; user-select:none; cursor:pointer; font-size:13px; font-family:Consolas,monospace; }
+.km-code-table td { padding:0 12px !important; vertical-align:top; border:none !important; line-height:1.15; }
+.km-code-line-num { width:50px; min-width:50px; text-align:right; color:#6a737d; user-select:none; cursor:pointer; font-size:14px; font-family:Consolas,monospace; }
 .km-code-line-num:hover { background:rgba(0,0,0,0.06); }
 .km-code-line { white-space:pre; tab-size:4; }
 .km-line-highlight { background:#fffbe6 !important; }
