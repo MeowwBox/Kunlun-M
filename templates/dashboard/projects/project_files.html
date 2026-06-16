@@ -32,10 +32,7 @@
         <div id="breadcrumb" style="font-size:13px; margin:0; line-height:28px;">
           <i class="fa fa-code"></i> 选择文件查看源码
         </div>
-        <div class="box-tools pull-right" id="codeToolbar" style="display:none;">
-          <span id="fileInfo" style="font-size:12px; color:#959da5; margin-right:12px;"></span>
-          <button type="button" class="btn btn-xs btn-default" onclick="copyCode()"><i class="fa fa-copy"></i> 复制</button>
-        </div>
+
       </div>
       <div class="box-body" style="padding:0; max-height:calc(100vh - 120px); overflow:auto; background:#eaedf1 !important;">
         <div id="codePanel" class="km-code-panel" style="display:none;">
@@ -253,9 +250,7 @@ function openFile(filePath) {
   var $codePanel = $('#codePanel');
   var $welcome = $('#welcomePanel');
   var $error = $('#errorPanel');
-  var $toolbar = $('#codeToolbar');
-
-  $codePanel.hide(); $welcome.hide(); $error.hide(); $toolbar.hide();
+  $codePanel.hide(); $welcome.hide(); $error.hide();
 
   // 面包屑
   var parts = filePath.split('/');
@@ -287,8 +282,6 @@ function openFile(filePath) {
     current_highlight = data.highlight || null;
     renderCode(data.lines, data.highlight, data.total_lines);
     $codePanel.show();
-    $toolbar.show();
-    $('#fileInfo').text(data.total_lines + ' 行 · ' + filePath);
   }).fail(function(jqxhr) {
     $error.show();
     $('#errorMessage').text('加载失败: HTTP ' + jqxhr.status);
@@ -397,20 +390,6 @@ $('#treeFilter').on('input', function() {
     }
   });
 });
-
-// ── 复制代码 ──
-function copyCode() {
-  var text = current_lines.join('\n');
-  if (navigator.clipboard) {
-    navigator.clipboard.writeText(text).then(function() {
-      toast('已复制到剪贴板');
-    });
-  }
-}
-function toast(msg) {
-  var $t = $('<div>').css({position:'fixed',top:'20px',right:'20px',background:'#333',color:'#fff',padding:'8px 16px',borderRadius:'4px',zIndex:9999,fontSize:'13px'}).text(msg).appendTo('body');
-  setTimeout(function(){ $t.fadeOut(300, function(){ $t.remove(); }); }, 1500);
-}
 
 // ── 工具函数 ──
 function escHtml(s) { return $('<span>').text(s).html(); }
