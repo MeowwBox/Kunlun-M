@@ -433,12 +433,119 @@ class TamperCheck:
 
         self.tamper_base_path = os.path.join(RULES_PATH, "tamper")
 
+    def _migrate_legacy_files(self):
+        """
+        兼容迁移：将根目录下的旧版扁平 tamper 文件自动迁移到对应语言子目录。
+        旧版文件格式：flask = {...} / flask_controlled = []（Format-1）
+        迁移规则：
+        - 目标子目录已有同名新版文件时：直接删除根目录旧文件
+        - 目标子目录无同名文件时：将旧数据转换为新版格式写入子目录，再删除根目录旧文件
+        """
+        from rules.tamper._compat import (is_legacy_tamper_file, _infer_language_from_svids,
+                                           _infer_language_from_controlled, wrap_legacy_module)
+        import importlib.util
+
+        for fname in sorted(os.listdir(self.tamper_base_path)):
+            filepath = os.path.join(self.tamper_base_path, fname)
+            if not os.path.isfile(filepath) or not fname.endswith('.py'):
+                continue
+            if fname.startswith('_') or fname.startswith('demo'):
+                continue
+
+            is_legacy, name = is_legacy_tamper_file(filepath)
+            if not is_legacy:
+                continue
+
+            # 加载并包装旧版模块
+            try:
+                spec = importlib.util.spec_from_file_location('_legacy_{}'.format(name), filepath)
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+
+                repair_dict = getattr(mod, name, {})
+                all_svids = []
+                for svids in repair_dict.values():
+                    if isinstance(svids, (list, tuple)):
+                        all_svids.extend(svids)
+
+                language = _infer_language_from_svids(all_svids)
+                if not language:
+                    controlled = getattr(mod, name + '_controlled', [])
+                    language = _infer_language_from_controlled(controlled)
+                if not language:
+                    language = 'php'
+
+                wrapped = wrap_legacy_module(mod, name, language, filepath)
+            except Exception as e:
+                logger.warning("[INIT][Tamper Migrate] Failed to process legacy {}: {}".format(fname, e))
+                continue
+
+            target_dir = os.path.join(self.tamper_base_path, language)
+            target_path = os.path.join(target_dir, fname)
+
+            if os.path.exists(target_path):
+                # 新版文件已存在，直接删除旧文件
+                logger.info("[INIT][Tamper Migrate] New file exists at {}/{}, removing legacy {}".format(language, fname, fname))
+                os.remove(filepath)
+            else:
+                # 将旧数据转换为新版格式写入子目录
+                os.makedirs(target_dir, exist_ok=True)
+
+                lines = [
+                    "# -*- coding: utf-8 -*-",
+                    "# Auto-migrated from legacy tamper format",
+                    "import os",
+                    "",
+                    "FRAMEWORK_NAME = '{}'".format(wrapped.FRAMEWORK_NAME),
+                    "DEPENDENCIES = {}",
+                    "",
+                    "def detect(project_dir, language='{}'):".format(language),
+                    '    """检测是否为 {} 项目"""'.format(wrapped.FRAMEWORK_NAME),
+                    "    return False",
+                    "",
+                ]
+
+                if wrapped.FILTER_FUNCTIONS:
+                    lines.append("")
+                    lines.append("FILTER_FUNCTIONS = {")
+                    for func_name, func_value in sorted(wrapped.FILTER_FUNCTIONS.items()):
+                        lines.append("    {}: {},".format(repr(func_name), repr(func_value)))
+                    lines.append("}")
+
+                if wrapped.EXTRA_SINKS:
+                    lines.append("")
+                    lines.append("EXTRA_SINKS = [")
+                    for item in wrapped.EXTRA_SINKS:
+                        lines.append("    ({}, {}),".format(repr(item[0]), repr(item[1])))
+                    lines.append("]")
+
+                if wrapped.CONTROLLED_SOURCES:
+                    lines.append("")
+                    lines.append("CONTROLLED_SOURCES = [")
+                    for source in wrapped.CONTROLLED_SOURCES:
+                        lines.append("    {},".format(repr(source)))
+                    lines.append("]")
+                else:
+                    lines.append("")
+                    lines.append("CONTROLLED_SOURCES = []")
+
+                content = "\n".join(lines) + "\n"
+                with codecs.open(target_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+
+                os.remove(filepath)
+                logger.info("[INIT][Tamper Migrate] Converted & migrated {} -> {}/{}".format(fname, language, fname))
+
     def load(self):
         """
         加载 tamper 文件到数据库（FrameworkTamper 表）。
         扫描 rules/tamper/<language>/<framework>.py 子目录结构。
+        同时兼容旧版：自动迁移根目录下的扁平旧文件到对应语言子目录。
         """
         import inspect
+
+        # === 兼容迁移：将根目录旧版扁平 tamper 文件迁移到语言子目录 ===
+        self._migrate_legacy_files()
 
         language_dirs = [d for d in os.listdir(self.tamper_base_path)
                          if os.path.isdir(os.path.join(self.tamper_base_path, d))
