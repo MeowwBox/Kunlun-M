@@ -54,11 +54,54 @@ except NameError as e:
     pass
 
 
+def _format_subgroup(title, actions, formatter):
+    """格式化子命令分组（Core Commands / Other Commands）"""
+    # 先算最大命令名宽度
+    max_len = max(len(a.dest) for a in actions) if actions else 0
+    lines = [title]
+    lines.append('-' * len(title))
+    for action in actions:
+        sub_help = formatter._expand_help(action)
+        # 多行 help：第一行紧跟命令名，后续行缩进对齐
+        help_lines = sub_help.split('\n')
+        lines.append('  {:<{}} {}'.format(action.dest, max_len, help_lines[0]))
+        for extra in help_lines[1:]:
+            lines.append('  {:<{}} {}'.format('', max_len, extra.strip()))
+    return '\n'.join(lines)
+
+
 def main():
     try:
         # arg parse
         t1 = time.time()
-        parser = argparse.ArgumentParser(prog=__title__, description=__introduction__.format(detail="Main Program"), epilog=__epilog__, formatter_class=argparse.RawDescriptionHelpFormatter, usage=argparse.SUPPRESS)
+
+        # 核心命令列表，在 -h 中分组展示
+        CORE_COMMANDS = {'init', 'scan', 'console', 'web'}
+
+        class GroupedSubparsersFormatter(argparse.RawDescriptionHelpFormatter):
+            """自定义 formatter：将 subparsers 拆分为 Core Commands 和 Other Commands 两组"""
+
+            def _metavar_formatter(self, action, default_metavar):
+                return super()._metavar_formatter(action, default_metavar)
+
+            def _format_action(self, action):
+                if isinstance(action, argparse._SubParsersAction):
+                    parts = []
+                    core_actions = []
+                    other_actions = []
+                    for subaction in action._get_subactions():
+                        if subaction.dest in CORE_COMMANDS:
+                            core_actions.append(subaction)
+                        else:
+                            other_actions.append(subaction)
+                    if core_actions:
+                        parts.append(_format_subgroup("Core Commands", core_actions, self))
+                    if other_actions:
+                        parts.append(_format_subgroup("Other Commands", other_actions, self))
+                    return '\n'.join(parts)
+                return super()._format_action(action)
+
+        parser = argparse.ArgumentParser(prog=__title__, description=__introduction__.format(detail="Main Program"), epilog=__epilog__, formatter_class=GroupedSubparsersFormatter, usage=argparse.SUPPRESS)
 
         subparsers = parser.add_subparsers()
 
