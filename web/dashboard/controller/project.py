@@ -27,7 +27,7 @@ from Kunlun_M.const import VUL_LEVEL, VENDOR_VUL_LEVEL
 from web.index.controller import login_or_token_required
 from utils.utils import del_sensitive_for_config
 
-from web.index.models import ScanTask, ScanResultTask, Rules, Tampers, NewEvilFunc, Project, ProjectVendors, VendorVulns
+from web.index.models import ScanTask, ScanResultTask, Rules, NewEvilFunc, Project, ProjectVendors, VendorVulns
 from web.index.models import search_project_by_name
 
 

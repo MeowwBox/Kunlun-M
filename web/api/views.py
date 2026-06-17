@@ -20,7 +20,7 @@ from django.views import View
 from django.db.models import Count
 from django.utils import timezone
 
-from web.index.models import ScanTask, VendorVulns, Rules, Tampers, NewEvilFunc, Project, ProjectVendors, ScanResultTask
+from web.index.models import ScanTask, VendorVulns, Rules, NewEvilFunc, Project, ProjectVendors, ScanResultTask
 from web.index.models import get_and_check_scantask_project_id, get_resultflow_class, get_and_check_scanresult
 from core.vendors import get_project_vendor_by_name, get_vendor_vul_by_name
 

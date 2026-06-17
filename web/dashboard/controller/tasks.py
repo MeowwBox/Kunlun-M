@@ -25,7 +25,7 @@ from Kunlun_M import settings
 from web.index.controller import login_or_token_required
 from utils.utils import del_sensitive_for_config
 
-from web.index.models import ScanTask, VendorVulns, Rules, Tampers, NewEvilFunc, Project
+from web.index.models import ScanTask, VendorVulns, Rules, FrameworkTamper, NewEvilFunc, Project
 from web.index.models import get_and_check_scantask_project_id, get_and_check_scanresult, get_and_check_evil_func, check_and_new_project_id
 
 
@@ -216,7 +216,7 @@ class TaskConfigView(View):
         vendor_globally_off = not bool(getattr(settings, "WITH_VENDOR", False))
 
         # 获取可用 tamper 列表供下拉选择
-        tamper_names = list(Tampers.objects.values_list('tam_name', flat=True).distinct().order_by('tam_name'))
+        tamper_names = list(FrameworkTamper.objects.values_list('name', flat=True).order_by('name'))
 
         data = {
             "task": task,

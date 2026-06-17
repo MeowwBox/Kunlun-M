@@ -38,7 +38,7 @@ from core.__version__ import __introduction__
 from core import cli
 from core.engine import Running
 
-from web.index.models import ScanTask, ScanResultTask, Rules, Tampers, NewEvilFunc
+from web.index.models import ScanTask, ScanResultTask, Rules, FrameworkTamper, NewEvilFunc
 from web.index.models import get_resultflow_class, get_dataflow_class
 from web.index.models import get_and_check_scantask_project_id, get_and_check_scanresult, check_and_new_project_id
 
@@ -1032,22 +1032,12 @@ Input Control:
                 return
 
             elif self.config_mode == 'tamper':
-                for option_value in self.last_config['input_control']:
-
-                    t = Tampers(tam_name=self.config_keyword, tam_key=self.config_keyword, tam_value=option_value, tam_type='Input-Control')
-                    t.save()
-
-                for option_name in self.last_config['filter_func']:
-
-                    t2 = Tampers.objects.filter(tam_name=self.config_keyword, tam_key=option_name, tam_type='Filter-Function').first()
-                    if t2:
-                        t2.tam_value = self.config_dict['filter_func'][option_name]
-                        t2.save()
-                    else:
-                        # 没有的话就要新加
-                        t2 = Tampers(tam_name=self.config_keyword, tam_key=option_name, tam_value=self.config_dict['filter_func'][option_name], tam_type='Filter-Function')
-                        t2.save()
-                logger.info("[Console] New Tamper {} has be saved.".format(self.config_keyword))
+                ft = FrameworkTamper.objects.filter(name__iexact=self.config_keyword).first()
+                if ft:
+                    ft.filter_functions = self.config_dict['filter_func']
+                    ft.controlled_sources = self.config_dict['input_control']
+                    ft.save()
+                logger.info("[Console] Tamper {} has been saved.".format(self.config_keyword))
                 return
 
     def command_del(self, *args, **kwargs):
@@ -1143,13 +1133,9 @@ Input Control:
                         logger.error("[Console] Not Found Rules, Please check command or execute config load.")
 
                 if mod == 'tamper':
-                    ts = Tampers.objects.values("tam_name").all()
+                    fts = FrameworkTamper.objects.values("name").all()
 
-                    tamper_name_list = []
-
-                    for tamper_name in ts:
-                        tamper_name_list.append(tamper_name['tam_name'].lower())
-
+                    tamper_name_list = [t['name'].lower() for t in fts]
                     tamper_name_list = list(set(tamper_name_list))
                     tamper_name_list.append("all")
 
@@ -1172,27 +1158,22 @@ Input Control:
                         logger.info("[Console] ALL Tampers:\n{}".format(tamper_table))
                         logger.warn("[Console] Use 'show tamper <tamper_name>' can get tamper detail.")
                     else:
-                        ts = Tampers.objects.filter(tam_name=key)
+                        ft = FrameworkTamper.objects.filter(name__iexact=key).first()
 
-                        if ts:
-                            filter_func = {}
-                            input_control = []
-
-                            for t in ts:
-                                if t.tam_type == 'Filter-Function':
-                                    filter_func[t.tam_key] = ast.literal_eval(t.tam_value)
-                                elif t.tam_type == 'Input-Control':
-                                    input_control.append(t.tam_value)
-
-                            logger.info("""\nTamper Name:
+                        if ft:
+                            logger.info("""
+Tamper Name:
         {}
-    
+
     Filter Func:
     {}
-    
-    Input Control:
+
+    Extra Sinks:
     {}
-    """.format(key, pprint.pformat(filter_func, indent=4), pprint.pformat(input_control, indent=4)))
+
+    Controlled Sources:
+    {}
+    """.format(ft.name, pprint.pformat(ft.filter_functions, indent=4), pprint.pformat(ft.extra_sinks, indent=4), pprint.pformat(ft.controlled_sources, indent=4)))
 
                         else:
                             logger.error("[Console] Not Found Tampers, Please check command or execute config load.")
@@ -1391,22 +1372,16 @@ Input Control:
                 return
 
         elif mod == 'tamper':
-            ts = Tampers.objects.filter(tam_name=keyword)
+            ft = FrameworkTamper.objects.filter(name__iexact=keyword).first()
 
-            if ts:
+            if ft:
                 self.current_mode = "config"
                 self.config_mode = "tamper"
                 self.config_keyword = keyword
-                self.config_dict['filter_func'] = {}
-                self.config_dict['input_control'] = []
-                self.last_config['filter_func'] = {}
-                self.last_config['input_control'] = []
-
-                for t in ts:
-                    if t.tam_type == 'Filter-Function':
-                        self.config_dict['filter_func'][t.tam_key] = ast.literal_eval(t.tam_value)
-                    elif t.tam_type == 'Input-Control':
-                        self.config_dict['input_control'].append(t.tam_value)
+                self.config_dict['filter_func'] = dict(ft.filter_functions or {})
+                self.config_dict['input_control'] = list(ft.controlled_sources or [])
+                self.last_config['filter_func'] = dict(ft.filter_functions or {})
+                self.last_config['input_control'] = list(ft.controlled_sources or [])
 
                 logger_console.info(self.config_tamper_help)
             else:

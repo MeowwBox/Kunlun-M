@@ -11,7 +11,7 @@
 
 import time
 
-from web.index.models import ScanTask, ScanResultTask, Rules, Tampers, Project, VendorVulns
+from web.index.models import ScanTask, ScanResultTask, Rules, FrameworkTamper, Project, VendorVulns
 
 # 内存缓存：存储统计查询结果，避免每次请求都查询数据库
 _cache = {}
@@ -48,7 +48,7 @@ class SDataMiddleware:
             request.session["tasks_finished_count"] = _get_cached_count(
                 "tasks_finished_count", lambda: ScanTask.objects.filter(is_finished=1).count())
             request.session["tampers_count"] = _get_cached_count(
-                "tampers_count", lambda: Tampers.objects.all().count())
+                "tampers_count", lambda: FrameworkTamper.objects.all().count())
             request.session["vendor_vuls_count"] = _get_cached_count(
                 "vendor_vuls_count", lambda: VendorVulns.objects.count())
             request.session["vul_count"] = _get_cached_count(

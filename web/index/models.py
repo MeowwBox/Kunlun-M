@@ -382,11 +382,22 @@ class Rules(models.Model):
 
 
 # roundcube "Filter-Function" show [1000, 10001, 10002]
-class Tampers(models.Model):
-    tam_name = models.CharField(max_length=30)
-    tam_type = models.CharField(max_length=100)
-    tam_key = models.CharField(max_length=200)
-    tam_value = models.CharField(max_length=200)
+class FrameworkTamper(models.Model):
+    name = models.CharField(max_length=50, unique=True, help_text='框架标识名，如 django, express')
+    language = models.CharField(max_length=20, help_text='语言，如 python, javascript')
+    framework_name = models.CharField(max_length=50, default='', help_text='显示名称，如 Django, Express')
+    dependencies = models.JSONField(default=dict, blank=True, help_text='DEPENDENCIES dict')
+    filter_functions = models.JSONField(default=dict, blank=True, help_text='FILTER_FUNCTIONS dict')
+    extra_sinks = models.JSONField(default=list, blank=True, help_text='EXTRA_SINKS list')
+    controlled_sources = models.JSONField(default=list, blank=True, help_text='CONTROLLED_SOURCES list')
+    detect_code = models.TextField(default='', blank=True, help_text='detect() 函数源码')
+
+    class Meta:
+        db_table = 'framework_tamper'
+        verbose_name = 'Framework Tamper'
+
+    def __str__(self):
+        return self.name
 
 
 class NewEvilFunc(models.Model):

@@ -14,7 +14,7 @@ from django.shortcuts import render, redirect
 from django.db.models import Q
 
 from Kunlun_M.settings import RULES_PATH
-from web.index.models import Tampers
+from web.index.models import FrameworkTamper
 
 
 def _scan_tamper_files():
@@ -55,8 +55,8 @@ def _scan_tamper_files():
 
 
 def _get_db_records_by_name(name):
-    """从数据库获取指定 tamper_name 的所有记录"""
-    return list(Tampers.objects.filter(tam_name=name))
+    """从数据库获取指定 name 的 FrameworkTamper 记录"""
+    return list(FrameworkTamper.objects.filter(name__iexact=name))
 
 
 class TamperListView(TemplateView):
@@ -115,10 +115,10 @@ class TamperDetailView(View):
 
         try:
             int_id = int(tamper_id)
-            tamper_record = Tampers.objects.filter(id=int_id).first()
+            tamper_record = FrameworkTamper.objects.filter(id=int_id).first()
             if tamper_record:
-                tamper_name = tamper_record.tam_name
-                all_records = list(Tampers.objects.filter(tam_name=tamper_name))
+                tamper_name = tamper_record.name
+                all_records = _get_db_records_by_name(tamper_name)
         except (ValueError, TypeError):
             pass
 

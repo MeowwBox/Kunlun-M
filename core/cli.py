@@ -33,7 +33,7 @@ from core.vendors import get_project_by_version, get_and_save_vendor_vuls
 from Kunlun_M.settings import RULES_PATH
 from Kunlun_M.const import VUL_LEVEL, VENDOR_VUL_LEVEL
 
-from web.index.models import ScanTask, ScanResultTask, Rules, NewEvilFunc, Project, ProjectVendors, VendorVulns
+from web.index.models import ScanTask, ScanResultTask, Rules, FrameworkTamper, NewEvilFunc, Project, ProjectVendors, VendorVulns
 from web.index.models import get_resultflow_class, get_and_check_scantask_project_id, check_and_new_project_id, get_and_check_scanresult
 
 import importlib
@@ -434,49 +434,44 @@ def show_info(type, key):
     elif type == "tamper":
 
         table = PrettyTable(
-            ['#', 'TampName', 'FilterFunc', 'InputControl'])
+            ['#', 'TamperName', 'Language', 'FilterFunc', 'ExtraSinks', 'ControlledSources'])
 
         table.align = 'l'
         i = 0
 
-        tamp_path = os.path.join(RULES_PATH, 'tamper/')
-        tamp_list = list_parse(tamp_path, True)
-
         if key == "all":
-            for tamp in tamp_list:
+            for ft in FrameworkTamper.objects.all().order_by("name"):
                 i += 1
-                tampname = tamp.split('.')[0]
-                tampfile = "rules.tamper." + tampname
-
-                tamp_obj = __import__(tampfile, fromlist=tampname)
-
-                filter_func = getattr(tamp_obj, tampname)
-                input_control = getattr(tamp_obj, tampname + "_controlled")
-
-                table.add_row([i, tampname, filter_func, input_control])
+                table.add_row([i, ft.name, ft.language,
+                               len(ft.filter_functions) if ft.filter_functions else 0,
+                               len(ft.extra_sinks) if ft.extra_sinks else 0,
+                               len(ft.controlled_sources) if ft.controlled_sources else 0])
 
             return table
-        elif key + ".py" in tamp_list:
-            tampname = key
-            tampfile = "rules.tamper." + tampname
-
-            tamp_obj = __import__(tampfile, fromlist=tampname)
-
-            filter_func = getattr(tamp_obj, tampname)
-            input_control = getattr(tamp_obj, tampname + "_controlled")
-
-            return """
+        else:
+            ft = FrameworkTamper.objects.filter(name__iexact=key).first()
+            if ft:
+                return """
 Tamper Name:
+    {}
+
+Language:
     {}
 
 Filter Func:
 {}
-    
-Input Control:
+
+Extra Sinks:
 {}
-""".format(tampname, pprint.pformat(filter_func, indent=4), pprint.pformat(input_control, indent=4))
-        else:
-            logger.error("[Info] no tamper name {]".format(key))
+
+Controlled Sources:
+{}
+""".format(ft.name, ft.language,
+           pprint.pformat(ft.filter_functions, indent=4) if ft.filter_functions else "    None",
+           pprint.pformat(ft.extra_sinks, indent=4) if ft.extra_sinks else "    None",
+           pprint.pformat(ft.controlled_sources, indent=4) if ft.controlled_sources else "    None")
+            else:
+                logger.error("[Info] no tamper name {}".format(key))
 
     return ""
 

@@ -69,9 +69,9 @@ def main():
                                        help='Check App name')
         parser_group_init.add_argument('migrationname', default='migrationname',  nargs='?', help='Check migration name')
 
-        # load config into database
-        parser_group_core = subparsers.add_parser('config', help='config for rule&tamper', description=__introduction__.format(detail='config for rule&tamper'), epilog=__database_epilog__, formatter_class=argparse.RawDescriptionHelpFormatter, usage=argparse.SUPPRESS, add_help=True)
-        parser_group_core.add_argument('load', choices=['load', 'recover', 'loadtamper', 'retamper'], default=False, help='operate for rule&tamper')
+        # export rules and tampers from database to files
+        parser_group_core = subparsers.add_parser('config', help='export rules and tampers from database to files', description=__introduction__.format(detail='export rules and tampers'), epilog=__database_epilog__, formatter_class=argparse.RawDescriptionHelpFormatter, usage=argparse.SUPPRESS, add_help=True)
+        parser_group_core.add_argument('export', choices=['export'], default=False, help='export rules and tampers from database to files')
 
         parser_group_generate = subparsers.add_parser(
             'generate',
@@ -229,38 +229,12 @@ def main():
                 logger.warning('[INIT] Rule/Tamper sync skipped: {}'.format(e))
             call_command('runserver', args.port)
 
-        if hasattr(args, "load"):
-            if args.load == "load":
-                logger.info("[INIT] RuleCheck start.")
-                RuleCheck().load()
-
-                logger.info("[INIT] RuleCheck finished.")
-                exit()
-
-            elif args.load == "recover":
-                logger.info("[INIT] RuleRecover start.")
-                RuleCheck().recover()
-
-                logger.info("[INIT] RuleRecover finished.")
-                exit()
-
-            elif args.load == "loadtamper":
-                logger.info("[INIT] TamperCheck start.")
-                TamperCheck().load()
-
-                logger.info("[INIT] TamperCheck finished.")
-                exit()
-
-            elif args.load == "retamper":
-                logger.info("[INIT] TamperRecover start.")
-                TamperCheck().recover()
-
-                logger.info("[INIT] TamperRecover finished.")
-                exit()
-
-            else:
-                parser_group_core.print_help()
-                exit()
+        if hasattr(args, "export") and args.export == "export":
+            logger.info("[INIT] Export rules and tampers start.")
+            RuleCheck().export()
+            TamperCheck().export()
+            logger.info("[INIT] Export rules and tampers finished.")
+            exit()
 
         if hasattr(args, "generate_type") and args.generate_type:
             if args.generate_type == "rule":

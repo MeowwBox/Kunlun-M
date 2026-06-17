@@ -16,7 +16,7 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
 from web.index.controller import login_or_token_required, api_token_required
-from web.index.models import ScanTask, ScanResultTask, Rules, Tampers, NewEvilFunc, get_resultflow_class
+from web.index.models import ScanTask, ScanResultTask, Rules, NewEvilFunc, get_resultflow_class
 from web.index.models import get_and_check_scantask_project_id, get_and_check_scanresult
 from utils.utils import show_context
 
