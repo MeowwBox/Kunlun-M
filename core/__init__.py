@@ -33,7 +33,7 @@ from .engine import Running
 
 from .__version__ import __title__, __introduction__, __url__, __version__
 from .__version__ import __author__, __author_email__, __license__
-from .__version__ import __copyright__, __epilog__, __scan_epilog__, __database_epilog__
+from .__version__ import __copyright__, __epilog__, __scan_epilog__
 
 from core.rule import RuleCheck, TamperCheck
 from core.scaffold import write_rule_file, write_tamper_file
@@ -110,7 +110,7 @@ def main():
         parser_group_init.set_defaults(init="init")
 
         # export rules and tampers from database to files
-        parser_group_export = subparsers.add_parser('export', help='export rules and tampers from database to files', description=__introduction__.format(detail='export rules and tampers'), epilog=__database_epilog__, formatter_class=argparse.RawDescriptionHelpFormatter, usage=argparse.SUPPRESS, add_help=True)
+        parser_group_export = subparsers.add_parser('export', help='export rules and tampers from database to files', description=__introduction__.format(detail='export rules and tampers'), epilog='Usage:\n  python {} export'.format('kunlun.py'), formatter_class=argparse.RawDescriptionHelpFormatter, usage=argparse.SUPPRESS, add_help=True)
         parser_group_export.set_defaults(export="export")
 
         parser_group_generate = subparsers.add_parser(
