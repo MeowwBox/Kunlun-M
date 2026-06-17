@@ -1,4 +1,22 @@
 ## 更新日志
+- 2026-06-17
+  - KunLun-M 2.15.1
+  - **Tamper 数据模型重构**
+    - 删除旧 `Tampers` EAV 模型（name/type/key/value），新建 `FrameworkTamper` 结构化模型（language/framework_name/dependencies/filter_functions/extra_sinks/controlled_sources/detect_code 全字段）
+    - 数据库迁移自动转换旧数据：`ast.literal_eval` 解析字符串值，SVID 范围推断语言（1000-1999→php, 6000-6999→javascript 等），extra_sink 兼容 list/dict 两种旧格式
+    - `TamperCheck.load()` 重写：扫描 `rules/tamper/<language>/` 子目录，inspect 提取字段，`update_or_create` 写入 DB
+    - `show tamper` 从文件扫描改为 DB 查询，支持 `-k` 关键词过滤
+    - 旧版扁平 tamper 文件自动迁移到语言子目录（`_migrate_legacy_files`）
+  - **CLI 命令精简**
+    - `config load/recover/loadtamper/retamper` → 统一为 `export`（DB→文件导出，已有文件跳过）
+    - `config` 子命令从 `choices=['export']` 改为独立 `export` 顶层命令
+    - `init initialize` → 直接 `init`（去掉冗余子命令）
+    - `-h` 帮助分组展示：Core Commands（init/scan/console/web）+ Other Commands（export/generate/show/search/plugin）
+    - 修复帮助文本 `tanmpers` 拼写错误
+  - **README 更新**
+    - 两个 README（中文/英文）命令行展示同步更新为新分组格式
+    - 版本号统一为 v2.15.1
+    - 删除已废弃的 `config load/recover/loadtamper/retamper` 说明
 - 2026-06-16
   - KunLun-M 2.15.0
   - **安全防护：统一路径安全校验**
