@@ -54,22 +54,6 @@ except NameError as e:
     pass
 
 
-def _format_subgroup(title, actions, formatter):
-    """格式化子命令分组（Core Commands / Other Commands）"""
-    # 先算最大命令名宽度
-    max_len = max(len(a.dest) for a in actions) if actions else 0
-    lines = [title]
-    lines.append('-' * len(title))
-    for action in actions:
-        sub_help = formatter._expand_help(action)
-        # 多行 help：第一行紧跟命令名，后续行缩进对齐
-        help_lines = sub_help.split('\n')
-        lines.append('  {:<{}} {}'.format(action.dest, max_len, help_lines[0]))
-        for extra in help_lines[1:]:
-            lines.append('  {:<{}} {}'.format('', max_len, extra.strip()))
-    return '\n'.join(lines)
-
-
 def main():
     try:
         # arg parse
@@ -81,24 +65,30 @@ def main():
         class GroupedSubparsersFormatter(argparse.RawDescriptionHelpFormatter):
             """自定义 formatter：将 subparsers 拆分为 Core Commands 和 Other Commands 两组"""
 
-            def _metavar_formatter(self, action, default_metavar):
-                return super()._metavar_formatter(action, default_metavar)
+            def _format_subgroup(self, title, actions):
+                """格式化子命令分组"""
+                if not actions:
+                    return ''
+                max_len = max(len(a.dest) for a in actions)
+                lines = [title, '-' * len(title)]
+                for a in actions:
+                    help_text = self._expand_help(a)
+                    help_lines = help_text.split(chr(10))
+                    lines.append('  {:<{}} {}'.format(a.dest, max_len, help_lines[0]))
+                    for extra in help_lines[1:]:
+                        lines.append('  {:<{}} {}'.format('', max_len, extra.strip()))
+                return chr(10).join(lines)
 
             def _format_action(self, action):
                 if isinstance(action, argparse._SubParsersAction):
+                    core = [s for s in action._get_subactions() if s.dest in CORE_COMMANDS]
+                    other = [s for s in action._get_subactions() if s.dest not in CORE_COMMANDS]
                     parts = []
-                    core_actions = []
-                    other_actions = []
-                    for subaction in action._get_subactions():
-                        if subaction.dest in CORE_COMMANDS:
-                            core_actions.append(subaction)
-                        else:
-                            other_actions.append(subaction)
-                    if core_actions:
-                        parts.append(_format_subgroup("Core Commands", core_actions, self))
-                    if other_actions:
-                        parts.append(_format_subgroup("Other Commands", other_actions, self))
-                    return '\n'.join(parts)
+                    if core:
+                        parts.append(self._format_subgroup("Core Commands", core))
+                    if other:
+                        parts.append(self._format_subgroup("Other Commands", other))
+                    return chr(10).join(parts)
                 return super()._format_action(action)
 
         parser = argparse.ArgumentParser(prog=__title__, description=__introduction__.format(detail="Main Program"), epilog=__epilog__, formatter_class=GroupedSubparsersFormatter, usage=argparse.SUPPRESS)
