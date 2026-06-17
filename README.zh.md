@@ -15,7 +15,7 @@
 | |/ / _   _ _ __ | |    _   _ _ __       | .  . |
 |    \| | | | '_ \| |   | | | | '_ \ _____| |\/| |
 | |\  \ |_| | | | | |___| |_| | | | |_____| |  | |
-\_| \_/\__,_|_| |_\_____/\__,_|_| |_|     \_|  |_/  -v2.0
+\_| \_/\__,_|_| |_\____/\__,_|_| |_|     \_|  |_/  -v2.15.0
 
 GitHub: https://github.com/LoRexxar/Kunlun-M
 
@@ -24,26 +24,34 @@ KunLun-M is a static code analysis system that automates the detecting vulnerabi
 Main Program
 
 positional arguments:
-  {init,config,scan,show,search,console,plugin,web}
-    init                Kunlun-M init before use.
-    config              config for rule&tamper
-    scan                scan target path
-    show                show rule&tamper
-    search              search vendor/project info
-    console             enter console mode
-    plugin              run plugin command
-    web                 start web dashboard
+Core Commands
+-------------
+  init    Kunlun-M init before use.
+  scan    scan target path
+  console enter console mode
+  web     KunLun-m Web mode
+Other Commands
+--------------
+  export   export rules and tampers from database to files
+  generate generate rule & tamper
+  show     show rule & tamper
+  search   search project by vendor/path/...
+  plugin   Plugins list:
+           entrance_finder                                   Quickly find the php entry page
+           php_unserialize_chain_tools                       Discover the PHP deserialization chain through codedb
+           
 
-optional arguments:
+options:
   -h, --help            show this help message and exit
 
 Usage:
+  python kunlun.py init
   python kunlun.py scan -t tests/vulnerabilities
   python kunlun.py scan -t tests/vulnerabilities -r 1000, 1001
   python kunlun.py scan -t tests/vulnerabilities -tp wordpress
   python kunlun.py scan -t tests/vulnerabilities -d -uc
-
-  python kunlun.py show rule -k php
+  python kunlun.py console
+  python kunlun.py web -p 9999
 ```
 
 ## Introduction
@@ -87,12 +95,7 @@ cp Kunlun_M/settings.py.bak Kunlun_M/settings.py
 
 初始化数据库，默认采用sqlite作为数据库
 ```
-python kunlun.py init initialize
-```
-
-加载规则进数据库（每次修改规则文件都需要加载）
-```
-python kunlun.py config load
+python kunlun.py init
 ```
 
 ### docker安装
@@ -119,15 +122,6 @@ python3 kunlun.py scan -t ./tests/vulnerabilities/
 python3 kunlun.py scan -t ./tests/vulnerabilities/ -f json -o /tmp/report.json
 python3 kunlun.py scan -t ./tests/vulnerabilities/ -f md -o /tmp/report.md
 python3 kunlun.py scan -t ./tests/vulnerabilities/ -f html -o /tmp/report.html
-```
-
-使用config模式加载本地的rule/tamper
-```
-python3 kunlun.py config load         # 加载rule进数据库
-python3 kunlun.py config recover      # 将数据库中的rule恢复到文件
-python3 kunlun.py config loadtamper   # 加载tamper进数据库
-python3 kunlun.py config retamper     # 将数据库中的tamper恢复到文件
-
 ```
 
 使用show模式查看目前的所有rule/tamper
@@ -200,7 +194,7 @@ python3 kunlun.py console
 | |/ / _   _ _ __ | |    _   _ _ __       | .  . |
 |    \| | | | '_ \| |   | | | | '_ \ _____| |\/| |
 | |\  \ |_| | | | | |___| |_| | | | |_____| |  | |
-\_| \_/\__,_|_| |_\_____/\__,_|_| |_|     \_|  |_/  -v2.0
+\_| \_/\__,_|_| |_\____/\__,_|_| |_|     \_|  |_/  -v2.15.0
 
 GitHub: https://github.com/LoRexxar/Kunlun-M
 
