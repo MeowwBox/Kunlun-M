@@ -28,7 +28,7 @@ KunLun-M is a static code analysis system that automates the detecting vulnerabi
 
 """.format(version=__version__)
 __epilog__ = """Usage:
-  python {m} config export
+  python {m} export
   python {m} generate rule -lan php --name "test" --svid 1000
   python {m} generate tamper --name "test"
   python {m} generate rule --sync
@@ -53,7 +53,7 @@ __scan_epilog__ = """Usage:
 
 """.format(m='kunlun.py', td='tests/vulnerabilities')
 __database_epilog__ = """Usage:
-  python {m} config export
+  python {m} export
   python {m} init initialize
   python {m} init checksql index 0009_projectvendors_source
 """.format(m='kunlun.py')

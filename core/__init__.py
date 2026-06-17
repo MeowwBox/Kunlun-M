@@ -70,8 +70,8 @@ def main():
         parser_group_init.add_argument('migrationname', default='migrationname',  nargs='?', help='Check migration name')
 
         # export rules and tampers from database to files
-        parser_group_core = subparsers.add_parser('config', help='export rules and tampers from database to files', description=__introduction__.format(detail='export rules and tampers'), epilog=__database_epilog__, formatter_class=argparse.RawDescriptionHelpFormatter, usage=argparse.SUPPRESS, add_help=True)
-        parser_group_core.add_argument('export', choices=['export'], default=False, help='export rules and tampers from database to files')
+        parser_group_export = subparsers.add_parser('export', help='export rules and tampers from database to files', description=__introduction__.format(detail='export rules and tampers'), epilog=__database_epilog__, formatter_class=argparse.RawDescriptionHelpFormatter, usage=argparse.SUPPRESS, add_help=True)
+        parser_group_export.set_defaults(export="export")
 
         parser_group_generate = subparsers.add_parser(
             'generate',
