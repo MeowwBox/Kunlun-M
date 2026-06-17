@@ -137,10 +137,10 @@ def main():
         parser_group_scan.add_argument('--without-vendor', dest='without_vendor', action='store_true', default=False, help='without scan vendor vuln (default open)')
 
         # show for rule & tamper
-        parser_group_show = subparsers.add_parser('show', help='show rule&tamper', description=__introduction__.format(detail='show rule&tamper'), formatter_class=argparse.RawDescriptionHelpFormatter, usage=argparse.SUPPRESS, add_help=True)
+        parser_group_show = subparsers.add_parser('show', help='show rule & tamper', description=__introduction__.format(detail='show rule & tamper'), formatter_class=argparse.RawDescriptionHelpFormatter, usage=argparse.SUPPRESS, add_help=True)
 
         parser_group_show.add_argument('list', choices=['rule', "tamper"], action='store', default=None,
-                                       help='show all rules & tanmpers')
+                                       help='show all rules & tampers')
 
         parser_group_show.add_argument('-k', '--key', dest='listkey', action='store', default="all",
                                        help='key for show rule & tamper. eg: 1001/wordpress')

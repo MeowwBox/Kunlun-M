@@ -28,12 +28,16 @@ KunLun-M is a static code analysis system that automates the detecting vulnerabi
 
 """.format(version=__version__)
 __epilog__ = """Usage:
+  python {m} config export
+  python {m} generate rule -lan php --name "test" --svid 1000
+  python {m} generate tamper --name "test"
+  python {m} generate rule --sync
   python {m} scan -t {td}
   python {m} scan -t {td} -r 1000, 1001
   python {m} scan -t {td} -tp wordpress
   python {m} scan -t {td} -d -uc
-  
-  python {m} list rule -k php
+  python {m} show rule -k 1000
+  python {m} show tamper -k django
 """.format(m='kunlun.py', td='tests/vulnerabilities')
 __scan_epilog__ = """Usage:
   python {m} scan -t {td}
@@ -49,6 +53,7 @@ __scan_epilog__ = """Usage:
 
 """.format(m='kunlun.py', td='tests/vulnerabilities')
 __database_epilog__ = """Usage:
+  python {m} config export
   python {m} init initialize
   python {m} init checksql index 0009_projectvendors_source
 """.format(m='kunlun.py')
