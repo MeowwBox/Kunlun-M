@@ -54,6 +54,5 @@ __scan_epilog__ = """Usage:
 """.format(m='kunlun.py', td='tests/vulnerabilities')
 __database_epilog__ = """Usage:
   python {m} export
-  python {m} init initialize
-  python {m} init checksql index 0009_projectvendors_source
+  python {m} init
 """.format(m='kunlun.py')
